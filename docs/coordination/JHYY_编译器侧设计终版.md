@@ -848,7 +848,7 @@ hosted + freestanding 两套 smoke 全绿。
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**） |
 | [`docs/plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
 | [`docs/plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md) | v4.2+ 自研后端性能线（v4.4 寄存器分配） |
-| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`） |
+| [`docs/internal/workarounds.md`](../internal/workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`） |
 | [`docs/internal/build.md`](../internal/build.md) | 构建 / 调试 / self-backend 坑 |
-| [`docs/FACTS.md`](../FACTS.md) | 回归套件清单与运行方法 |
+| [`docs/internal/FACTS.md`](../internal/FACTS.md) | 回归套件清单与运行方法 |
 | [`docs/perf/self-backend-baseline-2026-10-29.md`](../perf/self-backend-baseline-2026-10-29.md) | 帧/访存基线数据（341 KiB / 288 B 的来源） |

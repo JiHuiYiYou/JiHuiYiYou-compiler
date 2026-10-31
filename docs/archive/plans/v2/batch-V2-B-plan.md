@@ -149,7 +149,7 @@
 - `compiler/build/bin/regress.py`(加 `--cross` 模式,~40 行)
 - `tests/byte_equal_amd64.jhyy`(扩展覆盖 regalloc + peephole 验证,~30 行)
 - `docs/internal/build.md`(cross-compile + docker pull)
-- `docs/workarounds.md`(W-066 sysv 文档)
+- `docs/internal/workarounds.md`(W-066 sysv 文档)
 
 ## Commit / tag 节奏
 

@@ -65,7 +65,7 @@ if sb_after == (0 as i64) {
 |---|---|
 | `docs/archive/logs/v2/changelog-v2.11.0.md` (本文件) | umbrella changelog finalize |
 | `../../README.md` | v2.11.0 status 已 ✅ row update |
-| `docs/workarounds.md` W-073 + W-074 | superseder 实填 v2.11.0 commit + 真修 chain |
+| `docs/internal/workarounds.md` W-073 + W-074 | superseder 实填 v2.11.0 commit + 真修 chain |
 
 ---
 
@@ -101,7 +101,7 @@ V2-C Part 2a:
 ## References
 
 - **Plan**: `docs/archive/plans/v2/v2.11.0-plan.md`
-- **W-073 + W-074**: `docs/workarounds.md` (superseder 填 v2.11.0 commit)
+- **W-073 + W-074**: `docs/internal/workarounds.md` (superseder 填 v2.11.0 commit)
 - **D43 closure sha chain**: `docs/archive/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
 
 ---
@@ -168,7 +168,7 @@ ILToken struct offset 真修 (per L4 § 2.1 i32 field alignment):
 
 - 本 changelog sub-section append
 - `../../README.md` v2.11.1 row
-- `docs/workarounds.md` W-074.5 RESOLVED + W-074.6 ACTIVE 新条目
+- `docs/internal/workarounds.md` W-074.5 RESOLVED + W-074.6 ACTIVE 新条目
 
 ## v2.11.1 ship gate (实际 2026-09-10)
 
@@ -222,7 +222,7 @@ V2-C Part 2a-补:
 ## References
 
 - **Plan**: `twinkly-hatching-canyon.md` (plan mode draft 2026-09-10)
-- **W-074.5 + W-074.6**: `docs/workarounds.md` (W-074.5 RESOLVED, W-074.6 ACTIVE 新增)
+- **W-074.5 + W-074.6**: `docs/internal/workarounds.md` (W-074.5 RESOLVED, W-074.6 ACTIVE 新增)
 - **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger), [[feedback_codegen_amd64_run_zerobyte]] (self-backend body 0-byte, v2.x 中期)
 - **D43 closure sha chain**: `docs/archive/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
 - **后接**: `docs/archive/plans/v2/v2.12.0-plan.md` (QBE 移除, 部分 prerequisite 未闭)
@@ -251,7 +251,7 @@ W-074.6 v2.11.2 ship — codegen_amd64_run multi-func self-backend crash/hang �
 - Tier 3 (T3-a..b): frame state — per-fn reset + global-max variant + 3 个 temp offset fn 统一到 cg_offset_for_temp_with_target
 - Tier 5 (T5-a): token cap — lex_il slots 1024 → 16384 + arena 2 → 8 MB (big_test 跨过 v2.11.3 EXIT exact ship gate)
 
-## Tier-by-Tier (详细见 ../../../workarounds.md W-074.6 DETAILED)
+## Tier-by-Tier (详细见 ../../../internal/workarounds.md W-074.6 DETAILED)
 
 | Tier | LOC | Files |
 |---|---|---|
@@ -315,7 +315,7 @@ v2.12.0 QBE 移除 ship 时,不再要求 5/5 self-backend EXIT exact match (待 
 ## References
 
 - **Plan**: `docs/archive/plans/v2/v2.11.2-plan.md` (本 sprint, per feedback_plans_per_version)
-- **W-074.6 + W-074.7**: `docs/workarounds.md` (W-074.6 PARTIAL, W-074.7 ACTIVE 新增)
+- **W-074.6 + W-074.7**: `docs/internal/workarounds.md` (W-074.6 PARTIAL, W-074.7 ACTIVE 新增)
 - **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger), [[feedback_codegen_amd64_run_zerobyte]], [[feedback_no_date_estimates]]
 - **D43 closure sha chain**: `docs/archive/logs/v2/d43-baseline-archive.md` (`6a2f2277...` v2.8.0 active baseline)
 - **后接**: `docs/archive/plans/v2/v2.11.3-plan.md` (EXIT exact sprint, W-074.7, ~280 LOC,待写)
@@ -374,7 +374,7 @@ v2.11.3 plan 估 ~280 LOC across 7 files (T4-a/T4-b/T4-c/T4-d/T4-e/T4-f/T4-g/T4-
 ### Commits
 
 1. **Commit 1** (source): ~25 LOC 真修 T4-h + CGState.cur_fn_idx init/reset;剩余 ~140 LOC 是 scope DOWN 注释 + 防御性字段 + helper functions (cg_state_set_fn_header / cg_find_arg_idx / cg_state_bump_fn_idx / cg_state_cur_fn_idx)。`codegen_amd64_state.jhyy` +136 LOC,`_emit_call.jhyy` +22,`_emit_ctrl.jhyy` +25,`_peephole.jhyy` +6。
-2. **Commit 2** (docs): W-074.7 PARTIAL closure (../../../workarounds.md);D43 baseline drift correction (d43-baseline-archive.md);本 changelog sub-section + README ship row update。
+2. **Commit 2** (docs): W-074.7 PARTIAL closure (../../../internal/workarounds.md);D43 baseline drift correction (d43-baseline-archive.md);本 changelog sub-section + README ship row update。
 
 ### OS 启动链路 (2026-09-11 校准)
 
@@ -386,7 +386,7 @@ V2-C Part 2a-后-补:
 ## References
 
 - **Plan**: `docs/archive/plans/v2/v2.11.3-plan.md` (本 sprint, per feedback_plans_per_version;~64 LOC source, NOT ~280)
-- **W-074.6 + W-074.7**: `docs/workarounds.md` (W-074.6 PARTIAL, W-074.7 PARTIAL closure 2026-09-11)
+- **W-074.6 + W-074.7**: `docs/internal/workarounds.md` (W-074.6 PARTIAL, W-074.7 PARTIAL closure 2026-09-11)
 - **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger, 2/5 EXIT vs plan 5/5), [[feedback_codegen_amd64_run_zerobyte]], [[feedback_no_date_estimates]], [[feedback_audit_single_commit_diff]]
 - **D43 closure sha chain**: `docs/archive/logs/v2/d43-baseline-archive.md` (`2f0e8f7f...` v2.11.3 active baseline, drift-corrected from v2.11.2 `86a0103c...`)
 - **后接**: `docs/archive/plans/v2/v2.12.0-plan.md` (QBE 移除 + toolchain closure, scope DOWN ≥2/5 self-backend → 5/5 后 v2.x 中期)
@@ -436,7 +436,7 @@ W-074.7 PARTIAL closure PART 2: T4-b `emit_binop` src1/src2 parse 真修。**fib
 ### Commits
 
 1. **Commit 1** (source): ~30 LOC 真修 T4-b (cg_find_byte helper + emit_binop src1/src2 parse + 7 op branch imm support)。`codegen_amd64_state.jhyy` +12 LOC,`codegen_amd64_emit_call.jhyy` +104 LOC (含 verbose 注释), net ~116 insertions.
-2. **Commit 2** (docs): W-074.7 v2.11.4 fib_renamed closure (../../../workarounds.md);本 changelog v2.11.4 sub-section;README v2.11.4 ship row;../../plans/v2/v2.11.4-plan.md (per feedback_plans_per_version)。
+2. **Commit 2** (docs): W-074.7 v2.11.4 fib_renamed closure (../../../internal/workarounds.md);本 changelog v2.11.4 sub-section;README v2.11.4 ship row;../../plans/v2/v2.11.4-plan.md (per feedback_plans_per_version)。
 
 ### OS 启动链路 (2026-09-12 校准)
 
@@ -447,7 +447,7 @@ V2-C Part 2a-后-补-补:
 ## References (v2.11.4)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.4-plan.md` (本 sprint, per feedback_plans_per_version;~30 LOC source 真修)
-- **W-074.7**: `docs/workarounds.md` (v2.11.4 fib_renamed CLOSED, nested_struct_deep + struct_val_pass + big_test 仍待 v2.x 中期)
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.4 fib_renamed CLOSED, nested_struct_deep + struct_val_pass + big_test 仍待 v2.x 中期)
 - **Memory**: [[feedback_codegen_amd64_multifn]] (scope DOWN trigger), [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, T4-b src1/src2 parse bug 不能 catch — 只能 EXIT match 验)
 
 ## v2.11.5 — 2026-09-12 ship (axis-v2 commit `6857366`, tag `v2.11.5`)
@@ -498,7 +498,7 @@ v2.11.5 scope: 切到 alloc-tracking 真修 (替代之前 T4-c multi-arg 真修 
 **Commit chain (2 commits per v2.x convention)**:
 
 1. **Commit 1** (source + binary): `6857366` fix(codegen) — 上述 3 source files + jhyy.exe rebuild + sha256 refresh
-2. **Commit 2** (docs, 本 sub-section): ../../../workarounds.md W-074.7 PARTIAL closure v2.11.5 注释; changelog v2.11.5 sub-section; README v2.11.5 ship row; ../../plans/v2/v2.11.5-plan.md (per feedback_plans_per_version)
+2. **Commit 2** (docs, 本 sub-section): ../../../internal/workarounds.md W-074.7 PARTIAL closure v2.11.5 注释; changelog v2.11.5 sub-section; README v2.11.5 ship row; ../../plans/v2/v2.11.5-plan.md (per feedback_plans_per_version)
 
 **fix_evaluation_rule 诚实记录**: per [[feedback_fix_evaluation_rule]], v2.11.5 实际 self-backend EXIT match = 2/5 (hello=42 / fib_renamed=832040), 跟 v2.11.4 baseline 持平. **不强宣 “4/5 EXIT closure”** — v2.11.5 是 PARTIAL (撞 crash + garbage 修复, EXIT exact 仍 deferred v2.11.6 emit_store pointer semantics 真修).
 
@@ -513,7 +513,7 @@ V2-C Part 2a-后-补-补 (续):
 ## References (v2.11.5)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.5-plan.md` (本 sprint, per feedback_plans_per_version;~111 LOC source 真修 + ~80 LOC docs)
-- **W-074.7**: `docs/workarounds.md` (v2.11.5 alloc-tracking PARTIAL closure — crash 修复, EXIT exact 仍 deferred)
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.5 alloc-tracking PARTIAL closure — crash 修复, EXIT exact 仍 deferred)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, alloc-tracking bug 不能 catch)
 
 ## v2.11.6 — 2026-09-12 ship (axis-v2 commit `1e2ae1d`, tag `v2.11.6`)
@@ -571,7 +571,7 @@ V2-C Part 2a-后-补-补 (续):
 **Commit chain (2 commits per v2.x convention)**:
 
 1. **Commit 1** (source + binary): `1e2ae1d` fix(codegen) — 上述 4 source files + jhyy.exe rebuild + 4 个 N≥2 binary refresh
-2. **Commit 2** (docs, 本 sub-section): ../../../workarounds.md W-074.7.5/7.6 注释; changelog v2.11.6 sub-section; ../../../../README.md v2.11.6 ship row; ../../plans/v2/v2.11.6-plan.md (per feedback_plans_per_version)
+2. **Commit 2** (docs, 本 sub-section): ../../../internal/workarounds.md W-074.7.5/7.6 注释; changelog v2.11.6 sub-section; ../../../../README.md v2.11.6 ship row; ../../plans/v2/v2.11.6-plan.md (per feedback_plans_per_version)
 
 **fix_evaluation_rule 诚实记录 (per [[feedback_fix_evaluation_rule]])**:
 - v2.11.6 实际 self-backend EXIT match = 3/5 (hello=42 / fib_renamed=832040 / struct_val_pass=6) — 跟 v2.11.5 baseline 2/5 略升
@@ -593,7 +593,7 @@ V2-C Part 2a-后-补-补-补 (续):
 ## References (v2.11.6)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.6-plan.md` (本 sprint, per feedback_plans_per_version; ~158 LOC source 真修 + ~80 LOC docs)
-- **W-074.7**: `docs/workarounds.md` (v2.11.6 W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 真修; **5/5 link 真达成** ✅; EXIT exact 仍 deferred v2.11.7+)
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.6 W-074.7.5 peephole cap + W-074.7.6 block-name uniquify 真修; **5/5 link 真达成** ✅; EXIT exact 仍 deferred v2.11.7+)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, peephole cap bug 不能 catch — **big_test N=3 .il byte-equal 但 .s 截断**, 显式证伪 memory)
 
 ## v2.11.7 — 2026-09-12 scope DOWN defer (axis-v2 commit `<pending>`, tag `v2.11.7`)
@@ -639,9 +639,9 @@ v2.5.0 L4 § 3.5 E2 注释把整个 emit_store/emit_load 当 "1-to-1 栈栈搬�
 **fix_evaluation_rule 诚实记录 (per [[feedback_fix_evaluation_rule]])**:
 - v2.11.7 实际 EXIT match = 3/5 (跟 v2.11.6 baseline 持平 — **没新修, 因为调研发现真根因更深, scope UP 不充分**)
 - **不强宣 "4/5 EXIT exact closure"** — v2.11.7 是 scope DOWN defer, 真修留 v2.11.7a (full derived-address tracking)
-- 调研增量: ~190 LOC CGState 大改 (新 bitmap + record/query helpers + 4 emit path dispatch) — 实施后 regress, 全部 revert;留下的产出是"真根因诊断 doc" (本 sub-section + ../../../workarounds.md W-074.7.7 INVALID 跟 W-074.7.8 NEW 标注)
+- 调研增量: ~190 LOC CGState 大改 (新 bitmap + record/query helpers + 4 emit path dispatch) — 实施后 regress, 全部 revert;留下的产出是"真根因诊断 doc" (本 sub-section + ../../../internal/workarounds.md W-074.7.7 INVALID 跟 W-074.7.8 NEW 标注)
 
-**W-074.7 演化 (per ../../../workarounds.md)**:
+**W-074.7 演化 (per ../../../internal/workarounds.md)**:
 - ⚠️ **W-074.7.7 emit_store pointer semantics — INVALID closure** (本 sprint 调研结论: 4 emit path 真修只对 alloc-result pointer 有效, **derived address 才是真根因**, 不是 alloc-result pointer 单一种). 原 plan 基于错误根因模型, 实施后 regress, revert.
 - 🆕 **W-074.7.8 derived-address tracking — NEW (v2.11.7a 待 ship)**: bitmap 扩到 flag 任何 temp holding derived address (e.g. `add %t6, 0` 的 result temp 装的是 runtime 计算的 address, 不是 stack slot); emit_load/emit_store/emit_copy/emit_call arg load 改 full dispatch (slot vs derived-address lea-indirect). 估 ~250-350 LOC, 真修真根因, 5/5 EXIT exact 概率高. 风险: 改动大, 可能引入新 regress; 建议先调研 emit_binop 跟 derived-address result flag 设计, 再实施.
 
@@ -657,7 +657,7 @@ V2-C Part 2a-后-补-补-补-补 (续):
 ## References (v2.11.7)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.7-plan.md` (本 sprint, per feedback_plans_per_version; **~0 LOC source change, ~190 LOC source 调研产出 + revert, ~120 LOC docs = ~310 LOC docs**)
-- **W-074.7**: `docs/workarounds.md` (v2.11.7 W-074.7.7 **INVALID closure** (scope UP 调研错根因) + W-074.7.8 **NEW** (derived-address tracking, v2.11.7a 待 ship))
+- **W-074.7**: `docs/internal/workarounds.md` (v2.11.7 W-074.7.7 **INVALID closure** (scope UP 调研错根因) + W-074.7.8 **NEW** (derived-address tracking, v2.11.7a 待 ship))
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 actual EXIT match 跟调研发现, 不强宣 scope UP 成功); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger — scope UP 调研失败, scope DOWN 启动 v2.11.7a); [[feedback_codegen_amd64_run_zerobyte]] (N≥3 .il byte-equal 不验 .s, 但本 sprint 通过直接读 .s 比 gdb 取证 — emit_store 实际 emit 暴露真根因)
 
 ---
@@ -735,7 +735,7 @@ v2.11.5 design `cg_record_temp_slot(state, dst, off=region)` 让 dst 的 pointer
 - self-backend regress +2 flips (56 → 58, 远低于 +5 scope DOWN trigger); nested_struct_dwarf / struct_val_assign / struct_val_ret 等 7 个候选 flip 实际真修 2 个 + 触发 0 regress
 - QBE fallback 115/115 PASS preserved — 前端到 QBE 这条链干净, **问题被精确锁死在 self-backend 的新增 emit path 里** (跟 v2.11.7 调研结论一致)
 
-### W-074.7 演化 (per ../../../workarounds.md)
+### W-074.7 演化 (per ../../../internal/workarounds.md)
 
 - 🟢 **W-074.7.8 derived-address tracking — NEW → PARTIAL closure** (本 sprint 真修: 4 emit path + emit_alloc + emit_copy FNARG, 4/5 EXIT exact closure; big_test deferred v2.11.9+)
 - 🆕 **W-074.7.9 big_test runtime STATUS_INTEGER_OVERFLOW 0xC0000095 — NEW** (本 sprint 调研发现: 跟 derived-address 无关, 是 separate deeper bug, 真修 deferred v2.11.9+; 可能根因方向: emit_binop div/mod 跟 QBE semantics + emit_ctrl csltw/csgtw 跟 OF flag 交互)
@@ -786,7 +786,7 @@ V2-C Part 2a-后-补-补-补-补-补 (续):
 - **不强宣 "5/5 EXIT exact closure self-backend"** — W-074.6 family 显式 deferred v2.x 中期 per [[feedback_codegen_amd64_multifn]]; W-074.7.9 QBE side 真修 closure 是 scope 限定, 实际数字按 audit 记录
 - scope UP/DOWN: scope 限定在 v2.11.9 QBE side (~30 LOC source 真修). self-backend side extsw/multi-func body 0-byte 等 W-074.6 family 范围 = ~500+ LOC 多 sprint 已知 v2.6.3 → v3.1.4 持续, **不应** 强塞进 v2.11.9 (会触发 +5 scope DOWN trigger per [[feedback_codegen_amd64_multifn]])
 
-### W-074.7 演化 (per ../../../workarounds.md)
+### W-074.7 演化 (per ../../../internal/workarounds.md)
 
 - 🟡 **W-074.7.9 big_test runtime status — NEW → PARTIAL closure** (本 sprint QBE side 真修: `idiv` sign-extend prefix + lexer `rem` keyword + emit_binop `is_rem` flag + `is_rem` dispatch 真修; self-backend side 仍 ACTIVE due to W-074.6 family 范围)
 - W-074.6 multi-func self-backend body 0-byte — 仍 🟡 ACTIVE (deferred v2.x 中期; v2.11.9 不在 scope 范围)
@@ -821,7 +821,7 @@ V2-C Part 2a-后-补-补-补-补-补-补-补 (续):
 - `compiler/src0/codegen_amd64_emit_call.jhyy` +37 LOC: emit_copy FNARG 路径替换 hardcode `reg_rcx_for_qt(dst_qt)` → `cg_find_arg_idx` + `reg_rax_for_qt_idx(dst_qt, idx, target_tag)`, Win x64 arg 0..3 映射到 %rcx/%rdx/%r8/%r9 (SysV → rdi/rsi/rdx/rcx via reg_rax_for_qt_idx); safety fallback `reg_rcx_for_qt` 当 header_text=0 / arg not found
 
 **Commit 2 — chore(docs):** v2.11.10 sub-section + W-074.6 T3-a closure + per-version plan + README/CHANGELOG
-- `docs/workarounds.md` (~30 LOC): 新增 "W-074.6 T3-a closure: per-fn frame size — ✅ CLOSED (v2.11.10 ship)" entry, 详记 root cause (v2.11.2 global-max variant ship 决定 → 15488 bytes per fn → 递归 SIGSEGV) + 真修 (两阶段 pre-scan + per_fn_max table) + 验证 (5/6 EXIT exact closure + Stage 2 N=4 PASS + .s audit per-fn frame size 出现) + Scope DOWN (T4-g 新暴露, 5/5 deferred v2.11.10a+)
+- `docs/internal/workarounds.md` (~30 LOC): 新增 "W-074.6 T3-a closure: per-fn frame size — ✅ CLOSED (v2.11.10 ship)" entry, 详记 root cause (v2.11.2 global-max variant ship 决定 → 15488 bytes per fn → 递归 SIGSEGV) + 真修 (两阶段 pre-scan + per_fn_max table) + 验证 (5/6 EXIT exact closure + Stage 2 N=4 PASS + .s audit per-fn frame size 出现) + Scope DOWN (T4-g 新暴露, 5/5 deferred v2.11.10a+)
 - `docs/archive/logs/v2/changelog-v2.11.0.md` (本 sub-section, ~50 LOC)
 - `docs/archive/plans/v2/v2.11.10-plan.md` (per-version plan NEW, ~170 LOC per feedback_plans_per_version)
 - `../../README.md` v2.11.10 ship row add (+1 row)
@@ -850,24 +850,24 @@ V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
 ## References (v2.11.10)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.10-plan.md` (本 sprint, per feedback_plans_per_version; **FULL scope ~155 LOC source + ~200 docs = ~355 LOC 2 commits**)
-- **W-074.6 T3-a closure**: `docs/workarounds.md` W-074.6 T3-a closure **NEW → CLOSED** entry (5/6 self-backend EXIT exact + T3-a 真修 verified + T4-c 真修 verified + 5/5 deferred T4-g v2.11.10a+)
+- **W-074.6 T3-a closure**: `docs/internal/workarounds.md` W-074.6 T3-a closure **NEW → CLOSED** entry (5/6 self-backend EXIT exact + T3-a 真修 verified + T4-c 真修 verified + 5/5 deferred T4-g v2.11.10a+)
 - **Inline annotation**: `compiler/src0/codegen_amd64_state.jhyy:120-129` (CGState 加 fn_starts/per_fn_max/fn_count 3 字段 + 注释); `compiler/src0/codegen_amd64_state.jhyy:1010-1075` (cg_compute_per_fn_max_temps 两阶段 pre-scan + 注释); `compiler/src0/codegen_amd64.jhyy:278-285` (替换 cg_compute_global_max_temp → cg_compute_per_fn_max_temps + 注释); `compiler/src0/codegen_amd64_emit_ctrl.jhyy:430-465` (emit_func_header use_per_fn check + per_fn_max[cur_fn_idx] read + name extract + 注释); `compiler/src0/codegen_amd64_lexer.jhyy:812-895` (next_token_func_header dup full header + hdr_start ws skip + 注释); `compiler/src0/codegen_amd64_emit_call.jhyy:747-795` (FNARG multi-arg lookup via cg_find_arg_idx + reg_rax_for_qt_idx + 注释)
-- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure, 不强宣 "5/5 self-backend"; v2.11.10 plan "5/5 100% 可达" 预测 wrong 记录); [[feedback_codegen_amd64_multifn]] (scope UP trigger: T4-g 暴露后 scope DOWN 5/6 closure 接受; 5/6 跟 v2.11.9 baseline 一致不触发 scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate audit: per-fn subq 出现多个 distinct frame size + main_jhyy.s 非空 + jhyy.exe.sha256 refresh); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor, ../../plans/v2/v2.11.10-plan.md NEW); [[feedback_changelog_umbrella]] (v2.x axis 只 1 umbrella changelog, v2.11.10 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 T3-a closure entry NEW in ../../../workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure, 不强宣 "5/5 self-backend"; v2.11.10 plan "5/5 100% 可达" 预测 wrong 记录); [[feedback_codegen_amd64_multifn]] (scope UP trigger: T4-g 暴露后 scope DOWN 5/6 closure 接受; 5/6 跟 v2.11.9 baseline 一致不触发 scope DOWN trigger); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate audit: per-fn subq 出现多个 distinct frame size + main_jhyy.s 非空 + jhyy.exe.sha256 refresh); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor, ../../plans/v2/v2.11.10-plan.md NEW); [[feedback_changelog_umbrella]] (v2.x axis 只 1 umbrella changelog, v2.11.10 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 T3-a closure entry NEW in ../../../internal/workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
 
 ## References (v2.11.9)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.9-plan.md` (本 sprint, per feedback_plans_per_version; **FULL scope ~30 LOC source + ~110 LOC docs = ~140 LOC 2 commits**)
-- **W-074.7**: `docs/workarounds.md` W-074.7.9 **NEW → PARTIAL closure** (QBE side 真修: 2 个独立 root cause 真修; self-backend side 仍 ACTIVE due to W-074.6 family)
+- **W-074.7**: `docs/internal/workarounds.md` W-074.7.9 **NEW → PARTIAL closure** (QBE side 真修: 2 个独立 root cause 真修; self-backend side 仍 ACTIVE due to W-074.6 family)
 - **Inline annotation**: `compiler/src0/codegen_amd64_emit_call.jhyy:1076-1080` (idiv cltd/cqto prefix 真修 + 注释); `compiler/src0/codegen_amd64_emit_call.jhyy:1121-1146` (is_rem dispatch mirror is_mod + 注释); `compiler/src0/codegen_amd64_lexer.jhyy:1124-1142` (`'r'` → ret/rem disambiguate dispatch + 注释); `compiler/src0/codegen_amd64_lexer.jhyy:695-707` (next_token_binop `'r'` consume "em" → op_name="rem" + 注释)
-- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 QBE 5/5 closure + self-backend 1/5 baseline, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: scope UP 控制在 v2.11.9 QBE side only, self-backend side deferred v2.x 中期 W-074.6, 不触发 +5); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: audit grep self-backend big_test.s `cltd` = 14 + `idivl` = 14 + `movq %rdx, %rax` = 9 + `.s` 行数 ≥ 100 bytes + `main_jhyy.s` 非空 + jhyy.exe.sha256 refresh); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.9 entry 翻转 from NEW → PARTIAL closure with corrected root cause in ../../../workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 QBE 5/5 closure + self-backend 1/5 baseline, 不强宣 "5/5 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: scope UP 控制在 v2.11.9 QBE side only, self-backend side deferred v2.x 中期 W-074.6, 不触发 +5); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: audit grep self-backend big_test.s `cltd` = 14 + `idivl` = 14 + `movq %rdx, %rax` = 9 + `.s` 行数 ≥ 100 bytes + `main_jhyy.s` 非空 + jhyy.exe.sha256 refresh); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.9 entry 翻转 from NEW → PARTIAL closure with corrected root cause in ../../../internal/workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
 
 ## References (v2.11.8)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.8-plan.md` (本 sprint, per feedback_plans_per_version; **FULL scope ~319 LOC source + ~30 docs = ~349 LOC 2 commits**)
-- **W-074.7**: `docs/workarounds.md` W-074.7.8 **NEW → PARTIAL closure** + W-074.7.9 **NEW** (big_test runtime deferred)
+- **W-074.7**: `docs/internal/workarounds.md` W-074.7.8 **NEW → PARTIAL closure** + W-074.7.9 **NEW** (big_test runtime deferred)
 - **Self-referential slot bug 文档**: `compiler/src0/codegen_amd64_emit_mem.jhyy:285-340` (emit_alloc flag + lea+mov + 公式 slot 注释)
 - **FNARG flag propagate 文档**: `compiler/src0/codegen_amd64_emit_call.jhyy:821-833` (FNARG path 注释)
-- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 4/5 EXIT exact closure + big_test deferred; 不强宣 5/5); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: +2 flips 远低于 +5, ship); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: .s 行数 + main_jhyy.s 非空 check 验证 hello.jhyy = 12 行 / 207 bytes); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.8 entry + W-074.7.9 NEW in ../../../workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
+- **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 4/5 EXIT exact closure + big_test deferred; 不强宣 5/5); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: +2 flips 远低于 +5, ship); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: .s 行数 + main_jhyy.s 非空 check 验证 hello.jhyy = 12 行 / 207 bytes); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7.8 entry + W-074.7.9 NEW in ../../../internal/workarounds.md); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计)
 
 ## v2.11.11 — 2026-09-13 — W-074.6 T4-g lexer cnew/ceqw silent-skip 真修 (5/6 self-backend closure maintained; 6/6 NOT achieved — stack-slot-reuse sub-bug 暴露, deferred v2.11.11a+)
 
@@ -899,7 +899,7 @@ V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
   - op_str table 加 `n1 == 110 ('n') → "cnew"` branch consistency (~1 LOC, dead store 但保持代码对称)
 
 **Commit 2 — chore(docs):** v2.11.11 sub-section + W-074.6 T4-g closure PARTIAL + per-version plan + README/CHANGELOG
-- `docs/workarounds.md` (~30 LOC): 新增 "W-074.6 T4-g closure: lexer cnew/ceqw silent-skip — ⚠️ PARTIAL (v2.11.11 ship)" entry, 详记 root cause (lexer stage 1 漏 'n' + stage 2 只查 n4 + flag pattern 绕 codegen nested-OR workaround bug + 暴露 stack-slot-reuse sub-bug) + 真修 + 验证 (5/6 EXIT exact closure maintained + Stage 2 N=4 PASS + .s audit 65 setXX emits) + Scope DOWN (6/6 deferred v2.11.11a+)
+- `docs/internal/workarounds.md` (~30 LOC): 新增 "W-074.6 T4-g closure: lexer cnew/ceqw silent-skip — ⚠️ PARTIAL (v2.11.11 ship)" entry, 详记 root cause (lexer stage 1 漏 'n' + stage 2 只查 n4 + flag pattern 绕 codegen nested-OR workaround bug + 暴露 stack-slot-reuse sub-bug) + 真修 + 验证 (5/6 EXIT exact closure maintained + Stage 2 N=4 PASS + .s audit 65 setXX emits) + Scope DOWN (6/6 deferred v2.11.11a+)
 - `docs/archive/logs/v2/changelog-v2.11.0.md` (本 sub-section, ~80 LOC)
 - `docs/archive/plans/v2/v2.11.11-plan.md` (per-version plan NEW, ~250 LOC per feedback_plans_per_version)
 - `../../README.md` v2.11.11 ship row add (+1 row)
@@ -948,7 +948,7 @@ V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
 ## References (v2.11.11)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.11-plan.md` (本 sprint, per feedback_plans_per_version; **~5 LOC source + ~200 docs = ~205 LOC 2 commits**; partial closure per user pre-confirmed scope DOWN "仅 T4-g 真修 (推荐)")
-- **W-074.6 T4-g closure**: `docs/workarounds.md` W-074.6 T4-g closure **NEW → ⚠️ PARTIAL** entry (5/6 self-backend EXIT exact + T4-g lexer 真修 verified + codegen nested-OR workaround bug 取证 + stack-slot-reuse sub-bug 暴露 deferred v2.11.11a+)
+- **W-074.6 T4-g closure**: `docs/internal/workarounds.md` W-074.6 T4-g closure **NEW → ⚠️ PARTIAL** entry (5/6 self-backend EXIT exact + T4-g lexer 真修 verified + codegen nested-OR workaround bug 取证 + stack-slot-reuse sub-bug 暴露 deferred v2.11.11a+)
 - **Inline annotation**: `compiler/src0/codegen_amd64_lexer.jhyy:1212` (stage 1 加 n1=='n' OR); `:1218-1234` (stage 2 flag pattern refactor); `:1248` (op_str n1='n' branch consistency); `:1478-1482` (lex_il silent skip on `rc < 0`); `compiler/src0/codegen_amd64_emit_call.jhyy:1166-1192` (cmpl+setcc+movzbl dispatch already correct); `compiler/src0/codegen_amd64_emit_ctrl.jhyy:215-246` (test+jne+jmp dispatch already correct); `compiler/src0/codegen.jhyy:2060-2101` (short-circuit OR workaround bug 取证)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 5/6 closure maintained, 不强宣 "6/6 self-backend"); [[feedback_codegen_amd64_multifn]] (scope DOWN trigger: self-backend regress +13 PASS 整体改善, 不触发); [[feedback_codegen_amd64_run_zerobyte]] (audit gates: ≥ 65 setXX emits + jne Lloop_body emits + jmp Lloop_end emits + `subq $15488` = 0 + main_jhyy.s 非空); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 T4-g closure entry NEW); [[feedback_audit_single_commit_diff]] (audit 单 commit, 不累计); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)
 ## v2.11.12 (2026-09-15) — W-074.6 shl/shr missing + emit-copy dst_id=0 真修 → **6/6 self-backend EXIT exact closure ✅ 达成**
@@ -959,7 +959,7 @@ V2-C Part 2a-后-补-补-补-补-补-补-补-补 (续):
 - **Phase B**: emit_binop shl/shr/and/or/xor dispatch 实现
 - **Phase C**: emit_copy dst_id=0 root cause 真修 (LHS cursor save/restore)
 - **Phase D**: build + verify 6/6 self-backend EXIT exact closure
-- **Phase E**: docs (../../../workarounds.md 修正 v2.11.11 entry + 2 NEW W-074.6 entries + changelog + per-version plan + README + CHANGELOG + commit + tag v2.11.12 + push)
+- **Phase E**: docs (../../../internal/workarounds.md 修正 v2.11.11 entry + 2 NEW W-074.6 entries + changelog + per-version plan + README + CHANGELOG + commit + tag v2.11.12 + push)
 
 ### Phase A: shl/shr lexer dispatch (~50 LOC)
 
@@ -1032,7 +1032,7 @@ return -1 as i32;
 
 ### Phase E: docs
 
-- `docs/workarounds.md`:
+- `docs/internal/workarounds.md`:
   - **CORRECTION**: W-074.6 T4-g closure v2.11.11 entry 错文件路径 + 错归因 supersedure + 预算估修正 (~10 LOC supersedure note)
   - **NEW**: W-074.6 shl/shr missing entry (~80 LOC):root cause + 真修 (5 ops) + Phase C 2 sub-bug 修正 + 验证
   - **NEW**: W-074.6 emit-copy dst_id=0 entry (~70 LOC):root cause + 真修 (cursor save/restore) + lessons learned
@@ -1058,8 +1058,8 @@ return -1 as i32;
 ## References (v2.11.12)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.12-plan.md` (本 sprint, per feedback_plans_per_version; **~115 LOC source + ~250 docs = ~365 LOC 2 commits**; 6/6 closure ✅ 达成)
-- **W-074.6 shl/shr**: `docs/workarounds.md` W-074.6 shl/shr missing **✅ CLOSED** entry (~80 LOC)
-- **W-074.6 dst-id-0**: `docs/workarounds.md` W-074.6 emit-copy dst_id=0 **✅ CLOSED** entry (~70 LOC)
+- **W-074.6 shl/shr**: `docs/internal/workarounds.md` W-074.6 shl/shr missing **✅ CLOSED** entry (~80 LOC)
+- **W-074.6 dst-id-0**: `docs/internal/workarounds.md` W-074.6 emit-copy dst_id=0 **✅ CLOSED** entry (~70 LOC)
 - **W-074.6 T4-g closure v2.11.11 entry 修正**: SUPERSEDED note added (file path + 根因 + 预算估修正)
 - **Inline annotation**: `compiler/src0/codegen_amd64_lexer.jhyy:631-720` (next_token_binop 5 ops branch); `:1307-1329` (main dispatcher shl/shr + 'o' + 'x' + 'a'-and); `:1074-1123` (LHS cursor save/restore); `compiler/src0/codegen_amd64_emit_call.jhyy:1013-1040` (5 is_* flag + cg_find_sub); `:1166-1208` (5 dispatch branch)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 6/6 closure 达成 vs self-backend regress -2; 6/6 closure 真 ship 不强宣); [[feedback_codegen_amd64_multifn]] (FLIP count vs v2.11.11 baseline: 仅 -2 但都属于 pre-existing FAILs,不是新 regression;scope DOWN trigger 未触发); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: shl/shr/and/or/xor emits count + t_bit_pack/t_bit_unpack/t_shifts PASS + per-fn subq distinct frame size + main_jhyy.s 非空 + jne Lloop_body emits); [[feedback_no_date_estimates]] (no calendar dates); [[feedback_plans_per_version]] (1 plan/minor, ../../plans/v2/v2.11.12-plan.md NEW); [[feedback_changelog_umbrella]] (vX.Y axis 只 1 umbrella changelog, v2.11.12 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 shl/shr + W-074.6 dst-id-0 NEW + W-074.6 T4-g v2.11.11 entry supersedure correction); [[feedback_audit_single_commit_diff]] (audit 单 commit, v2.11.12 fix + docs 2 commits); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add)
@@ -1127,7 +1127,7 @@ return -1 as i32;
 
 ### Phase E: docs
 
-- `docs/workarounds.md`:
+- `docs/internal/workarounds.md`:
   - **NEW**: W-074.6 cne substring missing entry (~80 LOC): root cause + 真修 (1 LOC substring 4→3) + cross-cluster impact + 验证 + 诚实 scope 评估
   - **UPDATE**: W-074.6 family index entry (line 74):v2.11.13 Iter 4 closure append (cne substring ✅ CLOSED),累进 closed ~328 LOC,剩余 ~172 LOC
 - `docs/archive/logs/v2/changelog-v2.11.0.md` v2.11.13 sub-section append (本 entry)
@@ -1189,14 +1189,14 @@ return -1 as i32;
 ## References (v2.11.14)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.14-plan.md` (per `feedback_plans_per_version`; **~120 LOC source attempt + ~150 LOC revert + ~250 docs = ~520 LOC 1 docs commit**; partial closure 0/31 = 0% + hard STOP #3 trigger activated)
-- **W-074.7 phi merge gap**: `docs/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** entry (~80 LOC)
+- **W-074.7 phi merge gap**: `docs/internal/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** entry (~80 LOC)
 - **Inline annotation**: revert 干净 — `compiler/src0/codegen_amd64_state.jhyy`, `codegen_amd64_emit_call.jhyy`, `codegen_amd64_emit_ctrl.jhyy`, `codegen_amd64.jhyy` 全部 git checkout HEAD -- 还原 baseline
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 C.3 12 tests 估 → 0 PASS + 1 regress 实测, plan 估 partial wrong); [[feedback_codegen_amd64_multifn]] (FLIP count -1 触发 hard STOP #3 — match.jhyy currently-PASSing test regression > STOP threshold); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: malloc state_buf 160→256 必须 ≥ CGState struct 实际字节数,否则 emit_call/emit_ctrl 写未映射内存 → process crash); [[feedback_plans_per_version]] (../../plans/v2/v2.11.14-plan.md 已 ship per plan, 但实际 closure 0/31 → plan 在下个 sprint v2.11.15 redesign 时重用 audit cluster map); [[feedback_changelog_umbrella]] (v2.11.14 sub-section append — 记录 "0/31 closure, deferred 全 31 v2.11.15"); [[feedback_audit_single_commit_diff]] (audit revert 单 commit: `git checkout HEAD -- 4 files` + 重建 jhyy.exe + sha256 refresh); [[feedback_document_workarounds_in_docs]] (本 W-074.7 phi merge gap entry NEW,详记 root cause + 4 sub-bugs + 验证); [[feedback_auto_push_after_commit]]; [[feedback_ssh_key_same_shell]]
 
 ## References (v2.11.13)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.13-plan.md` (per `feedback_plans_per_version`; **~1 LOC source + ~250 docs = ~251 LOC 2 commits**; partial closure 14/44 = 32% + FLIP-gate scope DOWN trigger activated)
-- **W-074.6 cne substring**: `docs/workarounds.md` W-074.6 cne substring missing **✅ CLOSED** entry (~80 LOC)
+- **W-074.6 cne substring**: `docs/internal/workarounds.md` W-074.6 cne substring missing **✅ CLOSED** entry (~80 LOC)
 - **Inline annotation**: `compiler/src0/codegen_amd64_emit_call.jhyy:1077-1087` (cg_find_sub "cnew" 4-char → "cne" 3-char 真修)
 - **Memory**: [[feedback_fix_evaluation_rule]] (诚实记录 1 LOC 真修 vs plan 估 30-50 LOC;cross-cluster +7 PASS vs plan 估 C.2 (3 tests); 根因 cne substring vs plan 估 sizeof default); [[feedback_codegen_amd64_multifn]] (FLIP count +7 超 stop threshold 5 → scope DOWN v2.11.13 trigger activated); [[feedback_codegen_amd64_run_zerobyte]] (NEW ship gate: cnel in `_regress_cap_table_basic.s` — pre-fix `addl src1, src2` + `cmpl $0, sum`, post-fix `cmpl src2_off(%rbp), %rax` + `setne %al` + `movzbl %al, %eax`); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (../../plans/v2/v2.11.13-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.13 sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.6 cne substring NEW entry); [[feedback_audit_single_commit_diff]] (audit 单 commit `89b4b87`); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]]
 
@@ -1280,7 +1280,7 @@ This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. 
 ## References (v2.11.15 Phase 0)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.15-plan.md` (per `feedback_plans_per_version`; **Phase 0 + 6 iters Systemic plan NEW**; total ~245-410 source LOC + ~400 docs = ~645-810 LOC estimated across 6 implementation commits)
-- **W-074.7 phi merge gap**: `docs/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** (from v2.11.14; v2.11.15 Iter 2 re-targets as **single root cause** = `emit_phi` noop, NOT v2.11.14 plan's 4 sub-bugs)
+- **W-074.7 phi merge gap**: `docs/internal/workarounds.md` W-074.7 phi resolution emit_phi noop + match/OR/payload merge slot gap **⏸ DEFERRED** (from v2.11.14; v2.11.15 Iter 2 re-targets as **single root cause** = `emit_phi` noop, NOT v2.11.14 plan's 4 sub-bugs)
 - **`.s` evidence files**: `compiler/tests/examples/{char_pattern,slice_subrange,float_arith,generics_fn_call_site_inference,const_array,const_struct_array,dungeon_game}_run.s` (all post-v2.11.14 baseline jhyy.exe `774ec8347b4ce629...`)
 - **Baseline regress log**: `/tmp/regress_v2_11_15_baseline.log` (84 PASS / 31 FAIL / 25 SKIP)
 - **Memory**: [[feedback_fix_evaluation_rule]] (5-version 4-way-wrong lesson; Phase 0 .s evidence first → avoids v2.11.14 fabricated narrative); [[feedback_codegen_amd64_multifn]] (FLIP ≥ 4 STOP); [[feedback_codegen_amd64_run_zerobyte]] (CGState 64 bytes verified, NOT 160/256); [[feedback_il_s_debugging_pattern]] (Phase 0 .s evidence pattern); [[feedback_plans_per_version]] (../../plans/v2/v2.11.15-plan.md NEW); [[feedback_changelog_umbrella]] (v2.11.15 sub-section append); [[feedback_document_workarounds_in_docs]] (no new W entry Phase 0; per-Iter entries to come); [[feedback_audit_single_commit_diff]] (Phase 0 docs-only 1 commit, no source change); [[feedback_auto_push_after_commit]] (Phase 0 commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add) (push 前 same-shell SSH add)
@@ -1346,7 +1346,7 @@ This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. 
 ## References (v2.11.15 ship)
 
 - **Plan**: `docs/archive/plans/v2/v2.11.15-plan.md` (per `feedback_plans_per_version`; Phase 0 + 6 iters Systemic plan; 5 implementation commits + 2 no-op iters = actual ~270 LOC 真修 + ~150 docs LOC = ~420 LOC total — better than 5-version 4-way-wrong lesson history prediction of worst-case 40-53% closure)
-- **W-074.7 phi merge gap**: `docs/workarounds.md` → **✅ CLOSED** (emit_phi per-arm injection 真修 per Iter 2 commit `568d3aa`)
+- **W-074.7 phi merge gap**: `docs/internal/workarounds.md` → **✅ CLOSED** (emit_phi per-arm injection 真修 per Iter 2 commit `568d3aa`)
 - **Self-host closure verified**: 4-stage v1→v5 SHA match across Iters 2-4
 - **Memory**: [[feedback_fix_evaluation_rule]] (Iter 5 + 6 no-op discovery = honest scope re-evaluation AFTER implementation; partial cluster re-classification revealed A2 already-passing + C.2 already-passing tests, contradicting plan's cluster size estimates); [[feedback_codegen_amd64_multifn]] (no FLIP≥4 trigger activated — all 4 iters clean; spot-check verification confirms per-Iter 5/5 PASS gate); [[feedback_codegen_amd64_run_zerobyte]] (CGState malloc 160→224 catches pre-existing 8-byte overflow on fn_count field — bonus fix from Iter 2); [[feedback_no_date_estimates]]; [[feedback_plans_per_version]] (../../plans/v2/v2.11.15-plan.md 已 ship); [[feedback_changelog_umbrella]] (v2.11.15 ship record sub-section append); [[feedback_document_workarounds_in_docs]] (W-074.7 → ✅ CLOSED; new W-074.8 entries deferred to follow-on); [[feedback_audit_single_commit_diff]] (audit 单 commit per-Iter 1/1b/2/3/4); [[feedback_auto_push_after_commit]] (commit 成功直接 push); [[feedback_ssh_key_same_shell]] (push 前 same-shell SSH add + token-URL fallback per ../../../../../CLAUDE.md)
 
@@ -1480,7 +1480,7 @@ This is **NOT** a missing-data-emit bug — it's a **pointer-dereference** bug. 
 |---|---|
 | `docs/archive/plans/v2/v2.11.16-plan.md` | NEW per-version plan (this audit + roadmap, per `feedback_plans_per_version`) |
 | `docs/archive/logs/v2/changelog-v2.11.0.md` | v2.11.16 sub-section append (本 sub-section, per `feedback_changelog_umbrella`) |
-| `docs/workarounds.md` | W-074.6/W-074.7 entries update with audit results (per `feedback_document_workarounds_in_docs`) |
+| `docs/internal/workarounds.md` | W-074.6/W-074.7 entries update with audit results (per `feedback_document_workarounds_in_docs`) |
 
 ## References (v2.11.16 Phase 0)
 
@@ -1808,7 +1808,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 **总 v2.11.21-fix scope**:
 - **2 src0 commits** (Phase 1 cap_table_basic + Phase 4 dungeon_game 真修, **1 LOC each**)
 - **2 DEFER sub-bugs** (Phase 2 for_in_slice_nested + Phase 3 big_array, 推 v2.12.x full audit)
-- **2 DEFER docs** (Phase 2/3 entries 加进 `../../audit/rca-v2.11.21.md` + `../../../workarounds.md` W-074.13 sub-bug 2/4 标 DEFERRED v2.12.x)
+- **2 DEFER docs** (Phase 2/3 entries 加进 `../../audit/rca-v2.11.21.md` + `../../../internal/workarounds.md` W-074.13 sub-bug 2/4 标 DEFERRED v2.12.x)
 - **+2 self-backend PASS** (115 → 117)
 
 **V.5 stratified random sample of 20 PASS tests (silent-fail gate per `feedback_codegen_amd64_multifn`)**:
@@ -1903,7 +1903,7 @@ User 提出 28 Confirm FAIL 跨 7 簇, 选 RCA-first, 1 iter 诊断后落到本 
 
 - `docs/archive/logs/v2/changelog-v2.11.0.md` v2.11.23 ship section (this section)
 - `docs/archive/plans/v2/v2.11.23-plan.md` (NEW)
-- `docs/workarounds.md` W-074.13 sub-bug 1 + 4 CLOSED entries (真修) + 新 caveat section for v2.11.8 formula pool collision (replaces previous v2.11.8 self-referential claim) + v2.11.23 sprint closure section
+- `docs/internal/workarounds.md` W-074.13 sub-bug 1 + 4 CLOSED entries (真修) + 新 caveat section for v2.11.8 formula pool collision (replaces previous v2.11.8 self-referential claim) + v2.11.23 sprint closure section
 - `docs/internal/architecture.md` Last updated v2.11.23 + 1-line summary
 - `docs/archive/logs/v2/d43-baseline-archive.md` v2.11.23 row (HOLD on `e6b6f1fa...` per V.5 实测)
 - tag `v2.11.23` (per `feedback_auto_push_after_commit`)
@@ -1940,7 +1940,7 @@ v2.11.23 正确 RCA: **emit_alloc 应该调 existing `cg_record_temp_slot` API (
 - **net ACTIVE workaround count** (post-v2.11.23): 5 → **3** (W-074.13 全 CLOSED + parent W-074.13 RESOLVED)
 
 **Plan**: [`docs/archive/plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md) (NEW — 架构修 ship outcome)
-**Workarounds update**: [`docs/workarounds.md`](../../../workarounds.md) W-074.13 v2.11.23 sprint closure section
+**Workarounds update**: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) W-074.13 v2.11.23 sprint closure section
 
 ---
 

@@ -23,7 +23,7 @@ v4.0.0-rc1 = the moment when JHYY stops being two parallel compilers and becomes
 | v1.8.3 shipped (Stage 2 N=4 byte-equal closure + installer) | ✅ 2026-08-29 | tag `98c8272` |
 | v2.16.0 shipped (QBE removed + bench.sh + .exe byte-equal) | ✅ 2026-09-22 | tag `v2.16.0` = `axis-v2` HEAD `0b4cde5` |
 | v3.4.2 shipped (V3 self-backend closure + 3 minor 真修 W-085/088/089) | ✅ 2026-09-29 | tag `v3.4.2` = `axis-v3` HEAD `8cfcc1e` |
-| v2/v3 ACTIVE workaround bucket cleared | ✅ at v3.4.2 | `../../../workarounds.md` ACTIVE = 0 |
+| v2/v3 ACTIVE workaround bucket cleared | ✅ at v3.4.2 | `../../../internal/workarounds.md` ACTIVE = 0 |
 
 ---
 
@@ -32,7 +32,7 @@ v4.0.0-rc1 = the moment when JHYY stops being two parallel compilers and becomes
 | # | Commit | Message | Notes |
 |---|---|---|---|
 | 1 | `a4ba8fa` | `chore(merge): merge axis-v2 into main (v2.16.0 axis final)` | `--no-ff`; 1 conflict on `compiler/tests/bootstrap/fixed_point.sh` (resolved by `--theirs`; v3 doesn't have this file) |
-| 2 | `c13397d` | `chore(merge): merge axis-v3 into main (v3.4.2 axis final)` | `--no-ff`; 20 conflicts (src0/*.jhyy + ../../../workarounds.md + bench.sh + 6 new test files + 4 jhyy_v2..v5.exe + jhyy_stage0.exe); all resolved `--theirs` per user decision 2 (v3 slim workarounds + v3 stdlib + v3 new codegen arch wins) |
+| 2 | `c13397d` | `chore(merge): merge axis-v3 into main (v3.4.2 axis final)` | `--no-ff`; 20 conflicts (src0/*.jhyy + ../../../internal/workarounds.md + bench.sh + 6 new test files + 4 jhyy_v2..v5.exe + jhyy_stage0.exe); all resolved `--theirs` per user decision 2 (v3 slim workarounds + v3 stdlib + v3 new codegen arch wins) |
 | 3 | `c473246` | `chore(version): bump v2.16.0 → v4.0.0-rc1 across active source/docs/installer (~22 files)` | 22 files / 81 hits; excluded: `docs/archive/logs/v2/`, `docs/archive/plans/v2/`, `docs/logs/v3/changelog-v3.*`, `docs/plans/v3/v3.0.6-port-...` + `../../plans/v3/v3.4.0-plan.md`, `scripts/dev/v2_13_8_*.py` + `v2_15_0_*.py`, `README.md`, `installer/assets/license.rtf` |
 | 4 | `b1cf522` | `docs(archive): move invalidated v2/v3 plans to docs/archive/plans/v2-v3/` | per user decision 1: archive (not delete); `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md` + `../../plans/v2-v3/v2.0.0-os-prep.md` → `docs/archive/plans/v2-v3/` with README explaining rationale |
 | 5 | `3a48fdd` | `docs(readme): full rewrite for v4.0.0 (post-QBE self-backend + stdlib)` | per user decision 4: 432 → 363 lines; badges → v4.0.0 + self-hosted amd64 backend + Windows+Linux; status table reflects v4.0.0 state; roadmap points to v4.1.0..v4.12.0 |
@@ -50,7 +50,7 @@ v4.0.0-rc1 = the moment when JHYY stops being two parallel compilers and becomes
 | Compiler tests | ~12 | `compiler/tests/examples/{char_literal_3,4byte,fmod_basic,fmod_negative,fmod_f32,cap_table_2reg,cap_test_sysv,conv_test,float_arg_xmm,float_load_store,float_unsigned,slice_iter_nested,xmm_pressure_9args}.jhyy` |
 | Bootstrap / verification infra | 4 | `compiler/tests/bootstrap/{fixed_point.sh, ../../README.md, sysv_float_cross.sh, sysv_full_regress.sh}` |
 | Installer | ~5 | `installer/{build.ps1, Bundle.wxs, jhyy-compiler.wxs, Locale.zh-CN.wxl, README.md}` |
-| Internal docs | 3 | `docs/internal/{../../../internal/architecture.md, ../../../internal/build.md, ../../../workarounds.md, NEW CLAUDE.md}` |
+| Internal docs | 3 | `docs/internal/{../../../internal/architecture.md, ../../../internal/build.md, ../../../internal/workarounds.md, NEW CLAUDE.md}` |
 | ABI / spec | 2 | `docs/abis/{jhyy-lang-spec-v1.3.0.md, jhyy-lang-spec-floatsupplement-v3.3.0.md}` |
 | Build infra | 1 | `Makefile` |
 | New stdlib | 8 | `compiler/src0/std/{arena,fmt,io,math,mem,os,string,vec}.jhyy` |
@@ -75,7 +75,7 @@ Per `../../plans/v4/v4.0.0-plan.md` lines 62-67:
 | D43 final baseline freeze | SHA preserved from v2.16.0 → v4.0.0 closure | ❌ **NOT APPLICABLE** — same root cause as selfhost. v2.14.0 baseline `43fee332...` was on **C-side QBE chain**, not self-host. Per D43 closure rule: re-baseline requires self-host closure working; if not, baseline is NOT preserved through the merge. New baseline = N/A until v4.x self-host 真修。 |
 | `byte_equal_selfbackend.sh` | 3/3 PASS (fmod_basic / fmod_negative / fmod_f32) | ✅ **6/6 PASS** (3 .s sha-mnemonic gates + 3 .exe exit gates); wssa drift between V2 emit_conv and V3 emit_conv_* (1-byte size delta) noted as ⚠️ INFO (per script design — "预期若 V3 emit_conv != V2 emit_conv_*") |
 | `bench.sh --report` | first-time baseline accept (--strict ≤ 1.7x FAIL) | ✅ **REPORT** mode PASS — fib 1.399x / ack 0.596x / nq 1.020x. fib > 1.1x accepted per first-time baseline rule; --strict gate deferred v4.x per `feedback_no_artifacts_in_project` |
-| ACTIVE workaround count | 0 (../../../workarounds.md index) | ✅ 0 ACTIVE per v3.4.2 ship state |
+| ACTIVE workaround count | 0 (../../../internal/workarounds.md index) | ✅ 0 ACTIVE per v3.4.2 ship state |
 
 **Gate analysis** (per `feedback_rca_first_root_cause`):
 
@@ -141,7 +141,7 @@ W-106(arena-touch)/ W-107(per-fn 表 1024 上限)/ W-109(浮点比较算错)。
 
 ### ⚠️ 「163/163 PASS」不能当作正确性证据
 
-`docs/FACTS.md` 顶段有完整说明。一句话版本:185 个测试里约 108 个
+`docs/internal/FACTS.md` 顶段有完整说明。一句话版本:185 个测试里约 108 个
 有真断言,48 个只验「进程没崩」,stdout 从不被比较。浮点比较就是这么活到今天
 的 —— `float_cmp.jhyy` 无判据指令且 `return 42` 写死,而 f32 比较实际按 f64 算、
 `f64 ==/!=` 直接编译失败(W-109)。
@@ -173,9 +173,9 @@ W-106(arena-touch)/ W-107(per-fn 表 1024 上限)/ W-109(浮点比较算错)。
 
 ### What is v4.0.1
 
-v4.0.1 ships a **../../../workarounds.md ACTIVE bucket audit & sync** against main HEAD (commit `416285f`, v4.0.0-rc1)。动机:user 2026-10-01 说"以代码为准,不要信文档" — index table L24-88 多个 ACTIVE entry 跟 body 状态不一致(典型:W-085 body 已 ✅ RESOLVED 2026-09-29 但 index 仍 🟡 ACTIVE)。本 sprint 走 audit-flip pattern,验证每个 ACTIVE entry 的 literal trigger 在当前代码上是否真 reproduce,根据 reproduce 结果**flip → RESOLVED 或 add Last-verified footer**。
+v4.0.1 ships a **../../../internal/workarounds.md ACTIVE bucket audit & sync** against main HEAD (commit `416285f`, v4.0.0-rc1)。动机:user 2026-10-01 说"以代码为准,不要信文档" — index table L24-88 多个 ACTIVE entry 跟 body 状态不一致(典型:W-085 body 已 ✅ RESOLVED 2026-09-29 但 index 仍 🟡 ACTIVE)。本 sprint 走 audit-flip pattern,验证每个 ACTIVE entry 的 literal trigger 在当前代码上是否真 reproduce,根据 reproduce 结果**flip → RESOLVED 或 add Last-verified footer**。
 
-**No src0/ codegen changes**;本 sprint scope 严格限定在 `docs/workarounds.md` + [`changelog-v4.0.1.md`](#v401) (本文件)。
+**No src0/ codegen changes**;本 sprint scope 严格限定在 `docs/internal/workarounds.md` + [`changelog-v4.0.1.md`](#v401) (本文件)。
 
 ---
 
@@ -184,7 +184,7 @@ v4.0.1 ships a **../../../workarounds.md ACTIVE bucket audit & sync** against ma
 | Precondition | Status | Reference |
 |---|---|---|
 | v4.0.0-rc1 shipped (axis-v2 + axis-v3 merged, post-QBE self-backend) | ✅ 2026-09-30 | tag `v4.0.0-rc1`, commit `416285f` |
-| ../../../workarounds.md schema locked (5-state enum, 6-field status) | ✅ | `docs/workarounds.md §1-2` |
+| ../../../internal/workarounds.md schema locked (5-state enum, 6-field status) | ✅ | `docs/internal/workarounds.md §1-2` |
 | W-085 docs-only flip pattern precedent (v3.4.0) | ✅ 2026-09-29 | `docs/archive/logs/v3/changelog-v3.4.md` |
 
 ---
@@ -238,9 +238,9 @@ Per Step 1.1 verification matrix + Step 1.3 docs-only flips (per `merge-v2-axis-
 
 | Gate | Status |
 |------|--------|
-| `git diff --stat v4.0.0-rc1..v4.0.1` → only `docs/workarounds.md` + [`changelog-v4.0.1.md`](#v401) modified | ✅ |
+| `git diff --stat v4.0.0-rc1..v4.0.1` → only `docs/internal/workarounds.md` + [`changelog-v4.0.1.md`](#v401) modified | ✅ |
 | `jhyy.exe sha unchanged` (post-audit rebuild NOT required) | ✅ — docs-only sprint |
-| ../../../workarounds.md index row count == body ACTIVE count (4 == 4) | ✅ |
+| ../../../internal/workarounds.md index row count == body ACTIVE count (4 == 4) | ✅ |
 | ACTIVE bucket entries all have `Last-verified: 2026-10-01` footer | ✅ |
 | Flipped entries (W-077/W-078) have audit-flip paragraph in body | ✅ |
 | regress.py 158/158 PASS HOLD (no src0/ changes → auto-pass) | ✅ (no rebuild required) |
@@ -261,7 +261,7 @@ Per Step 1.1 verification matrix + Step 1.3 docs-only flips (per `merge-v2-axis-
 
 | # | Commit | Message | Type |
 |---|--------|---------|------|
-| 1 | (this commit) | `docs(audit): v4.0.1 ../../../workarounds.md ACTIVE bucket sync against main HEAD` | docs |
+| 1 | (this commit) | `docs(audit): v4.0.1 ../../../internal/workarounds.md ACTIVE bucket sync against main HEAD` | docs |
 | 2 | tag | `v4.0.1` | — |
 
 Total: 1 docs commit + 1 tag + 1 push.
@@ -271,7 +271,7 @@ Total: 1 docs commit + 1 tag + 1 push.
 ### References
 
 - v4.0.0-rc1 changelog: `docs/archive/logs/v4/changelog-v4.0.0.md`
-- ../../../workarounds.md audit-flip pattern: `docs/archive/logs/v3/changelog-v3.4.md` L11-87 (W-085 docs-only flip, 2026-09-29)
+- ../../../internal/workarounds.md audit-flip pattern: `docs/archive/logs/v3/changelog-v3.4.md` L11-87 (W-085 docs-only flip, 2026-09-29)
 - v4.0.1 plan: `~/.claude/plans/merge-v2-axis-v3-axis-into-main-serialized-aho.md` (audit + RCA 双 sprint plan)
 - Memory: `feedback_verify_active_reproduces`, `feedback_audit_single_commit_diff`, `feedback_changelog_umbrella`, `feedback_fix_evaluation_rule`, `feedback_rca_first_root_cause`, `feedback_git_identity_canonical`, `feedback_ssh_key_same_shell`, `feedback_codegen_amd64_multifn`, `feedback_memory_selectivity`
 - QBE git rm commit (per W-079 line 80): `6ae2d7c` (v3.1.0/Ph.3) — invalidates W-078 "QBE extsw fix 留 v3.x mid"
@@ -418,7 +418,7 @@ v4.0.2 内尝试 i64-store 真修 (~25 LOC):
 | bench.sh --report 5/5 PASS | ✅ (first-time baseline accepted per --report semantics) |
 | fixed_point.sh N≥3 byte-equal PASS | ❌ **W-074.6 multifn silent fail blocking (deferred to v4.0.2.1)** |
 | jhyy.exe compile main.jhyy → gcc link OK | ❌ **W-074.6 multifn silent fail blocking (deferred to v4.0.2.1)** |
-| ACTIVE bucket = 0 in ../../../workarounds.md | ⏳ ACTUAL = 1 (W-075 DEFERRED per user 2026-10-02 accept) |
+| ACTIVE bucket = 0 in ../../../internal/workarounds.md | ⏳ ACTUAL = 1 (W-075 DEFERRED per user 2026-10-02 accept) |
 | GHA ci.yml latest run: PASS | ⏳ (next push triggers; ci.yml + release.yml paths fixed) |
 | GHA release.yml latest dry_run: PASS | ⏳ (manual trigger after ci green) |
 
@@ -557,7 +557,7 @@ per `feedback_rca_first_root_cause` 1-iter RCA: per-fn pre-scan table 256 entrie
 ### References (v4.0.2.1 add)
 
 - v4.0.2.1 plan: `docs/archive/plans/v4/v4.0.2.1-plan.md` (NEW)
-- W-074.6 + W-096 entries: `docs/workarounds.md` (W-074.6 DEFERRED 维持, W-096 DEFERRED 新 entry)
+- W-074.6 + W-096 entries: `docs/internal/workarounds.md` (W-074.6 DEFERRED 维持, W-096 DEFERRED 新 entry)
 - v3.x mid W-096 emit-side per-fn-local counter plan: TBD (post-v4.0.2.1 ship 启动)
 - v4.0.0 final promote: TBD (post v3.x mid W-096 真修 ship)
 - Memory: `feedback_codegen_amd64_multifn` (multifn 误诊历史), `feedback_rca_first_root_cause` (3 sub-bug + W-096 RCA chain, 1-iter), `feedback_audit_single_commit_diff` (per-sub-bug 独立 commit, 可独立 audit), `feedback_verify_active_reproduces` (1024 cap 1-iter 验证), `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT` 必要性), `feedback_plans_per_version` (../../plans/v4/v4.0.2.1-plan.md 独立 minor plan, 不进 v4.0.2 umbrella)
@@ -644,7 +644,7 @@ fn cg_local_t_from_global(global_t: i64) -> i64 {
 
 ### References (v4.0.2.2 add)
 
-- W-096 entry: `docs/workarounds.md` (✅ RESOLVED 2026-10-08)
+- W-096 entry: `docs/internal/workarounds.md` (✅ RESOLVED 2026-10-08)
 - v3.x mid W-096 emit-side per-fn-local counter plan: 推 v4.0.2.3 (Stage 2 jhyy-side emit bug 单独 fix)
 - v4.0.0 final promote: TBD (post v4.0.2.3 Stage 2 closure 真修 ship)
 - Memory: `feedback_codegen_amd64_multifn` (5/5 gate 误诊历史), `feedback_rca_first_root_cause` (3 fix iter chain, 1-iter), `feedback_audit_single_commit_diff` (per-fix 独立 audit), `feedback_verify_active_reproduces` (1024 cap + emit-side 1-iter 验证), `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间 `cd $JHYY_ROOT`), `feedback_plans_per_version` (v4.0.2.2 独立 minor plan)
@@ -699,7 +699,7 @@ fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
 - 10 cases: n=0/1/4/7/8/9/16/17/24/32 + 8-byte broadcast pattern verify
 - EXIT=0 on C-side jhyy.exe
 
-#### 3. `docs/workarounds.md` — W-075 flip RESOLVED + W-098 NEW ACTIVE
+#### 3. `docs/internal/workarounds.md` — W-075 flip RESOLVED + W-098 NEW ACTIVE
 
 - W-075: ✅ RESOLVED 2026-10-09 (v4.0.2.3 wip) — workaround ship, comprehensive test PASS
 - W-098: NEW ACTIVE — jhyy-side codegen emit i64 literal (>32-bit range) 截 i32 + cltq sign-extend 丢高 32 位;W-097 deep audit sprint 同步修
@@ -752,8 +752,8 @@ fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
 
 ### References
 
-- W-075 entry: `docs/workarounds.md` (✅ RESOLVED 2026-10-09)
-- W-098 entry: `docs/workarounds.md` (NEW ACTIVE 2026-10-09)
+- W-075 entry: `docs/internal/workarounds.md` (✅ RESOLVED 2026-10-09)
+- W-098 entry: `docs/internal/workarounds.md` (NEW ACTIVE 2026-10-09)
 - 源码: `compiler/src0/std/mem.jhyy:mem_set` (b32|shift|OR workaround)
 - 源码: `compiler/tests/examples/std_mem_set_aligned.jhyy` (10 cases + byte-by-byte verify)
 - Memory: `feedback_fix_evaluation_rule` (5/5 PASS on target test), `feedback_rca_first_root_cause` (1-iter 找 W-098 真因, 不是 multifn frame), `feedback_audit_single_commit_diff` (W-096 fix 4 revert 单 commit audit), `feedback_verify_active_reproduces` (W-075 第 1 撤回前的 multifn frame 误判历史教训)
@@ -858,7 +858,7 @@ regress 160/161 PASS (1 pre-existing `std_math_basic` per baseline, per `feedbac
 - `_audit_w098_binop.jhyy` — binop sub path 验证
 - `_audit_w098_b8.jhyy` — mem_set use case (`0x0101010101010101`)
 
-#### 5. `docs/workarounds.md` — W-098 ACTIVE → ✅ RESOLVED
+#### 5. `docs/internal/workarounds.md` — W-098 ACTIVE → ✅ RESOLVED
 
 flip 状态 + 补 "真修" 段 (3-tier detail) + 更新 "影响范围" (post-fix silent fail 消除) + 更新 "引用" (加 source file:line refs)。
 
@@ -1009,10 +1009,10 @@ emit_binop writes sete result to -16512(%rbp) (.s line 70238) → CLOBBER %t9191
 
 ### 引用
 
-- ../../../workarounds.md W-101 entry: `docs/workarounds.md` (attempt #1-#5 REVERTED ledger, 5 entries)
-- ../../../workarounds.md W-097 entry: `docs/workarounds.md` (✅ RESOLVED in `080582e`)
-- ../../../workarounds.md W-098 entry: `docs/workarounds.md` (✅ RESOLVED in `1f266b2`)
-- ../../../workarounds.md W-100 entry: `docs/workarounds.md` (✅ RESOLVED in `080582e`)
+- ../../../internal/workarounds.md W-101 entry: `docs/internal/workarounds.md` (attempt #1-#5 REVERTED ledger, 5 entries)
+- ../../../internal/workarounds.md W-097 entry: `docs/internal/workarounds.md` (✅ RESOLVED in `080582e`)
+- ../../../internal/workarounds.md W-098 entry: `docs/internal/workarounds.md` (✅ RESOLVED in `1f266b2`)
+- ../../../internal/workarounds.md W-100 entry: `docs/internal/workarounds.md` (✅ RESOLVED in `080582e`)
 - v4.0.4 plan: `docs/archive/plans/v4/v4.0.4-plan.md` (1-iter RCA + minimal repro + targeted fix strategy)
 - v4.0.3 audit: `docs/archive/audit/v4.0.3-codegen-deep-audit.md` (6 维度 + Fix direction 错被 attempt #4 override)
 - W-097 audit: `docs/archive/audit/w-097-emit-audit-checklist.md` (25 sites 跨 10 src0/ 文件, 但实际 7-site fix ship 足)
@@ -1153,7 +1153,7 @@ W-101 (ACTIVE since 2026-10-09) 仍 ACTIVE — fix direction (separate address-h
 - v4.0.4 plan: `docs/archive/plans/v4/v4.0.4-plan.md` (Step 1 logging strategy + Step 2 bitmap attempt)
 - v4.0.3 audit: `docs/archive/audit/v4.0.3-codegen-deep-audit.md` (维度 2 disjoint 假设错 + § 5 separate address-holder pool direction)
 - v4.0.3 plan: `docs/archive/plans/v4/v4.0.3-plan.md` (4 attempts REVERTED same trap)
-- ../../../workarounds.md W-101 entry: `docs/workarounds.md` (6 REVERTED attempts detailed ledger)
+- ../../../internal/workarounds.md W-101 entry: `docs/internal/workarounds.md` (6 REVERTED attempts detailed ledger)
 - jhyy.exe baseline sha `54e8ae5d8...` (含 Step 1 logging, 无 v4.0.5 fix)
 - jhyy_v405.exe.exe ship sha `22929a80...` (含 v4.0.5 fix, REVERTED)
 - jhyy_v1_new.exe.s smoking gun: `compiler/build/bin/jhyy_v1_new.exe.s:70100` (`movq %rax, -16512(%rbp)` 写 %t9191 但 runtime 0)
@@ -1284,7 +1284,7 @@ v407 .s 跟 baseline .s subq + lea count 完全相同。frame_size + address-hol
 - v4.0.5 plan: `docs/archive/plans/v4/v4.0.5-plan.md` (~290 行, supersedes v4.0.3 + v4.0.4 plans)
 - v4.0.4 changelog: [`changelog-v4.0.4.md`](#v404) (Step 1 logging ship + Step 2 bitmap REVERTED)
 - v4.0.3 audit: `docs/archive/audit/v4.0.3-codegen-deep-audit.md` (维度 2 disjoint 假设错 + § 5 separate address-holder pool direction)
-- ../../../workarounds.md W-101 entry: `docs/workarounds.md` (7 attempts ledger)
+- ../../../internal/workarounds.md W-101 entry: `docs/internal/workarounds.md` (7 attempts ledger)
 - jhyy.exe baseline sha `54e8ae5d8...` (含 Step 1 logging, 无 v4.0.6 fix)
 - jhyy_v407.exe.exe ship sha `2d14b2b8...` (含 v4.0.6 fix, 781673B, attempt #7 SUCCESS)
 - jhyy_v405_attempt6.exe.exe ship sha `22929a80...` (含 v4.0.5 fix, REVERTED, attempt #6 1-arg caller bug)
@@ -1296,7 +1296,7 @@ v407 .s 跟 baseline .s subq + lea count 完全相同。frame_size + address-hol
 ## v4.0.12 — SysV MEMORY class(>16B struct 走栈)· W-104 闭合
 
 **2026-10-20。** W-104 是最后一条「违反 locked ABI 规范」的 ACTIVE —— 现在
-**RESOLVED**。台账:`docs/workarounds.md` W-104。
+**RESOLVED**。台账:`docs/internal/workarounds.md` W-104。
 
 ### 修了什么
 
@@ -1357,7 +1357,7 @@ artifact 级门:    sysv_mixed_struct / sysv_memory_class / sysv_arg_spill 全 P
 
 **2026-10-20。** W-114(全 unit-variant 的 enum `match` 永远命中第一支)是最后
 一条「核心语言功能静默失效」的 ACTIVE —— 现在 **RESOLVED**。台账:
-`docs/workarounds.md` W-114 / W-119。
+`docs/internal/workarounds.md` W-114 / W-119。
 
 ### RCA 推翻了原描述
 
@@ -2751,7 +2751,7 @@ import / fn 类型参数 / type 类型参数 / fn 与 type 同名 / 全局 let �
 ⇒ 归一化。**不编造历史**:日期取自原行或条目的 `**日期:**` 字段;版本取自原行、
 条目正文或 changelog 的「日期→版本」映射;取不到就**如实报告**(最后 3 条按
 changelog 证据手工判定为 v1.5.6)。原状态行里塞不下的 commit ref / audit 说明
-搬进**新增的 `**提交/说明:**` 字段**(信息不丢;字段已写进 `docs/workarounds.md` §2)。
+搬进**新增的 `**提交/说明:**` 字段**(信息不丢;字段已写进 `docs/internal/workarounds.md` §2)。
 
 ⇒ 结果:**136 条状态行全部合规** / **0 ACTIVE**(125 RESOLVED + 8 SUPERSEDED +
 2 INVALID)/ 150 个锚点 0 重复 / 142 条索引链接 **0 死链** / 重建索引**幂等**
@@ -3346,7 +3346,7 @@ Sprint ordering may be re-parallelized (not strictly serial) per dep graph: v4.3
 - **Memory**: `project_v2_v3_final.md` (2026-09-29 user FINAL 决定 v2/v3 closure)
 - **Self-backend RCA**: `feedback_v3_self_backend_diverges_v2.md` + `feedback_codegen_amd64_run_zerobyte.md` (V3 self-backend bugs真修 in v3.4.x chain)
 - **D43 baseline**: `docs/archive/logs/v2/d43-baseline-archive.md` (v2.14.0 N≥10 baseline `43fee332...` HOLD through v4.0.0)
-- **Workaround history**: `docs/workarounds.md` (77 RESOLVED + 5 SUPERSEDED + 2 INVALID + 1 permanently deferred)
+- **Workaround history**: `docs/internal/workarounds.md` (77 RESOLVED + 5 SUPERSEDED + 2 INVALID + 1 permanently deferred)
 
 ---
 

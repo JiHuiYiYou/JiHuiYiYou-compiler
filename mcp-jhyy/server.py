@@ -61,7 +61,7 @@ Routing (intent → tool):
 - verify selfhost closure (v1→v2→v3 byte-equal) → jhyy_selfhost_check
 - search workarounds / "is W-XXX still active" → jhyy_workarounds
 
-DO NOT: Bash("jhyy.exe ..."), Bash("python regress*.py"), Bash("sha256sum *.il"), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"), Read("docs/workarounds.md"). Use the tools above.
+DO NOT: Bash("jhyy.exe ..."), Bash("python regress*.py"), Bash("sha256sum *.il"), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"), Read("docs/internal/workarounds.md"). Use the tools above.
 
 Default to jhyy_run for any "run" / "test" intent. Default to jhyy_regress for any "verify nothing regressed" intent.
 """
@@ -384,7 +384,7 @@ def jhyy_selfhost_check(
 
 @mcp.tool
 def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
-    """Search the workarounds registry (docs/workarounds.md) by keyword or W-XXX ID.
+    """Search the workarounds registry (docs/internal/workarounds.md) by keyword or W-XXX ID.
 
     USE THIS WHEN investigating a known bug pattern or checking if a workaround is ACTIVE.
     Triggers: "is W-005 still active", "what's the workaround for X",
@@ -404,7 +404,7 @@ def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
          deferred_count, invalid_count, unknown_count,
          total}
 
-    v2.13.6 mini: default path = cwd git worktree 的 docs/workarounds.md
+    v2.13.6 mini: default path = cwd git worktree 的 docs/internal/workarounds.md
     (worktree-aware, 解决 axis-vN isolation 问题 per feedback_axis_vn_worktree_isolation).
     Fallback to script parents[1] (旧 main-bound 行为).
 

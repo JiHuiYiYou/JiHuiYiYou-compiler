@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""文档事实对拍门 —— 让 [`docs/FACTS.md`](../../docs/FACTS.md) 真的是「唯一真相源」。
+"""文档事实对拍门 —— 让 [`docs/internal/FACTS.md`](../../docs/internal/FACTS.md) 真的是「唯一真相源」。
 
 **为什么需要这道门(2026-10-30 实测)**:
 本仓曾把「回归通过数」写在 **31 份文档**里、把「ACTIVE 数」写在 25 份里。
@@ -28,7 +28,7 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-FACTS = ROOT / "docs" / "FACTS.md"
+FACTS = ROOT / "docs" / "internal" / "FACTS.md"
 
 problems: list[str] = []
 
@@ -85,9 +85,9 @@ def check_version() -> None:
         elif m.group(1) != version:
             fail(f"{rel}: 徽章版本 {m.group(1)} != VERSION {version}")
     if not FACTS.is_file():
-        fail("docs/FACTS.md 不存在 —— 事实单一真相源必须在")
+        fail("docs/internal/FACTS.md 不存在 —— 事实单一真相源必须在")
     elif version not in read(FACTS):
-        fail(f"docs/FACTS.md 里没有出现当前版本 {version}")
+        fail(f"docs/internal/FACTS.md 里没有出现当前版本 {version}")
 
 
 # --------------------------------------------------------------------------
@@ -137,9 +137,9 @@ def declared() -> dict:
 # B/C. 与现实对拍
 # --------------------------------------------------------------------------
 def check_ledger(d: dict) -> None:
-    wm = ROOT / "docs" / "workarounds.md"
+    wm = ROOT / "docs" / "internal" / "workarounds.md"
     if not wm.is_file():
-        fail("docs/workarounds.md 不存在")
+        fail("docs/internal/workarounds.md 不存在")
         return
     text = read(wm)
     idx_rows = len(re.findall(r"^\| \[W-", text, re.M))
@@ -178,7 +178,7 @@ def check_pass_consistency(d: dict) -> None:
     want = d["pass"]
     for p in all_md():
         rel = p.relative_to(ROOT).as_posix()
-        if rel.startswith("docs/archive/") or rel == "docs/workarounds.md":
+        if rel.startswith("docs/archive/") or rel == "docs/internal/workarounds.md":
             continue          # 历史记录不追溯;台账每条 entry 的证据都是当时快照
         body = re.sub(r"```.*?```", "", read(p), flags=re.S)
         for line in body.splitlines():
@@ -311,7 +311,7 @@ def check_facts_links() -> None:
             continue
         cand = (FACTS.parent / urllib.parse.unquote(t)).resolve()
         if not cand.exists():
-            fail(f"docs/FACTS.md: 引用的文件不存在 → {t}")
+            fail(f"docs/internal/FACTS.md: 引用的文件不存在 → {t}")
 
 
 # --------------------------------------------------------------------------
@@ -331,7 +331,7 @@ def main() -> int:
         print(f"\n[docs_facts_check] FAIL —— {len(problems)} 处漂移:")
         for p in problems:
             print("  x", p)
-        print("\n  修法:数字只写在 docs/FACTS.md,其它文档改成引用它;")
+        print("\n  修法:数字只写在 docs/internal/FACTS.md,其它文档改成引用它;")
         print("       或改 FACTS.md 让它与现实一致。")
         return 1
     print("\n[docs_facts_check] OK —— 事实与现实一致,无断链。")

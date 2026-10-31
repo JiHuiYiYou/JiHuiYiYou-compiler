@@ -23,7 +23,7 @@
 |------|--------------|-------------|---|
 | regress PASS (C-side jhyy_stage0.exe) | 54/54 + 3 SKIP | **78/82 PASS + 4 SKIP** | +24 PASS |
 | regress PASS (jhyy.exe jhyy-side) | 54/54 + 3 SKIP | **78/82 PASS + 4 SKIP** | +24 PASS |
-| ACTIVE workaround 数 | W-053 + W-054 + 多个 W-NNN (per ../../../workarounds.md) | -1 (W-053 RESOLVED, W-054 改方案) | -1 |
+| ACTIVE workaround 数 | W-053 + W-054 + 多个 W-NNN (per ../../../internal/workarounds.md) | -1 (W-053 RESOLVED, W-054 改方案) | -1 |
 | src/ src0 byte-equal closure | ✅ (Stage 2 闭环) | ✅ (Stage 2 闭环仍闭) | unchanged |
 | 新 test 数 | — | 13 个 | +13 |
 
@@ -164,7 +164,7 @@
 ### 文档
 
 - `docs/archive/logs/v1/changelog-v1.6.0.md` (本文件,新建)
-- `docs/workarounds.md` — W-053 RESOLVED + W-054 改方案 + W-055 ACTIVE (3 节)
+- `docs/internal/workarounds.md` — W-053 RESOLVED + W-054 改方案 + W-055 ACTIVE (3 节)
 
 ### 删除 / 改名 (Stage 1)
 

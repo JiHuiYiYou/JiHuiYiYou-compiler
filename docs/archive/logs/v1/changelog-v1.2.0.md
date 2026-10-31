@@ -12,7 +12,7 @@
 
 **类型**: cleanup (workaround 代码撤回)
 **估时**: 0.5 sprint
-**../../../workarounds.md**: W-005 状态从 ACTIVE → "code revert 完,v0 fix ship 已闭环" (等 v1.2.5 doc sync 标 RESOLVED)
+**../../../internal/workarounds.md**: W-005 状态从 ACTIVE → "code revert 完,v0 fix ship 已闭环" (等 v1.2.5 doc sync 标 RESOLVED)
 
 ### 工作
 
@@ -63,7 +63,7 @@
 - v1.2.2 W-003 `let _ = fncall()` revert (24 处,跨 codegen.jhyy / main.jhyy / _driver_*)
 - v1.2.3 `_v1` 后缀 119 处 cross-file cleanup (参数名 + 临时变量)
 - v1.2.4 `_v2`/`_v3`/`_v4`/`_v5` 后缀 84 处 cleanup
-- v1.2.5 doc 同步 (../../../workarounds.md W-XXX 标 RESOLVED + changelog + status.md "src0/ 自然化" section)
+- v1.2.5 doc 同步 (../../../internal/workarounds.md W-XXX 标 RESOLVED + changelog + status.md "src0/ 自然化" section)
 - v1.3 (下一阶段) v1.x 语法糖 Phase 4 — null / else if / sizeof / for-in / `#[inline]` / defer / Pattern binding / OR pattern
 
 ### 引用
@@ -78,7 +78,7 @@
 
 **类型**: cleanup (workaround 代码撤回)
 **估时**: 0.5 sprint
-**../../../workarounds.md**: W-003 状态从 ACTIVE → "code revert 完,v0 fix ship 已闭环" (等 v1.2.5 doc sync 标 RESOLVED)
+**../../../internal/workarounds.md**: W-003 状态从 ACTIVE → "code revert 完,v0 fix ship 已闭环" (等 v1.2.5 doc sync 标 RESOLVED)
 
 ### 工作
 
@@ -142,7 +142,7 @@
 
 **类型**: cleanup (workaround 后缀撤回)
 **估时**: 0.5 sprint
-**../../../workarounds.md**: 不直接对应 W-XXX,但属于 v1.1.0 batch ship 后的 stale-name 防御清理
+**../../../internal/workarounds.md**: 不直接对应 W-XXX,但属于 v1.1.0 batch ship 后的 stale-name 防御清理
 
 ### 工作
 
@@ -196,7 +196,7 @@
 ### 留给后续
 
 - v1.2.4 `_v2`/`_v3`/`_v4`/`_v5` 后缀 84 处 cleanup (同模式)
-- v1.2.5 doc 同步 (../../../workarounds.md + status.md + changelog 收尾)
+- v1.2.5 doc 同步 (../../../internal/workarounds.md + status.md + changelog 收尾)
 - v1.3 (下一阶段) v1.x 语法糖
 
 ### 引用
@@ -210,7 +210,7 @@
 
 **类型**: cleanup (workaround 后缀撤回)
 **估时**: 0.5 sprint
-**../../../workarounds.md**: 不直接对应 W-XXX,跟 v1.2.3 同模式,延续 stale-name 防御清理
+**../../../internal/workarounds.md**: 不直接对应 W-XXX,跟 v1.2.3 同模式,延续 stale-name 防御清理
 
 ### 工作
 
@@ -264,7 +264,7 @@
 
 ### 留给后续
 
-- v1.2.5 doc 同步 (../../../workarounds.md W-XXX 标 RESOLVED + status.md "src0/ 自然化" section + changelog 收尾)
+- v1.2.5 doc 同步 (../../../internal/workarounds.md W-XXX 标 RESOLVED + status.md "src0/ 自然化" section + changelog 收尾)
 - v1.3 (下一阶段) v1.x 语法糖
 
 ### 引用
@@ -275,11 +275,11 @@
 
 ---
 
-## v1.2 wip commit 1.5 — Doc sync (../../../workarounds.md + status.md + changelog 收尾) — 2026-08-12
+## v1.2 wip commit 1.5 — Doc sync (../../../internal/workarounds.md + status.md + changelog 收尾) — 2026-08-12
 
 **类型**: doc-only (no code change)
 **估时**: 0.3 sprint
-**../../../workarounds.md**: W-005 / W-003 状态从 "code revert 完" → "完整闭环 (v0 fix ship + src0/ 代码撤回双 ship)"
+**../../../internal/workarounds.md**: W-005 / W-003 状态从 "code revert 完" → "完整闭环 (v0 fix ship + src0/ 代码撤回双 ship)"
 
 ### 工作
 
@@ -288,7 +288,7 @@
   - 下一阶段: v2.x/v3.x → **v1.3 (v1.x 语法糖 Phase 4)** 优先 (per user feedback 2026-08-12)
   - 新增 § "src0/ 自然化 (v1.2.0 sprint, 2026-08-12 ship)" section: 4 sprint 一览表 + 纯 rename 验证 (跨 4 commit 7 行 cascade 一致) + 不动的 defense 列表 + Plan / 记录链接
 
-- **`docs/workarounds.md` 修改**:
+- **`docs/internal/workarounds.md` 修改**:
   - § W-005 末尾加 "v1.2.0 cross-ref" 段: 16 处 revert + 99 处 `_vN` cleanup + 完整闭环确认
   - § W-003 RESOLVED 段加 "v1.2.0 cross-ref" 段: 24 处 revert + out-of-scope "29 处" 实际工作已 ship 确认
   - List 表格 (line 30 + 32) W-003 / W-005 状态文字已 ship 状态文档对齐全
@@ -297,7 +297,7 @@
 
 ### 验证
 
-- **doc 一致性**: ../../../workarounds.md (W-005/W-003 cross-ref) / changelog-v1.2.0.md (commit 1.1-1.5 完整) / status.md (新 src0/ 自然化 section) 三方对齐 ✅
+- **doc 一致性**: ../../../internal/workarounds.md (W-005/W-003 cross-ref) / changelog-v1.2.0.md (commit 1.1-1.5 完整) / status.md (新 src0/ 自然化 section) 三方对齐 ✅
 - **不需 code regress** (doc-only): 仍跑双 50/50 守门 ✅
   - regress.py 50/50 PASS (jhyy.exe sha `d442ba3f...`)
   - regress_v1.py 50/50 PASS (jhyy_v1.exe.exe sha `ba94df93...`)
@@ -331,6 +331,6 @@
 
 - v1.2.1/v1.2.2/v1.2.3/v1.2.4 changelog — 4 sprint 完整 ship 记录
 - `docs/internal/status.md` § src0/ 自然化 — status.md 新 section
-- [docs/workarounds.md](../../../workarounds.md) — ../../../workarounds.md v1.2.0 cross-ref
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — ../../../internal/workarounds.md v1.2.0 cross-ref
 - [[project-v1-0-post-50-53-plan]] § Phase 3.1 — W-005 / W-003 / `_vN` 清理原始 plan
 - [[project-sprint-v1-1-2-c-side-divergence]] — C-side vs jhyy_v1 IL divergence

@@ -2,7 +2,7 @@
 
 > **装机用户唯一入口文档。**
 >
-> **版本号与产物尺寸见 [`docs/FACTS.md`](../docs/FACTS.md) § 1** —— 不要在这里复述。
+> **版本号与产物尺寸见 [`docs/internal/FACTS.md`](../docs/internal/FACTS.md) § 1** —— 不要在这里复述。
 
 ---
 

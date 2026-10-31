@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/vscode-ext/package
 ⚠️ `package.json` 里的 `"version": "0.1.0"` 是 **manifest 模板的内部字段，不动**
 —— 打包时脚本按 `$JHY_VERSION` 原地替换它（避免 JSON 重排版污染 diff）。
 
-**版本号与产物名见 [`docs/FACTS.md`](../docs/FACTS.md) § 1。**
+**版本号与产物名见 [`docs/internal/FACTS.md`](../docs/internal/FACTS.md) § 1。**
 
 ---
 

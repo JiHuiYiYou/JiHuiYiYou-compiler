@@ -439,7 +439,7 @@ feat(cap-table): add CapTable<T> + cross-function cap pass (3g.7)
 |------|------|------|
 | dedup (1) + NULL guard (3) + dead code (2) + merge artifact (3) | -14 + 9 + -10 + ~30 (net) | codegen_amd64.jhyy + parser.c + sema.c + main.jhyy + codegen.jhyy + codegen_amd64_emit_call.jhyy |
 | v3.1.3 carry-over (Cap/PhantomData + test) | +18 + 38 | abi_amd64_sysv.jhyy + cap_test_sysv.jhyy |
-| 文档 (本段) | +本段 ~80 行 | changelog-v3.1.md + ../../../workarounds.md + jhyy-abi-v1.0.0.md § 13.x |
+| 文档 (本段) | +本段 ~80 行 | changelog-v3.1.md + ../../../internal/workarounds.md + jhyy-abi-v1.0.0.md § 13.x |
 
 **Out of scope (留 v3.x 末)**:
 - C-side `NodeFuncDecl` 加 `is_naked` / `type_params` 字段 (Agent 1 推测 layout drift, GDB 验证 false positive, defer)
@@ -540,7 +540,7 @@ v3.1.4 ship 时 § 5 G1 验证项 (`cap_test_sysv.jhyy` 走 `--target=amd64_sysv
 ## 6. 文档 / Documentation
 
 - (新增段) ABI spec `jhyy-abi-v1.0.0.md` § 13.x SysV Cap/PhantomData class 增补 (从 v3.1.3 计划 carry-over)
-- (新增) ../../../workarounds.md W-068 真修 v2 entry (3 root cause + NULL guard 4 处 + 修后 baseline hold)
+- (新增) ../../../internal/workarounds.md W-068 真修 v2 entry (3 root cause + NULL guard 4 处 + 修后 baseline hold)
 - (本段) changelog-v3.1.md v3.1.4 段
 
 ---

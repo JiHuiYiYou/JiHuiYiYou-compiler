@@ -76,7 +76,7 @@ run3 "B2 jhyy_v1.exe    compile src0/main.jhyy"  "$JHYV_V1 compile $MAIN -o $OUT
 #      (只有 JHY_WRITE_IL=1 才落),所以前置的「jhyy build 补生成」也补不出来;
 #   ③ 实测 qbe 对不存在的文件 exit 1 + "cannot open" + 产出 0 字节 ⇒
 #      run3 报的那个耗时是**进程启动时间**,不是编译时间。
-# ⇒ 整段删除;`qbe/` 目录也一并从仓里删掉(见 docs/workarounds.md)。
+# ⇒ 整段删除;`qbe/` 目录也一并从仓里删掉(见 docs/internal/workarounds.md)。
 
 echo
 echo "===== File sizes ====="

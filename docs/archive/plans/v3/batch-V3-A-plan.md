@@ -156,7 +156,7 @@
 - `compiler/src0/main.jhyy`(link line + entry 切换,~20 行)
 - `compiler/runtime/runtime.c`(注释更新)
 - `compiler/build/bin/regress.py`(无改动;no_std test 单独跑)
-- `docs/workarounds.md`(W-068 no_std workaround)
+- `docs/internal/workarounds.md`(W-068 no_std workaround)
 
 ## Commit / tag 节奏
 

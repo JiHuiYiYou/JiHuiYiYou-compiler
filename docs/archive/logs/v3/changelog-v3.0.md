@@ -607,7 +607,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 - `compiler/tests/examples/char_literal_4byte.jhyy` (emoji `'🎉'` U+1F389 = 127881, UTF-8: F0 9F 8E 89) — EXIT=0
 
 **Docs update**:
-- `docs/workarounds.md` W-057 flip 🟡 DEFERRED → ✅ RESOLVED (line 59 索引 + line 3852+ body section)。
+- `docs/internal/workarounds.md` W-057 flip 🟡 DEFERRED → ✅ RESOLVED (line 59 索引 + line 3852+ body section)。
 - `docs/archive/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` NEW (per-version plan file per `feedback_plans_per_version`)。
 - `README.md` v3.0.6/Ph.1 row append。
 
@@ -647,7 +647,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 4. `compiler/tests/examples/fmod_f32.jhyy` NEW (`7.0_f32 % 2.0_f32` exit=1, polymorphic f32 fold `stosi` variant)。
 
 **Docs update**:
-- `docs/workarounds.md` W-058 flip 🟡 DEFERRED → ✅ RESOLVED (line 60 索引 + line 3905+ body section rewrite with Resolution 段)。
+- `docs/internal/workarounds.md` W-058 flip 🟡 DEFERRED → ✅ RESOLVED (line 60 索引 + line 3905+ body section rewrite with Resolution 段)。
 - `docs/archive/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.2 status flip 📋 → ✅ + V3 line offset 实测 -49 (修正 audit fix #3 的 -74 估时)。
 - `README.md` v3.0.6/Ph.2 row append (after Ph.1 row)。
 
@@ -693,7 +693,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 - **Layer 3 (更深层, defer)**: 即使 emit_* 字段约定统一, lexer 也**不 consume operand** — `next_token_binop`/`copy` 等不 consume src operand, `lex_il` 跳过未知 byte;emit_* 假设 src 在 token 里, 但 token 里没 src
 
 **Docs update**:
-- `docs/workarounds.md` W-083 flip 🟡 DEFERRED → ✅ RESOLVED (line ~3966+ body section)+ W-086 NEW 🟡 DEFERRED entry (Layer 2 + Layer 3 RCA + 假阳性 byte_equal_amd64 5/5 PASS 证据 + 真修路径 v3.0.7)
+- `docs/internal/workarounds.md` W-083 flip 🟡 DEFERRED → ✅ RESOLVED (line ~3966+ body section)+ W-086 NEW 🟡 DEFERRED entry (Layer 2 + Layer 3 RCA + 假阳性 byte_equal_amd64 5/5 PASS 证据 + 真修路径 v3.0.7)
 - `docs/archive/plans/v3/v3.0.6-port-v2.16.0-src0-closure.md` Ph.3 section rewrite with 3-layer RCA + revised verification gate (default QBE backend 3/3 PASS ✅ / JHY_SELF_BACKEND=1 ❌ defer W-086 真修)
 - `README.md` v3.0.6/Ph.3 row append (after Ph.2 row)
 
@@ -773,7 +773,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
 1. **Commit 0** `infra(v3.0.7/Commit 0): V2 self-backend golden .s 入库 (Gate-0 [2/4] 对照基线)` — `d51155e`
    - 3 V2 v2.16.0 self-backend 实际产出 .s 入仓到 `compiler/tests/bootstrap/baseline_v2_self/` (fmod_basic.s / fmod_negative.s / fmod_f32.s)
    - 造 Gate-0 红灯: V3 self-backend 0-byte .s → Gate-0 3/3 FAIL
-   - 关联: W-086 NEW defer 入 ../../../workarounds.md
+   - 关联: W-086 NEW defer 入 ../../../internal/workarounds.md
 2. **Commit 1** `fix+infra(v3.0.7/Commit 1): V3 self-backend W-083/W-086 wholesale 真修 (merge-file 8 codegen_amd64_*.jhyy + strcmp + state cast + cltq + 2-op form)` — pending ship
    - **`git merge-file` wholesale**: V3/V2 共同祖先 `516821924613eba26cb5153bc8882814a783effe`, 8 codegen_amd64_*.jhyy (state/lexer/emit_call/emit_ctrl/emit_mem/regalloc/peephole + main) merge, **保留 V3 modular split 命名**
    - **strcmp migration**: 16 处 `op_name == ("X" as *u8)` → `strcmp(op_name, ("X" as *u8)) == (0 as i32)` (jhyy `==` on `*u8` 是 pointer compare NOT string compare, hang)
@@ -793,7 +793,7 @@ v3.0.5 tag push (`d742b32`) 触发 release.yml CI 跑 gated regress → jhyy_sta
   - fmod_f32: V3 self-backend sha=`e6346d245ed4b6ed...` byte-equal to V2 v2.16.0 self-backend golden sha=`e6346d245ed4b6ed...`
 - **regress 142/142 PASS / 0 FAIL / 20 SKIP** preserved (default QBE path + JHY_SELF_BACKEND=1 self-backend path 双绿); `_regress_*.exe` 清 stale 后 FRESH total 162 (per `feedback_regress_clean_count`)
 - **jhyy.exe sha** `bc98c633ca924f1f...` post-Commit 1+2 rebuild
-- **W-086 + W-083 status flip**: 🟡 DEFERRED / ⏳ RESOLVED-pending-verification → ✅ RESOLVED 2026-09-23 (../../../workarounds.md 索引行 + body section 同步更新)
+- **W-086 + W-083 status flip**: 🟡 DEFERRED / ⏳ RESOLVED-pending-verification → ✅ RESOLVED 2026-09-23 (../../../internal/workarounds.md 索引行 + body section 同步更新)
 
 ### Why this sprint existed (vs. W-083 alone, post-v3.0.6/Ph.3)
 
@@ -808,7 +808,7 @@ per 用户 2026-09-23 三选项决策 (1/4): "选项 4 + strict sha 锁. 6-8 个
 
 ### References
 
-- ../../../workarounds.md: W-086 ✅ RESOLVED entry + W-083 ✅ RESOLVED entry (索引行 + body section 同步)
+- ../../../internal/workarounds.md: W-086 ✅ RESOLVED entry + W-083 ✅ RESOLVED entry (索引行 + body section 同步)
 - Gate-0 script: `compiler/tests/bootstrap/byte_equal_selfbackend.sh` (244 LOC, [2/4] adaptive sha strategy + 4 gate 总 — `.s non-empty` + `strict sha` + `gcc link` + `exit code`)
 - V2 golden: `compiler/tests/bootstrap/baseline_v2_self/v2_self_*.s` (3 .s 入仓)
 - V3 merge base: `516821924613eba26cb5153bc8882814a783effe`
@@ -829,7 +829,7 @@ V3-B ✅ ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 um
 
 ## v3.0.9 — V3 self-backend per-fn alloc pool pre-scan 真修 (W-087 frame offset 越界) — 2026-09-23 ✅ shipped
 
-**Status**: ✅ **shipped** (single commit + jhyy.exe/jhyy_stage0.exe rebuild + SHA baseline refresh + ../../../workarounds.md W-087 entry)
+**Status**: ✅ **shipped** (single commit + jhyy.exe/jhyy_stage0.exe rebuild + SHA baseline refresh + ../../../internal/workarounds.md W-087 entry)
 
 **Trigger**: 2026-09-23 phase 5 binary regress (QBE removed + self-backend sole path) 暴露 19 std_* test 全 STACK_OVERFLOW (`JHY_SELF_BACKEND=1 jhyy.exe run std_*.jhyy` exit=127)。per `feedback_rca_first_root_cause` 1 iter RCA: 19/19 = 100% 同根因 = frame size 不含 alloc pool region → store 到 -8200(%rbp) 越界。
 
@@ -853,7 +853,7 @@ V3-B ✅ ship 后由 V3-C sprint 设计 fill in — 3 sub-sprint 累计到本 um
 - `compiler/src0/codegen_amd64_state.jhyy`: +75 LOC (struct 字段 + cg_state_init alloc + cg_token_alloc_size helper + cg_compute_per_fn_max_temps Phase 2 扩展)
 - `compiler/build/bin/jhyy.exe` + `compiler/build/bin/jhyy_stage0.exe`: rebuild
 - `compiler/build/bin/jhyy.exe.sha256`: refresh to `dc670c1f4cf48841...`
-- `docs/workarounds.md`: W-087 NEW entry + 索引行 (✅ RESOLVED)
+- `docs/internal/workarounds.md`: W-087 NEW entry + 索引行 (✅ RESOLVED)
 
 **Memory 更新**: `feedback_v3_self_backend_diverges_v2.md` 翻 "146 DIFFs are V3's debt" → "frame offset 越界是 V3 真债（W-087 修了）, 其余 3 类 DIFF 是 V2 共享特性" (per user 2026-09-23 反馈 "别写'146 差异都是债'")。
 

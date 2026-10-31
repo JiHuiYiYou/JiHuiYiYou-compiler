@@ -334,7 +334,7 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - Why re-baseline: 加 3 个 state 函数 (`target_is_win` / `cg_offset_for_temp_with_target` / `compute_offset_for_temp_id_with_target`) → ndeccls 1031 → 1034 → IL 591082 → 592311 bytes → sha 必须变
 - v1 编 = v2 编 (D43 closure invariant 仍 hold;只是具体 sha 值变了)
 - Win path emit logic byte-equal hold(20 PASS byte_equal_amd64 baseline verify 确认)
-- `../../../workarounds.md` W-069 closure invariant entry 已 update,`../../../internal/architecture.md` D43 lock line 163 已 update
+- `../../../internal/workarounds.md` W-069 closure invariant entry 已 update,`../../../internal/architecture.md` D43 lock line 163 已 update
 
 **scope (实际 v2.8.0 Commit 1 落地, ~245 LOC jhyy-side)**:
 - ✅ `compiler/src0/codegen_amd64_state.jhyy` — 3 helpers (~30 LOC)
@@ -344,7 +344,7 @@ docker run --rm -v /c/...:/work gcc:12 bash -c "
 - ✅ `compiler/src0/codegen_amd64.jhyy` — codegen_amd64_run + parse_and_emit 接 target_tag (~10 LOC)
 - ✅ `compiler/src0/main.jhyy` — run_backend 传 t (~3 LOC)
 - ✅ `docs/archive/logs/v2/d43-baseline-archive.md` — 旧 baseline 退役 + 新 baseline 采 (~10 LOC)
-- ✅ `docs/workarounds.md` W-069 entry — closure invariant 改 (~3 LOC)
+- ✅ `docs/internal/workarounds.md` W-069 entry — closure invariant 改 (~3 LOC)
 - ✅ `docs/internal/architecture.md` D43 lock — baseline sha 改 (~3 LOC)
 
 **Phase 1 critical files**:
@@ -429,7 +429,7 @@ amd64_sysv_freestanding target: 实现留 v2.7.1
 - v2.8.1 plan: [`docs/archive/plans/v2/v2.8.1-plan.md`](../../plans/v2/v2.8.1-plan.md)
 - v2.8.0 ship (前置): [`docs/archive/plans/v2/v2.8.0-plan.md`](../../plans/v2/v2.8.0-plan.md) Phase 2 audit line 217-222
 - v2.7.0 plan (Phase 2a 漏做 C-side mirror): [`docs/archive/plans/v2/v2.7.0-plan.md`](../../plans/v2/v2.7.0-plan.md)
-- W-069 NODE_CALL is_extern mangling (related): `docs/workarounds.md`
+- W-069 NODE_CALL is_extern mangling (related): `docs/internal/workarounds.md`
 - jhyy-side codegen.jhyy cg_module stub-fatal: line 3880 (SYSV) / 3885 (SYSV_FREESTANDING)
 - jhyy-side abi_amd64_sysv.jhyy (QBE-call-time helper, 7 ABI fn, v2.7.0 Phase 1 ship): `compiler/src0/abi_amd64_sysv.jhyy`
 - jhyy-side abi_amd64_sysv_freestanding.jhyy (similar): `compiler/src0/abi_amd64_sysv_freestanding.jhyy`
@@ -509,7 +509,7 @@ v2.x 末 N 代 fixed point + QBE 移除 仍是独立工作 (per `batch-V2-C-plan
 
 ### W-070 真修 (resolution)
 
-W-070 entry (`docs/workarounds.md`) status: 真修 in v2.8.2. Replaces TBD resolution.
+W-070 entry (`docs/internal/workarounds.md`) status: 真修 in v2.8.2. Replaces TBD resolution.
 
 ### References
 
@@ -545,7 +545,7 @@ v2.8.2 ship 时 honest 标 ⚠️ 的 gap = 5 sysv tests end-to-end 真跑 PASS�
    - `sysv_struct_ret.jhyy` → exit=18
    - `sysv_vararg_basic.jhyy` → exit=42 (10+32, fixture 改 inline fn)
 3. ✅ WSL branch 不变 (already correct, line 207-215 per v2.7.1 ship)
-4. ✅ ../../../workarounds.md W-070 "sysv SKIP-honest" caveat 删 (现在 PASS 验证)
+4. ✅ ../../../internal/workarounds.md W-070 "sysv SKIP-honest" caveat 删 (现在 PASS 验证)
 
 ### Scope (~70 LOC source + ~50 LOC docs, 2 commits)
 
@@ -586,7 +586,7 @@ v2.8.2 ship 时 honest 标 ⚠️ 的 gap = 5 sysv tests end-to-end 真跑 PASS�
 
 ### W-070 真修 verification (post-v2.8.3)
 
-W-070 entry (`docs/workarounds.md`) status:
+W-070 entry (`docs/internal/workarounds.md`) status:
 ```markdown
 ### Resolution (v2.8.2 真修 + v2.8.3 验证完整化)
 

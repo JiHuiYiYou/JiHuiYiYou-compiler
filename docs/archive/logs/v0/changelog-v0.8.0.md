@@ -268,7 +268,7 @@ let fname_str = *(ptr_add_u8(sym_p_v1 as *u8, 0 as i64) as **u8);  // Sym.name @
 
 **superseder**：本 commit 转 W-008 为 RESOLVED；剩余 v1 OK 数量回落的原因是 commit 11 把一些之前走错 IL 但碰巧能跑的测试暴露到 QBE 严格 typecheck 下，**新 cslel 错**。修 W-009（cslel 比较结果类型错）后 v1 OK 数量应回到 16+。
 
-**详细文档**：[docs/workarounds.md](../../../workarounds.md#w-008)
+**详细文档**：[docs/internal/workarounds.md](../../../internal/workarounds.md#w-008)
 
 ---
 
@@ -319,7 +319,7 @@ if (*src).kind != KIND_PRIMITIVE() { return arg; }
 - v1 regress：12 OK（持平，arena.jhyy 不在 regress 测试集——是 library；但**Stage 0 closure 解锁**）
 - W-008 (commit 11) + W-009 (commit 12) = jhyy_v1 编 arena.jhyy 通过 QBE typecheck 的**必要组合**
 
-**详细文档**：[docs/workarounds.md](../../../workarounds.md#w-009)
+**详细文档**：[docs/internal/workarounds.md](../../../internal/workarounds.md#w-009)
 ```
 
 ## Phase A/B 计划（commit 4 后剩余工作 — v0.9 真修前）

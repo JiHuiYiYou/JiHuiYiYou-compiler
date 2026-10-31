@@ -955,7 +955,7 @@ def run_all(
         print(f"  ├─ XPASS    {len(xpass_tests)}  ⚠️ XFAIL 标记已过期 —— 对应 bug 修好了但没摘标记")
     if noassert_tests or vacuous_tests:
         print("  └─ ⚠️ 上面两类**不是 PASS**。它们仍会跑(能抓编译器崩溃),但验证不了"
-              "任何计算结果。逐个补断言见 docs/FACTS.md。")
+              "任何计算结果。逐个补断言见 docs/internal/FACTS.md。")
 
     # Sprint mcp-2: cleanup _regress_* artifacts for tests that didn't fail.
     # Pass → clean dir after run; Fail → keep .il/.s/.exe for inspection

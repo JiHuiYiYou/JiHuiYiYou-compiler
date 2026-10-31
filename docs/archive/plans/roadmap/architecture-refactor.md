@@ -27,7 +27,7 @@
 | v0.6.0 已发 | git tag | v1.0-self-hosting.md 提"v0.6.0 通过" |
 | v0.7.0(7A enum first-class + 7B const struct array)已发 | changelog | 是 |
 | **v0.8 wip 跑到 commit 12(5820793)** | git log | ❌ 旧 v0.8 任务清单只画到 3 commit 收尾 |
-| 9 个 codegen workaround(W-001 ~ W-009)| `docs/workarounds.md` | ❌ 旧 plan 完全没提 |
+| 9 个 codegen workaround(W-001 ~ W-009)| `docs/internal/workarounds.md` | ❌ 旧 plan 完全没提 |
 | **Stage 0 closure 部分达成**(jhyy_v1 编 src0/arena.jhyy 通过 QBE typecheck;其余 13 个 src0/*.jhyy 大部分**还没编过**)| commit 12 自验 | ❌ 旧 v0.8 任务清单"Stage 1 = M4 闭环" |
 | **v1 regress:12 OK / 47 总**(剩余 35 个 = **8 CERR + 8 AV + 25 STK + 0 NORUN**)| commit 12 自测 | ❌ |
 | 29-extsw hypothesis 50/50 是 arena.jhyy 翻译稿问题,非 codegen 真 bug | bootstrap closure 自验记录 (per git log 2026-07) | ❌ |
@@ -219,7 +219,7 @@ v1.0.0 任务清单 § "不在 v1.0 范围(明确延后)" 整段重写。原表:
 
 v1.0.0 详细实现方案 § "v0.6 codegen 已知坑" 表(7 条)扩展为 10 条:
 - 保留原 7 条(部分编号调整)
-- **新增 8 条**:W-001~W-009 翻译(从 `docs/workarounds.md` 拿过来),每条标"v0.9 真修 / 延后 / 接受 workaround"状态
+- **新增 8 条**:W-001~W-009 翻译(从 `docs/internal/workarounds.md` 拿过来),每条标"v0.9 真修 / 延后 / 接受 workaround"状态
 - **新增 9 条**:29-extsw hypothesis(50/50 arena.jhyy 翻译稿问题,非 codegen 真 bug;v0.9 验证)
 - **新增 10 条**:jhyy_helpers.c 范围(sprint 1 末 + sprint 4 末 + sprint 5 末 三次扩展)
 
@@ -435,8 +435,8 @@ docs/internal/
   ├─ ../../../internal/architecture.md (流水线 / 模块 / QBE IL / Stage 0 自举)
   ├─ ../../../internal/build.md (编译 / QBE 坑)
   ├─ ../../../../CONTRIBUTING.md (编码约定)
-  ├─ ../../../FACTS.md (集成测试)
-  └─ ../../../workarounds.md (W-001~W-009 现状,R-4 引用)
+  ├─ ../../../internal/FACTS.md (集成测试)
+  └─ ../../../internal/workarounds.md (W-001~W-009 现状,R-4 引用)
 
 [../../../jhyy_OS/docs/](../../../coordination/JHYY_OS侧设计终版.md) (OS 端,跟本 repo 同级)
   └─ coordination.md (跨项目对齐,本 repo 通过绝对路径引用)
@@ -691,7 +691,7 @@ v3.2+(3l std lib) ───────────────→ M11 硬前置
 - [docs/archive/plans/roadmap/v3.x-capability-spec.md](v3.x-capability-spec.md) — R-9 改
 - [docs/internal/architecture.md](../../../internal/architecture.md) — 内部架构(本重构不改,但 cross-ref)
 - `status.md` — 当前状态(本重构不改,但 cross-ref)
-- [docs/workarounds.md](../../../workarounds.md) — W-001~W-009 现状(R-4 引用)
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — W-001~W-009 现状(R-4 引用)
 - [docs/coordination/JHYY_OS侧设计终版.md](../../../coordination/JHYY_OS侧设计终版.md) — 跨项目对齐
 - [docs/coordination/JHYY_OS侧设计终版.md](../../../coordination/JHYY_OS侧设计终版.md) — OS 端 5 决策
 - [docs/coordination/JHYY_OS侧设计终版.md](../../../coordination/JHYY_OS侧设计终版.md) — M5b 启动硬条件

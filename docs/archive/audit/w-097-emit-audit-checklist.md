@@ -160,9 +160,9 @@ If any other sub-bug surfaces during audit (e.g. src2_is_imm + qt mismatch), fil
 
 ## References
 
-- W-097 entry: `docs/workarounds.md` (DEFERRED since 2026-10-09)
-- W-098 entry: `docs/workarounds.md` (ACTIVE since 2026-10-09)
-- W-096 entry: `docs/workarounds.md` (✅ RESOLVED 2026-10-08)
+- W-097 entry: `docs/internal/workarounds.md` (DEFERRED since 2026-10-09)
+- W-098 entry: `docs/internal/workarounds.md` (ACTIVE since 2026-10-09)
+- W-096 entry: `docs/internal/workarounds.md` (✅ RESOLVED 2026-10-08)
 - Memory: `feedback_deep_audit_checklist_first` (this audit strategy)
 - Memory: `feedback_rca_first_root_cause` (1-iter RCA before fix)
 - Memory: `feedback_verify_active_reproduces` (verify ACTIVE repro before fix)

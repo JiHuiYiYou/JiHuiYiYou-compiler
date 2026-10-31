@@ -20,7 +20,7 @@
 
   Reference:
     - WiX 4 source: src/wix/WixToolset.BootstrapperApplications.wixext/
-    - docs/workarounds.md W-033
+    - docs/internal/workarounds.md W-033
 -->
 <WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="zh-CN">
 

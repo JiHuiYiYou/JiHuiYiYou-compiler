@@ -159,11 +159,11 @@ v2.11.5 design 写好 `cg_record_temp_slot` API (state.jhyy:251) — 写 dst's p
 - `memory/feedback_regress_clean_count.md` — FRESH total (例 119/139) 才能写入 changelog
 - `memory/feedback_changelog_umbrella.md` — vX.Y axis umbrella changelog; 本 sprint 满足 "重大 pivot" 例外
 - `memory/feedback_plans_per_version.md` — 每个 minor version 一个 `vX.Y.Z-plan.md`
-- `memory/feedback_memory_selectivity.md` — memory 只存通用规约, sprint-specific 写到 ../../../workarounds.md
+- `memory/feedback_memory_selectivity.md` — memory 只存通用规约, sprint-specific 写到 ../../../internal/workarounds.md
 
 ## 引用
 
-- W-074.13 4 sub-bug 全 CLOSED: [`docs/workarounds.md`](../../../workarounds.md) W-074.13 entry + v2.11.23 sprint closure section
+- W-074.13 4 sub-bug 全 CLOSED: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) W-074.13 entry + v2.11.23 sprint closure section
 - v2.11.23 plan: [`docs/archive/plans/v2/v2.11.23-plan.md`](../../plans/v2/v2.11.23-plan.md)
 - v2.11.23 predecessor RCA: [`docs/archive/audit/rca-v2.11.21.md`](../../audit/rca-v2.11.21.md) (v2.11.23 closure section 写 v2.11.21 末尾 — audit 指出 v2.11.22 RCA claim 偏, v2.11.23 修正; **不**创建 rca-v2.11.22.md)
 - v2.11.23 umbrella section: [docs/archive/logs/v2/changelog-v2.11.0.md](changelog-v2.11.0.md) (本 standalone doc 是 milestone celebration view, umbrella 顶部加 link 索引 — **不**重复内容)

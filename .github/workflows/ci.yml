@@ -169,7 +169,7 @@ jobs:
           # 并打 warning 说「CI 编出的编译器行为与发布的不同(W-117)」。那句话是
           # **错的**:W-117 已于 2026-10-18 闭合(根因 = IL lexer 在 EOF 处无守卫,
           # `lex_peek_byte` 无 `cur < end` 边界检查 + `lex_next_byte` 在 EOF 不推进
-          # cur),该症状在受控 A/B 下不复现 —— 见 docs/workarounds.md。
+          # cur),该症状在受控 A/B 下不复现 —— 见 docs/internal/workarounds.md。
           #
           # 现在:**不换回产物**。回归门测的就是本 job 刚编出来的这份,也就是
           # **当前源码**编出来的编译器。改 src0 引入的语义回归,201 个测试
@@ -564,7 +564,7 @@ jobs:
       # 为什么要有这道门:本仓曾把「回归通过数」写在 31 份文档里、把「ACTIVE 数」
       # 写在 25 份里 —— 于是两份 README 的版本徽章落后 8 个 release,而 CI 全绿。
       # 根因是**事实没有单一真相源** + 门只扫 6 个位置。
-      # 现在:数字只写在 docs/FACTS.md,其它文档引用它;本门对拍 FACTS.md 与现实
+      # 现在:数字只写在 docs/internal/FACTS.md,其它文档引用它;本门对拍 FACTS.md 与现实
       # (VERSION / 台账索引 / 门数 / 回归基线),并检查全仓链接与锚点。
       - name: Docs facts gate (FACTS.md == reality, no broken links)
         if: always()

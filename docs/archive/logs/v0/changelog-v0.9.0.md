@@ -187,7 +187,7 @@ fn main_jhyy() -> i32 {
 
 ---
 
-### 改动 5: `docs/workarounds.md` — 加 B-let2 cross-ref entry
+### 改动 5: `docs/internal/workarounds.md` — 加 B-let2 cross-ref entry
 
 索引 + 详细 cross-ref entry:
 - 跟 W-007 (w→l extsw) 镜像对称
@@ -209,7 +209,7 @@ python -c "..."   # 3 OK baseline (持平 commit 12 12 OK 测量口径)
 
 # 3. codegen 文档
 docs/internal/codegen-pitfalls.md § 2 — 6 gaps 全记录
-docs/workarounds.md — B-let2 cross-ref entry 完整
+docs/internal/workarounds.md — B-let2 cross-ref entry 完整
 ```
 
 ---
@@ -674,7 +674,7 @@ python compiler/build/bin/regress.py
 | 标准 | 状态 |
 |------|------|
 | W-005 segfault 根因重诊断 | ✅ (C/jhyy CGContext struct 布局 mismatch,非 NODE_ASSIGN 错) |
-| ../../../workarounds.md W-005 加根因段 + superseder 改 commit 2.10 | ✅ |
+| ../../../internal/workarounds.md W-005 加根因段 + superseder 改 commit 2.10 | ✅ |
 | byte-equal 持平 5/7 | ✅ (5/7,let-mut 触发面继续 W-005 workaround) |
 | regress 持平 baseline | ✅ (3 OK = 持平 commit 2.9) |
 | 无 codegen 改动 | ✅ (本 commit doc-only) |
@@ -739,7 +739,7 @@ fn main_jhyy() -> i32 {
 
 **scope 评估:** ~50 行 C 端改动 + 1 处 init + 1 处 free。**风险:中-高**(CGContext 是 codegen 全局上下文,改 field offset 影响所有 cg_expr/cg_stmt 路径)。**预计 commit 2.11** (跟 W-003 真修合并,W-003 也涉及 codegen_stmt 增强)。
 
-### 改动 1: `docs/workarounds.md` W-005 段更新
+### 改动 1: `docs/internal/workarounds.md` W-005 段更新
 
 加根因重诊断段 + superseder 改 commit 2.10 + 影响说明。
 
@@ -899,7 +899,7 @@ bash compiler/tests/stage1-expanded.sh
 
 ### 影响
 
-- **W-005 workaround 现在可安全移除**: src0/ 14 处 `*pos_ptr_vN` 累加模式是 commit 2.10 阶段因 W-005 根因 (CGContext 错位) 撞 segfault 而加的,现在布局已对齐 → 下个 commit (2.13) 加固 phase 2 可全部 revert 回 `let mut x; x += n` 风格。W-005 在 commit 2.13 移出 ../../../workarounds.md active 列表。
+- **W-005 workaround 现在可安全移除**: src0/ 14 处 `*pos_ptr_vN` 累加模式是 commit 2.10 阶段因 W-005 根因 (CGContext 错位) 撞 segfault 而加的,现在布局已对齐 → 下个 commit (2.13) 加固 phase 2 可全部 revert 回 `let mut x; x += n` 风格。W-005 在 commit 2.13 移出 ../../../internal/workarounds.md active 列表。
 - **不影响 byte-equal**: 改动纯 codegen.c CGContext 内存布局,跟 .il emit 顺序/内容无关。byte-equal 持平 5/7 (跟 commit 2.9/2.10 baseline 一致)。
 - **不影响 regress**: 50/53 PASS, 0 FAIL, 3 SKIP — 持平。
 - **audit 排在 2.14 之后 / B 之前** (per user 决策 2026-08-05): 5 struct (Sym/SymTable/Parser/Lexer/SemaContext) 已知没观测到 segfault = audit 紧急度低,推到 v0.9 wip 末。
@@ -1126,16 +1126,16 @@ bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.s
 ## commit 2.12 — W-001 真修 docs sync + 211 W-002 revert 合并
 
 **日期:** 2026-08-05
-**范围:** `docs/workarounds.md` (W-001 + W-002 标 RESOLVED) + `compiler/src0/_W002_rename_map.txt` + `compiler/src0/_W002_revert.py` (新) + `compiler/src0/*.jhyy` 11 文件批量 revert (2095 occurrences)
+**范围:** `docs/internal/workarounds.md` (W-001 + W-002 标 RESOLVED) + `compiler/src0/_W002_rename_map.txt` + `compiler/src0/_W002_revert.py` (新) + `compiler/src0/*.jhyy` 11 文件批量 revert (2095 occurrences)
 **前驱:** commit 2.12a (sema) + commit 2.12b (codegen)
 **目标:** W-001 docs 同步 (实际真修已在 v0.8 commit 9 `d570c72` ship) + W-002 211 个 `_v1` 后缀 revert 回原名 → observation step 检验 main.jhyy segfault 是否消除
 
 ### 上下文回顾
 
 **W-001 实际状态 (commit 时机错位)**:
-- 文档状态: `docs/workarounds.md` W-001 标 ACTIVE, 描述 "hash_string 用 `*i32` deref 4-byte read 绕 v0 codegen `loadsb` 错"
+- 文档状态: `docs/internal/workarounds.md` W-001 标 ACTIVE, 描述 "hash_string 用 `*i32` deref 4-byte read 绕 v0 codegen `loadsb` 错"
 - 实际状态: W-001 已在 **v0.8 commit 9 (`d570c72`, 2026-08-03)** ship 真修 — `util.jhyy:212-231` `hash_string` 改成 byte-by-byte `*u8` deref + length mix (FNV-1a), 移除 `*i32` 4-byte overread
-- ../../../workarounds.md 没同步标 RESOLVED 是历史遗漏, 实质 root cause fix 已 ship
+- ../../../internal/workarounds.md 没同步标 RESOLVED 是历史遗漏, 实质 root cause fix 已 ship
 
 **W-002 失效条件 (ii) 满足**:
 > "或 v0 codegen 修了 W-001 的副作用（W-001 workaround 改成 byte-by-byte 不再 overread）—— 此时即使 jhyy_v1 触发面不变也不再 segfault"
@@ -1144,7 +1144,7 @@ v0.8 commit 9 满足此条件 → W-002 211 个 `_v1` 后缀可以 revert 回原
 
 ### 改动
 
-**1. `docs/workarounds.md`**:
+**1. `docs/internal/workarounds.md`**:
 - 顶部索引表 W-001 / W-002 状态 ACTIVE → RESOLVED
 - W-001 section 加 RESOLVED 详情 (引用 v0.8 commit 9 `d570c72` 真修 + 解释真修 vs workaround 区别)
 - W-002 section 头部状态改 RESOLVED + 加 RESOLVED section (实施步骤 + 保留历史)
@@ -1152,7 +1152,7 @@ v0.8 commit 9 满足此条件 → W-002 211 个 `_v1` 后缀可以 revert 回原
 **2. `compiler/src0/_W002_revert.py`** (新): Python 脚本批量 revert 211 个 identifier
 - 读 `_W002_rename_map.txt`, 按 `X_v1` 长度倒序生成 regex (`最长先匹配` 避免 cascading — e.g. `buf_v1` 不能先 match 进 `out_buf_v1`)
 - 用 `(?<!\w)` 负向 lookbehind 防止部分匹配 (e.g. `out_buf_v1` 里的 `buf_v1` 不被 match, 因为前面 `_` 是 word char)
-- 11 个 .jhyy 文件, 共 2095 occurrences revert (../../../workarounds.md 表预估值 2073, 实际略多 22 因为后续 commit 加了少量 `_v1` 后缀)
+- 11 个 .jhyy 文件, 共 2095 occurrences revert (../../../internal/workarounds.md 表预估值 2073, 实际略多 22 因为后续 commit 加了少量 `_v1` 后缀)
 
 **3. `compiler/src0/*.jhyy` 11 文件 revert**: 共 2095 occurrences (codegen 744 / sema 351 / parser 469 / main 182 / ast 71 / types 97 / ir 49 / lexer 49 / symtab 30 / arena 17 / util 36)
 - 剩余 ~100 个 `_v1` 后缀 (在 main.jhyy / codegen.jhyy / util.jhyy 等) 都是**合法的局部变量命名** (e.g. `p_v1`, `path_v1`, `ret_v1`, `ftype_slot_v1`), 不在 211 map 内, 不动
@@ -1232,7 +1232,7 @@ bash /c/Users/liuzhen/Desktop/coding/JiHuiYiYou/compiler/tests/stage1-expanded.s
 - v0.8 commit 7 (`0453cef`) — W-002 211 identifier rename (workaround 实施, 现在可移除)
 - `compiler/src0/_W002_rename_map.txt` — 211 rename map (保留作为 archive)
 - `compiler/src0/_W002_revert.py` — revert 脚本 (本次 ship)
-- `docs/workarounds.md` — W-001 + W-002 标 RESOLVED (本次 ship)
+- `docs/internal/workarounds.md` — W-001 + W-002 标 RESOLVED (本次 ship)
 
 ---
 
@@ -1311,7 +1311,7 @@ bash compiler/tests/stage1-expanded.sh
 
 ### 影响
 
-- **W-005 workarounds 全部移除**: `docs/workarounds.md` § W-005 状态 ACTIVE → **RESOLVED (v0.9 wip commit 2.13)**
+- **W-005 workarounds 全部移除**: `docs/internal/workarounds.md` § W-005 状态 ACTIVE → **RESOLVED (v0.9 wip commit 2.13)**
 - **src0/ 跟 v0 端 C 源码语义对齐**: 所有累加模式 (`run_qbe`/`link_with_gcc` 的 cmd_buf 拼接, `hash_string`/`hm_*` 的累加器) 跟 C 端一致用 `let mut` 自然风格
 - **jhyy_v1.exe size**: 持平 (~371KB), 无 regression
 - **v0 build**: clean, 0 warning (clang/gcc -Wall -Wextra)
@@ -1336,7 +1336,7 @@ bash compiler/tests/stage1-expanded.sh
 - v0.9 wip commit 2.10 — W-005 真修 phase 1 (诊断性 doc-only)
 - v0.8 commit 10 (`d8535a9`) — W-005 扩展到 util.jhyy + arena.jhyy (initial workaround 实施)
 - v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-005 workaround 初始引入)
-- `docs/workarounds.md` — W-005 标 RESOLVED (本次 ship)
+- `docs/internal/workarounds.md` — W-005 标 RESOLVED (本次 ship)
 ---
 
 ## commit 2.14 — W-004 BLOCKED verification + W-002 archive 标记 + W-006 dormant + 4-workaround cross-ref
@@ -1479,7 +1479,7 @@ bash compiler/tests/stage1-expanded.sh
 - v0.8 commit 9 (`d570c72`) — W-001 byte-by-byte 真修 (W-002/W-004 根因消除)
 - v0.8 commit 11 — W-008 真修 (cg_find_field_offset)
 - v0.8 commit 12 — W-009 真修 (cg_convert_arg 入口 bail)
-- `docs/workarounds.md` — 4 块改动集中 (本 commit)
+- `docs/internal/workarounds.md` — 4 块改动集中 (本 commit)
 - `compiler/src0/_W002_rename_map.txt` — archive 文件 (tracked, README 已加)
 - `compiler/src0/_W002_revert.py` — 已删除 (一次性脚本)
 
@@ -1623,7 +1623,7 @@ W-004 status 保持 ACTIVE (BLOCKED verification — Task #61 prerequisite)。
 - v0.9 wip commit 2.14 — W-004 BLOCKED verification (Task #60 prerequisite 标记)
 - v0.8 commit 6 — `parse_dispatch_simple_only` 抽取 (设计决策源头)
 - v0.8 commit 5 — if-as-expression inline 实现 (parse_expr 加 TOKEN_IF 分支)
-- `docs/workarounds.md` — W-004 (status ACTIVE BLOCKED verification)
+- `docs/internal/workarounds.md` — W-004 (status ACTIVE BLOCKED verification)
 - `compiler/src0/parser.jhyy:1198+` (commit 6 注释 + Task #60 更新)
 - `compiler/src0/parser.jhyy:1268+` (Site 1 inner body dispatcher 加 TOKEN_WHILE 嵌套分支)
 - `compiler/src0/codegen.jhyy:2186-2206` (`if → while → while` 触发面)
@@ -2120,7 +2120,7 @@ ast.jhyy `ast_new_int` + parser.jhyy `parse_const_decl` 移除 `jh_fmt_lld_stder
 - `compiler/src0/codegen.jhyy:18 while loops` — 全 iterate over array indices, 无 hash 迭代
 - `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本
 - `compiler/src0/codegen.jhyy:1885-1889` — "已知 trick" 注释删除
-- `docs/workarounds.md` — AUDIT 是 W-005 真修后立项的预防任务
+- `docs/internal/workarounds.md` — AUDIT 是 W-005 真修后立项的预防任务
 
 ---
 
@@ -2241,7 +2241,7 @@ diff net: 净 -45 行 (3 处 workaround 块 + 6 处 debug print)。
 - `compiler/src0/main.jhyy:50-53` — fread/fwrite/fclose/system extern fn 补全
 - `compiler/src/main.c:241` — `resolve_imports` 待翻译 (Task #61 close-out 阶段 ~200 行)
 - `compiler/tests/stage1-expanded.sh` — 7 测试集 byte-equal 验证脚本 (Stage 1 持平)
-- `docs/workarounds.md` — W-005 (IRVal stack alloc, 已修) + W-008/W-009 (Stage 1 audit 修)
+- `docs/internal/workarounds.md` — W-005 (IRVal stack alloc, 已修) + W-008/W-009 (Stage 1 audit 修)
 - `docs/internal/codegen-pitfalls.md` — `*(p as T)` var-then-deref pattern 真因 + workaround
 
 ---
@@ -3167,7 +3167,7 @@ typedef struct {
 | Stage 1 byte-equal | 7/7 baseline | **7/7 PASS** | 持平 |
 | jhyy_v1.exe.exe sha | 9b67e53... | **43c66665...** | rebuilt (clean HEAD rebuild) |
 
-**../../../workarounds.md**: 新增 W-012 完整 entry + 索引（sentinel pollution 真修描述 + 触发面 + fix 点 + 不变量 + 验证）
+**../../../internal/workarounds.md**: 新增 W-012 完整 entry + 索引（sentinel pollution 真修描述 + 触发面 + fix 点 + 不变量 + 验证）
 
 **不 tag v1.0.0**: Sprint 4.26 Stage 2 N=3 byte-equal 重测后再决定（已知仍可能有别的 Stage 2 差异）
 
@@ -3193,7 +3193,7 @@ v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 
 - util.jhyy:186 (W-004 仍 ACTIVE BLOCKED) → 加 `[Status: W-004 ACTIVE (BLOCKED verification, ...); 代码仍按 workaround 写]` 标签
 - 3 处 C-side header comments (ast.c:454 / lexer.c:396 / types.c:190 "Debug name") → 正式 docstring 形式
 - mcp-jhyy/jhyy_runner.py 1-行 docstring → 5-行 Public API list
-- docs/workarounds.md W-004 index → 标 "Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0" (修正 index vs body 不一致)
+- docs/internal/workarounds.md W-004 index → 标 "Task #60 fixed 2026-08-06; W-004 verification deferred to post-v1.0.0" (修正 index vs body 不一致)
 
 **明确不做**:
 - 不动 workaround 代码本身 (16 处 workaround 代码一字未改)
@@ -3207,7 +3207,7 @@ v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 
 - ✅ util.jhyy:186 W-004 ACTIVE status 标清晰
 - ✅ 3 处 C-side header comment 形式化
 - ✅ mcp-jhyy/jhyy_runner.py docstring 完整化 (与其他 3 个 mcp-jhyy 模块对齐)
-- ✅ ../../../workarounds.md W-004 index vs body 一致 (Task #60 已修, W-004 verification deferred)
+- ✅ ../../../internal/workarounds.md W-004 index vs body 一致 (Task #60 已修, W-004 verification deferred)
 - ✅ 风险守门 grep 通过 (Step 1):
   - jh_fmt_*_stderr: codegen.jhyy:1 + sema.jhyy:3 + util.jhyy:2 = 6 调用 (preserved)
   - dump_node/dump_sym: ast.c:81 + types.c:1 = 82 references (preserved)
@@ -3237,7 +3237,7 @@ v1.0.0 tag 后 (commit `eabee0d`, 2026-08-10), commit `6f52ac7` 留下的 Phase 
 | `compiler/src/lexer.c` | "token name for debugging" → 正式 docstring | ±1 |
 | `compiler/src/types.c` | "type to string (for debugging)" → 正式 docstring | ±1 |
 | `mcp-jhyy/jhyy_runner.py` | docstring 1-行 → 5-行 Public API | +10/-1 |
-| `docs/workarounds.md` | W-004 index status 描述 | ±1 |
+| `docs/internal/workarounds.md` | W-004 index status 描述 | ±1 |
 | **合计** | 9 files | **+28 净** |
 
 ### 不做但留给后续 sprint

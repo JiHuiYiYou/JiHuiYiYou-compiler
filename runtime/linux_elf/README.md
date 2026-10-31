@@ -51,4 +51,4 @@ readelf -h hello.elf    # 验 ET_EXEC + EM_X86_64 + entry _start
 
 - 多 target 与交叉编译 ⇒ [`docs/internal/build.md`](../../docs/internal/build.md) § 多 target
 - ABI（SysV 分类）⇒ [`docs/abis/jhyy-abi-v4.0.0.md`](../../docs/abis/jhyy-abi-v4.0.0.md)
-- 目标三元组清单 ⇒ [`docs/FACTS.md`](../../docs/FACTS.md) § 5
+- 目标三元组清单 ⇒ [`docs/internal/FACTS.md`](../../docs/internal/FACTS.md) § 5

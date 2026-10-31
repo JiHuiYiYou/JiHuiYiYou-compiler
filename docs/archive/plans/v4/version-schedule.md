@@ -706,7 +706,7 @@ W-122 / W-123 / W-103 / W-105 / W-105.1 / W-106 / W-107。
 | `regress jhyy_v2.exe`(**自举产物也跑**) | ✅ **184/184 PASS** + 20 SKIP |
 | `closure_check.sh` | ✅ PASS,v2.s == v3.s byte-identical |
 | `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(跑到 N=10) |
-| `../../../workarounds.md 索引` | ✅ **ACTIVE 0 / DEFERRED 0** |
+| `../../../internal/workarounds.md 索引` | ✅ **ACTIVE 0 / DEFERRED 0** |
 | `make selfhost` | ✅ v2..v5 逐字节相同 |
 | `artifact_checks.sh` | ✅ 7 PASS / 0 KNOWN-FAIL / 0 FAIL |
 | SysV 6 个回归 + W-104 三方向 ABI 对拍 | ✅ 6 PASS + 3 PASS |
@@ -755,7 +755,7 @@ FLAKY 分类机制」是同一条理由。
    `"compiler/build/obj/_section_directive.buf"` 为含 pid 的路径,并同步
    `main.jhyy:854` 的读侧)。
 3. **无差异** → 不改编译器,把 `_section_directive.buf` 降级成登记在案的隐患,
-   在 `../../../workarounds.md` 留一条说明「机制成立、未观测到发作、暂不改」。
+   在 `../../../internal/workarounds.md` 留一条说明「机制成立、未观测到发作、暂不改」。
 
 **探针本身成本极低**(复用现成的 `.s` 比对),且无论结论如何都留下一个
 「并发下 codegen 是否确定」的常驻答案 —— 这比改完之后才知道有没有改对强。

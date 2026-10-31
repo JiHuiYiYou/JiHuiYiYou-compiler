@@ -131,6 +131,6 @@ C:/Users/liuzhen/miniconda3/python.exe -m pytest mcp-jhyy/tests -q
 
 ## 相关
 
-- 台账（`jhyy_workarounds` 读的就是它）⇒ [`docs/workarounds.md`](../docs/workarounds.md)
+- 台账（`jhyy_workarounds` 读的就是它）⇒ [`docs/internal/workarounds.md`](../docs/internal/workarounds.md)
 - 语言规范 / ABI ⇒ [`docs/abis/`](../docs/abis/)
 - 编译器架构 ⇒ [`docs/internal/architecture.md`](../docs/internal/architecture.md)

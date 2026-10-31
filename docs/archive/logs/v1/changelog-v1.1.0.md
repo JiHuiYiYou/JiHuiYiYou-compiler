@@ -11,7 +11,7 @@
 
 **类型**: 真修 (transitive — root cause = W-005 #2 family, 在 Sprint 4.21-4.25 chain 中被一并修)
 **估时**: 0.1 sprint (audit/reproduce 实证, 无代码改动)
-**../../../workarounds.md**: W-006 → RESOLVED (transitive)
+**../../../internal/workarounds.md**: W-006 → RESOLVED (transitive)
 
 ### 工作
 
@@ -31,7 +31,7 @@
   - `be3be33` (commit 2.78) — Sprint 4.21 Phases C+D+G — cg_copy_struct 改 `const IRVal*` + cg_expr out-param 改指针 (消除 stale pointer)
   - `9b67e53` (commit 2.79) — Sprint 4.23 — MAX_LOCALS 512→1024 (nlocals silent skip 边界)
   - `fad9de2` (commit 2.81) — Sprint 4.25 — W-005 #2 真修 (A' sentinel 守卫, 8 处 `irval_is_undef(v)` + pre-increment next_tmp) → **关键 commit**
-- **更新 `../../../workarounds.md`**:
+- **更新 `../../../internal/workarounds.md`**:
   - § 索引 line 33: W-006 status ACTIVE (dormant) → RESOLVED (transitive)
   - § W-006 body: status field 同上
   - 新增 `## W-006 RESOLVED — transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain (2026-08-11)` section (含误诊史 + 真修 chain 表 + 状态实证)
@@ -72,7 +72,7 @@
 
 ### 引用
 
-- [docs/workarounds.md](../../../workarounds.md) — 完整 W-006 entry + RESOLVED section
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 完整 W-006 entry + RESOLVED section
 - [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_w006_dormant_scan_2026_08_05.md` — 2026-08-05 首次 dormant scan
 - `memory/project_sprint4_21_phase_b_c_d_g_done.md` — Sprint 4.21 Phases C+D+G (cg_copy_struct const IRVal* + cg_expr out-param)
@@ -85,13 +85,13 @@
 
 **类型**: 真修 (transitive — root cause = W-001 `hash_string` `*i32` deref overread, 真修 ship in v0.8 commit 9 `d570c72`)
 **估时**: 0.2 sprint (verify + doc, no code change)
-**../../../workarounds.md**: W-004 → RESOLVED (transitive)
+**../../../internal/workarounds.md**: W-004 → RESOLVED (transitive)
 
 ### 工作
 
 - **Reproduce minimal repro** (per W-004 失效条件 (i)):
-  - BAD (`fn main`(4) + `let a`(1) + `field cur`(3) per ../../../workarounds.md L343-349) → jhyy_v1 (sha `ba94df93...`) → codegen done, EXIT=1 (link fail due to `main` symbol conflict with runtime.c) ✅
-  - GOOD (`fn ab`(2) + `let arena_local`(11) + `field current_value`(13) per ../../../workarounds.md L351-358) → jhyy_v1 → codegen done, EXIT=1 ✅
+  - BAD (`fn main`(4) + `let a`(1) + `field cur`(3) per ../../../internal/workarounds.md L343-349) → jhyy_v1 (sha `ba94df93...`) → codegen done, EXIT=1 (link fail due to `main` symbol conflict with runtime.c) ✅
+  - GOOD (`fn ab`(2) + `let arena_local`(11) + `field current_value`(13) per ../../../internal/workarounds.md L351-358) → jhyy_v1 → codegen done, EXIT=1 ✅
 - **4 boundary variations** (extreme / 4-char / 5-char fn / 7-char field) → jhyy_v1 → 全部 codegen done, EXIT=1 ✅
   - v1: `fn a`(1) + `let b`(1) + `field c`(1) — extreme short
   - v2: `fn aaaa`(4) + `let bbbb`(4) + `field cccc`(4) — boundary total
@@ -103,7 +103,7 @@
   - W-001 真修 (commit `d570c72`) 改 byte-by-byte `*u8` deref + length mix (FNV-1a) → 短名不再 overread → symtab 不再撞 → W-004 失效条件 (i) 满足
   - W-006 真因 = W-005 #2 family (cg_expr IRVal struct pass-by-value stale pointer), **不同 family** — W-006 transitive close 不连带 W-004
 - **Task #60 fix unblocked verification path**: 2026-08-05 验证 BLOCKED (Task #60 upstream), 2026-08-06 Task #60 真修 (commit `52843b6`) → 现在可验证
-- **更新 `../../../workarounds.md`**:
+- **更新 `../../../internal/workarounds.md`**:
   - § 索引 line 31: W-004 status ACTIVE (BLOCKED verification) → RESOLVED (transitive)
   - § W-004 body: status field 同上
   - § W-004 superseder (line 376): TBD → ✅ closed (root cause = W-001 byte-by-byte FNV-1a 真修)
@@ -150,9 +150,9 @@
 
 ### 引用
 
-- [docs/workarounds.md](../../../workarounds.md) — 完整 W-004 entry + 2026-08-12 verification status + RESOLVED section
-- [docs/workarounds.md](../../../workarounds.md) — 真因 byte-by-byte FNV-1a 真修 (root cause)
-- [docs/workarounds.md](../../../workarounds.md) — 关系澄清 (不同 family, 不连带)
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 完整 W-004 entry + 2026-08-12 verification status + RESOLVED section
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 真因 byte-by-byte FNV-1a 真修 (root cause)
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 关系澄清 (不同 family, 不连带)
 - [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_w006_transitively_resolved.md` — W-006 transitive close 模板 (本文 mirror)
 - v0 codegen Bug 1 (hash_string overread) + Bug 6 (let-mut assignment) W-004 真因 (per git log)
@@ -166,7 +166,7 @@
 
 **类型**: 真修 (transitive — root cause = v0.8 commit 7 `0453cef` 在 cg_convert_arg 加 `src=W → dst=L` extsw 分支; jhyy_v1 已含镜像)
 **估时**: 0.1 sprint (audit/reproduce 实证, 无新代码改动)
-**../../../workarounds.md**: W-007 → RESOLVED (transitive)
+**../../../internal/workarounds.md**: W-007 → RESOLVED (transitive)
 **commit**: `58667ae`
 
 ### 工作
@@ -177,7 +177,7 @@
   - v3: 嵌套 + multi-call: `let r = fncall() as i64; return r;` → ✅ EXIT
   - v4: through `let _ = fncall() as i64` → ✅ EXIT
 - **Root cause audit**: W-007 当时诊断 "jhyy_v1 codegen 把 return value 当 w emit" 是表层现象,真因 = `cg_convert_arg` 缺 `src=W → dst=L` extsw 分支. v0.8 commit 7 (C-side 真修) + Sprint v1.1.0 期间 jhyy-side 镜像 (per cg_convert_arg 的 codegen.jhyy:685-689)
-- **更新 `../../../workarounds.md`**:
+- **更新 `../../../internal/workarounds.md`**:
   - § 索引 line 34: W-007 status → ✅ RESOLVED (transitive)
   - § W-007 body: status / date / "superseder" → v0.8 commit 7 `0453cef`
   - 新增 `### W-007 RESOLVED — transitively closed by v0.8 commit 7 extsw 分支 (2026-08-12)` section (5×5 PASS 验证表 + canonical IL + 真因)
@@ -201,7 +201,7 @@
 
 ### 引用
 
-- [docs/workarounds.md](../../../workarounds.md) — 完整 W-007 entry + RESOLVED section
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 完整 W-007 entry + RESOLVED section
 - [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/feedback_fix_evaluation_rule.md` — 5/5 PASS 评估守门
 - commit `0453cef` (v0.8 commit 7) — C-side cg_convert_arg extsw 分支真修
@@ -212,7 +212,7 @@
 
 **类型**: 真修 (transitive — root cause = W-005 #2 family, IRVal struct pass-by-value stale pointer, Sprint 4.21-4.25 chain 已 ship)
 **估时**: 0.1 sprint (audit/reproduce 实证, 无新代码改动)
-**../../../workarounds.md**: W-003 → RESOLVED (transitive)
+**../../../internal/workarounds.md**: W-003 → RESOLVED (transitive)
 **commit**: `80b5c2e`
 
 ### 工作
@@ -228,7 +228,7 @@
   - `grep -rn 'let _ = ' compiler/src0/*.jhyy` → 89 命中 (codegen.jhyy / sema.jhyy / util.jhyy / ir.jhyy)
   - 全部 compile 干净 (jhyy-side 翻译风格自然避免深度 Bug 7b)
 - **Root cause audit**: W-003 当时诊断 "let _ emit segfault" 是表层现象,真因 = W-005 #2 family (cg_expr IRVal struct pass-by-value stale pointer) — Sprint 4.21 (commit 2.78) + 4.25 (commit 2.81) chain 已 ship 真修
-- **更新 `../../../workarounds.md`**:
+- **更新 `../../../internal/workarounds.md`**:
   - § 索引 line 30: W-003 status → ✅ RESOLVED (transitive)
   - § W-003 body: status / date 更新
   - 新增 `### W-003 RESOLVED — transitively closed by Sprint 4.21-4.25 W-005 #2 真修 chain (2026-08-12)` section (6 验证 cases + 真修 chain 引用)
@@ -256,7 +256,7 @@
 
 ### 引用
 
-- [docs/workarounds.md](../../../workarounds.md) — 完整 W-003 entry + RESOLVED section
+- [docs/internal/workarounds.md](../../../internal/workarounds.md) — 完整 W-003 entry + RESOLVED section
 - [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](../../plans/v1/v1.1.0任务清单 + 概要设计.md) — 计划详情
 - `memory/project_sprint4_23_max_locals.md` — Sprint 4.23 MAX_LOCALS 真修 (W-010 真因, 跟 W-003 是 W-005 #2 family)
 - `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修 (W-005 #2 关键 commit)
@@ -381,8 +381,8 @@
 
 **类型**: 真修 (4 个 v0 codegen bug 之 #4, **C-side only** — jhyy-side 一直 correct)
 **估时**: 0.5 sprint (reproduce + 1-line fix + docs W-013 新增)
-**commit**: `4449e50` (C-side codegen.c + ../../../workarounds.md)
-**../../../workarounds.md**: W-013 新增 → ✅ RESOLVED
+**commit**: `4449e50` (C-side codegen.c + ../../../internal/workarounds.md)
+**../../../internal/workarounds.md**: W-013 新增 → ✅ RESOLVED
 
 ### 根因
 
@@ -419,7 +419,7 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 
 ### W-013 新增入 docs
 
-- `docs/workarounds.md` § 索引 新增 W-013 行 (✅ RESOLVED 标记)
+- `docs/internal/workarounds.md` § 索引 新增 W-013 行 (✅ RESOLVED 标记)
 - § W-013 详细 section 新增 (根因 + 真修 + 验证表 + superseder note + 不变量 + 引用)
 
 ### 不变量 (byte-equal 保护)
@@ -451,7 +451,7 @@ if (!conv && (src_qt == 'w' || src_qt == 'l') && (dst_qt == 'b' || dst_qt == 'h'
 | regress_v1.py (jhyy_v1) 持平 baseline 50/50 | ✅ | 6 sprint 后各测一次, 全 50/50 |
 | Stage 1 byte-equal 7/7 持平 | ✅ | 双源 emit 模式等价 |
 | Stage 2 N=3 byte-equal (`2445e97d...`) 持平 | ✅ | jhyy_v1.exe.exe 不 rebuild |
-| ../../../workarounds.md 全 RESOLVED 入索引 | ✅ | W-003 / W-004 / W-006 / W-007 / W-013 (新) |
+| ../../../internal/workarounds.md 全 RESOLVED 入索引 | ✅ | W-003 / W-004 / W-006 / W-007 / W-013 (新) |
 
 ### 累计不变量
 

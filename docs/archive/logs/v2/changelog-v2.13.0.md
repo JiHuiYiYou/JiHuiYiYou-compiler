@@ -22,7 +22,7 @@ Per [`docs/archive/plans/v2/v2.13.0-plan.md`](../../plans/v2/v2.13.0-plan.md) (2
 | 1 | Phase 1 — 真 XMM regalloc | `5d405bb` | src0 4 files modify + 1 NEW module (`codegen_amd64_xmm_argalloc.jhyy` 259 LOC); CGState +4 fields (xmm_arg_count/int_arg_count/stack_arg_offset + reset hook); emit_call refactor: hardcoded Win 4 reg / SysV 6 reg 双 loop → unified per-call + `emit_stack_arg_push` 栈参 fallback; shadow space `subq $32, %rsp` reorder BEFORE emit_args (per Phase 1b bug surface fix); parse cap 8 → 16; f64 IMM table miss fallback `jh_double_to_bits`; peephole `if len > 4096 return input` workaround (W-074.6.1 partial); NEW `tests/examples/xmm_pressure_9args.jhyy` 9-f64-arg fixture EXIT=255. **V.1 5/5 PASS**. |
 | 2 | Phase 2 — 真 amd64_sysv codegen 全覆盖 | `b1ad5c3` | `abi_amd64_sysv.jhyy` +30 LOC: 3-class Phase 1 → 8-class SysV §A.4 full (SYSV_CLASS_INTEGER/SSE/SSEUP/MEMORY/NO_CLASS 5 const + `sysv_class_to_qbe_letter(cls, sz)` class→QBE 字母 map + `abi_sysv_classify_arg_full` 8-class wrapper declared AFTER 3-class fn — jhyy sema 不支持 forward ref,per memory `feedback_jhyy_no_forward_ref`)。NEW `compiler/tests/bootstrap/sysv_full_regress.sh` 141 LOC (Stage 1 jhyy 真 emit + Stage 2 docker gcc:12 chain,5 sysv tests × 5 runs gate)。**V.3 5/5 PASS**:sysv_abi_test=28 / sysv_struct_mixed=42 / sysv_struct_pass=35 / sysv_struct_ret=18 / sysv_vararg_basic=42 all exit codes 一致。 |
 | 3 | Phase 3 — amd64_win_freestanding 真 E2E | `d062a71` | target_dispatch.jhyy verify-only ✓ (4 target_tag wired per audit); hello-freestanding.jhyy 自写后端 .il/.s byte-equal vs QBE baseline (sha `f3c72ed9...` .il + `5ad27efb...` .s); run-ovmf.sh 改 QEMU 10.x syntax (`-chardev file,id=dbgcon,path=$DEBUG_LOG -device isa-debugcon,chardev=dbgcon` was `-debugcon file:stdio -global isa-debugcon.iobase=0x402`); serial + debug output → $SERIAL_LOG + $DEBUG_LOG files。**V.4 5/5 PASS**:5 consecutive OVMF self-backend boots → "Hello from jhyy freestanding!" x2 in serial log + clean shutdown。 |
-| 4 | Phase 4 — docs + ship | (本 commit) | changelog-v2.11.0.md v2.13.0 section append (per `feedback_changelog_umbrella` 不创建 standalone `changelog-v2.13.0.md`); ../../../../README.md v2.13.0 row; ../../../internal/architecture.md XMM regalloc + SysV codegen module boundary + Last updated v2.13.0; ../../../internal/build.md amd64_sysv_freestanding 真 E2E recipe + QEMU 10 chardev syntax; ../../../workarounds.md W-074.6 → FULL CLOSED。tag v2.13.0 + push。 |
+| 4 | Phase 4 — docs + ship | (本 commit) | changelog-v2.11.0.md v2.13.0 section append (per `feedback_changelog_umbrella` 不创建 standalone `changelog-v2.13.0.md`); ../../../../README.md v2.13.0 row; ../../../internal/architecture.md XMM regalloc + SysV codegen module boundary + Last updated v2.13.0; ../../../internal/build.md amd64_sysv_freestanding 真 E2E recipe + QEMU 10 chardev syntax; ../../../internal/workarounds.md W-074.6 → FULL CLOSED。tag v2.13.0 + push。 |
 
 ### Ship gates (V.1-V.6 aggregate)
 
@@ -70,7 +70,7 @@ Per [`docs/archive/plans/v2/v2.13.0-plan.md`](../../plans/v2/v2.13.0-plan.md) (2
 5. **`compiler/src0/codegen_amd64.jhyy:297`** `malloc(224)` → `malloc(512)` (Phase 1 CGState struct slack — 防 0-byte body per `feedback_codegen_amd64_run_zerobyte`)
 6. **`compiler/src0/codegen_amd64_peephole.jhyy`** +11/-131 LOC (Phase 1 W-074.6.1 workaround skip fold for len > 4096)
 7. **`scripts/dev/test/run-ovmf.sh`** QEMU 10.x syntax (Phase 3 适配)
-8. **../../../workarounds.md** — W-074.6 PARTIAL → **FULL CLOSED** (XMM regalloc + spill + caller/callee save + stack-arg fallback 全真修,V.1 9-f64-arg test 5/5 PASS 证明);W-074.6.1 NEW sub-workaround 保持 ACTIVE PARTIAL
+8. **../../../internal/workarounds.md** — W-074.6 PARTIAL → **FULL CLOSED** (XMM regalloc + spill + caller/callee save + stack-arg fallback 全真修,V.1 9-f64-arg test 5/5 PASS 证明);W-074.6.1 NEW sub-workaround 保持 ACTIVE PARTIAL
 9. **`docs/archive/logs/v2/d43-baseline-archive.md`** — 新 row v2.13.0 (Ph.2) sha `b743f8a5...` (Phase 2 re-baseline)
 
 ### 下一阶段 (v2.13.x + v2.14+)
@@ -98,7 +98,7 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 
 **Group A — Status audit + flip (zero source change, docs-only)**:
 
-| ID | ../../../workarounds.md line | old 状态 | v2.13.1 翻 | 翻依据 (commit anchor) |
+| ID | ../../../internal/workarounds.md line | old 状态 | v2.13.1 翻 | 翻依据 (commit anchor) |
 |----|---------------------|---------|-----------|---------------------|
 | W-074.6.1-a | 5546 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `emit_copy` FNARG path 真修 ship v2.11.8 commit `6192834` (W-074.7.8 derived-address tracking 延伸-4, codegen_amd64_emit_call.jhyy:1330) |
 | W-074.6.1-b | 5547 | 🟡 ACTIVE | ✅ CLOSED v2.13.1 | `per_fn_max` table 真修 ship v2.11.10 commit `c93247c` (per v2.11.10 sub-section) |
@@ -132,7 +132,7 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
   - QBE: **120/120 PASS / 0 FAIL / 21 SKIP** (of 141 total) — baseline 119/120 + new fixture +1 = 120/120 ✓
   - self-backend: **120/121 PASS / 1 transient FAIL** (`match.jhyy` transient race during full run; single-pass PASS EXIT=0) / 20 SKIP — baseline 120/120 + new fixture +1 = 121, 1 transient FAIL 是 full-regress race 不算 regression
 - **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.1 = docs-only, src0 未改 → 无 re-baseline event expected)
-- **V.4** Phase 3 aggregate — 6 status flips verified, ../../../workarounds.md ACTIVE count 7 → ~2 (W-058 + W-057 vendor-only, + W-074.8 sub-bug 2/4 + W-074.9 deferred HIGH risk)
+- **V.4** Phase 3 aggregate — 6 status flips verified, ../../../internal/workarounds.md ACTIVE count 7 → ~2 (W-058 + W-057 vendor-only, + W-074.8 sub-bug 2/4 + W-074.9 deferred HIGH risk)
 
 ### Commit history (axis-v2)
 
@@ -142,7 +142,7 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 
 ### 关键决策 / 教训
 
-- **RCA-first 必备**: v2.13.1 plan 列 W-074.8 sub-bug 1 + 3 为 LOW risk latent hardening 真改目标, Phase 1 实测发现都是 false positive — baseline dispatcher (codegen.jhyy:866 `storel val.id, addr`) + emit_mem ptr-deref flag 都已 ship 修 (per v2.11.8/v2.11.13/v2.11.15 真修链), ../../../workarounds.md ACTIVE 描述 stale. **不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]]
+- **RCA-first 必备**: v2.13.1 plan 列 W-074.8 sub-bug 1 + 3 为 LOW risk latent hardening 真改目标, Phase 1 实测发现都是 false positive — baseline dispatcher (codegen.jhyy:866 `storel val.id, addr`) + emit_mem ptr-deref flag 都已 ship 修 (per v2.11.8/v2.11.13/v2.11.15 真修链), ../../../internal/workarounds.md ACTIVE 描述 stale. **不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]]
 - **Group B 改 = 0 LOC** — plan 估 25-40 LOC 但 RCA 后 0 LOC; ship time 主要花在 docs (per [[feedback_doc_refactor_factcheck]] 逐条 fact-check)
 - **新 fixture 价值**: `slice_iter_nested_basic.jhyy` 显式建 nested slice iter E2E 验, baseline EXIT=66 PASS; 加 fixture 帮 regress 从 119/120 → 120/120 (coverage +1)
 - **W-074.7.9 PARTIAL → CLOSED flip**: 原 PARTIAL 标记基于 W-074.6 family 仍 ACTIVE; v2.13.0 后 W-074.6 FULL CLOSED → self-backend path 不 PARTIAL any more. per [[feedback_codegen_amd64_multifn]] scope DOWN trigger no longer applies
@@ -162,10 +162,10 @@ per user 2026-09-19 "不要有outofscope,不要Defer,这些都安排在v2.13.x�
 
 v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA-first, 0 src change, 跟 v2.13.1 同 pattern）。在 v2.13.1 ship 基础上收 W-074.8 family 尾 (sub-bug 2 + 4)。
 
-### Phase 1 RCA findings (../../../workarounds.md STALE descriptions)
+### Phase 1 RCA findings (../../../internal/workarounds.md STALE descriptions)
 
 **Sub-bug 2 (C.4 float imm)** STALE:
-- 描述 (../../../workarounds.md line 6177-6186 翻前) 标 `⏸ DEFERRED` + "Active FAIL: f32_suffix, float_arith, float_arith_f32"
+- 描述 (../../../internal/workarounds.md line 6177-6186 翻前) 标 `⏸ DEFERRED` + "Active FAIL: f32_suffix, float_arith, float_arith_f32"
 - 真修复 ship 在 v2.11.19 Phase 3 commit `d6364ba` (2026-09-17, "f32 IMM 真解 + f64 fractional 真解 + FNARG XMM bug"):
   - `compiler/src0/jhyy_helpers.c` 加 `jh_double_to_bits` + `jh_float_to_bits` (atof → IEEE 754 bit pattern)
   - `cg_parse_f64_imm_bits` fractional 分支真解 (consume frac digits → `jh_double_to_bits` → emit `movabsq` + `movq` 真确位)
@@ -185,7 +185,7 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
 - v2.12.0 audit (`docs/archive/audit/v2.12.0-audit-log.md` line 166 Scope 类 + line 184-191) 验证 cap_table_basic EXIT=42 PASS QBE≡SB parity
 - **STALE #2 (SysV § A.4 分类误判)**: CapTable<i32> = struct { data: *Cap<i32> 8B, len: i64 8B } = 16B struct。两 eightbytes 都是 INTEGER class (8B pointer + 8B i64)。Per SysV § A.4 merge rules: INTEGER+INTEGER → INTEGER class = **1 register pass**, NOT 2-register。Workarounds.md "16B → 2 regs" claim 跟 SysV § A.4 算法不符
 
-### 2 status flips + entry header flip (../../../workarounds.md docs-only)
+### 2 status flips + entry header flip (../../../internal/workarounds.md docs-only)
 
 | Sub-bug | 翻前 | 翻后 |
 |---------|------|------|
@@ -206,7 +206,7 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
   - self-backend: **121/142 PASS** (baseline 120/141 + new fixture +1 = 121/142) ✓
   - per `feedback_regress_clean_count` `rm _regress_*.exe` 清 stale artifact, FRESH total 写入 changelog
 - **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.2 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
-- **V.4** Phase 3 aggregate — 3 status flips verified (entry header + sub-bug 2 + sub-bug 4 + OS 启动链路), ../../../workarounds.md ACTIVE count ~5 → ~3 (W-074.9 3 + W-058 + W-057 vendor-only)
+- **V.4** Phase 3 aggregate — 3 status flips verified (entry header + sub-bug 2 + sub-bug 4 + OS 启动链路), ../../../internal/workarounds.md ACTIVE count ~5 → ~3 (W-074.9 3 + W-058 + W-057 vendor-only)
 
 ### Commit history (axis-v2)
 
@@ -216,7 +216,7 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
 
 ### 关键决策 / 教训
 
-- **RCA-first 必备 (跟 v2.13.1 同)**: v2.13.2 plan 列 W-074.8 sub-bug 2 + 4 为 docs-only audit-flip 目标, Phase 1 实测发现都是 STALE description (../../../workarounds.md 措辞滞后) + 真修复已在 v2.11.x ship (`d6364ba` + `4beab82`)。**不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]] + [[feedback_doc_refactor_factcheck]]
+- **RCA-first 必备 (跟 v2.13.1 同)**: v2.13.2 plan 列 W-074.8 sub-bug 2 + 4 为 docs-only audit-flip 目标, Phase 1 实测发现都是 STALE description (../../../internal/workarounds.md 措辞滞后) + 真修复已在 v2.11.x ship (`d6364ba` + `4beab82`)。**不**真改 src0, 仅 docs flip. per [[feedback_rca_first_root_cause]] + [[feedback_doc_refactor_factcheck]]
 - **Sub-bug 4 STALE on 2 counts** 是 v2.13.2 重要发现: 不仅是 "描述 stale", 还错诊 (16B → 2-reg) + SysV § A.4 分类误判。Workarounds.md 写错了 2 次,真因是 `emit_copy` `pct_count` heuristic + SysV ABI classification 理解错。1 LOC fix (`4beab82`) 验证真修完成
 - **NEW fixture 价值**: `cap_table_2reg_basic.jhyy` 显式建 16B struct cross-fn pass E2E 验, baseline EXIT=42 PASS; 加 fixture 帮 regress 从 120/140 → 121/141 (coverage +1)
 - **W-074.8 family FULLY CLOSED**: sub-bug 1+3 v2.13.1 / sub-bug 2+4 v2.13.2 (4 sub-bugs 全 audit-flip, 0 src change total)。ACTIVE workaround count 7 → ~3 (剩 W-074.9 3 + W-058 + W-057 vendor-only)。v2.13.3+ 推 W-074.9 (3 sub-bugs: dungeon_game gcc link + B-runtime big_array + top_level_let_mut_types)
@@ -236,12 +236,12 @@ v2.13.2 = Group A docs-only audit-flip sprint（per user 2026-09-20 决定，RCA
 
 ## v2.13.3 — STALE docs audit #3: W-074 header + W-074.9 entry + W-074.7 title + W-023 reclassify ✅ shipped 2026-09-20
 
-v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, 跟 v2.13.1/2 同 pattern, RCA-first 0 src change)。在 v2.13.2 ship 基础上继续翻 ../../../workarounds.md STALE entries + 1 个 misclassification 修正。
+v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, 跟 v2.13.1/2 同 pattern, RCA-first 0 src change)。在 v2.13.2 ship 基础上继续翻 ../../../internal/workarounds.md STALE entries + 1 个 misclassification 修正。
 
 ### Phase 1 RCA findings (4 STALE flips identified via subagent audit)
 
 **W-074 entry header** STALE:
-- 描述 (../../../workarounds.md line 5294 翻前) 标 `🟡 ACTIVE 2026-09-09 (待 v2.11.0 ship 真修 ... 真修 in flight)`
+- 描述 (../../../internal/workarounds.md line 5294 翻前) 标 `🟡 ACTIVE 2026-09-09 (待 v2.11.0 ship 真修 ... 真修 in flight)`
 - 真修 ship 在 v2.11.0 commit `25dfb00` "W-074 il_len=0 root cause 真修 + regress --self-backend" (Wed Sep 9 2026 20:28:05 +0800, per `git show --stat`)
 - W-074.5 sub-entry 早 v2.11.1 ship 翻 RESOLVED, 但本 entry header 漏翻。W-073 verification gap 已 v2.13.1 ship RESOLVED (per audit W-074.6 真修链 ~900+ LOC 累计 + regress 120/120 PASS)
 
@@ -256,18 +256,18 @@ v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, �
   - v2.12.0 audit (Module/global 类 Scope 12 tests) 验证 `top_level_let_mut_types.jhyy` (EXIT=17) PASS QBE≡SB parity + codegen path diff identical
 
 **W-074.7 title/body mismatch** (title 误标 CLOSED, body 是 ground truth):
-- 标题 (../../../workarounds.md line 6090 翻前) "✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy)"
+- 标题 (../../../internal/workarounds.md line 6090 翻前) "✅ CLOSED (v2.11.15 Iter 2 commit `568d3aa` 2026-09-16 per-arm injection strategy)"
 - body (line 6094) 是 ground truth:"⏸ DEFERRED (audit correction 2026-09-16) — spot-check 5/12 PASS, 但 full regress 验证 11/12 C.3 tests 仍 FAIL (只有 min_enum 真 PASS)。Iter 2 fix 闭合了 min_enum 一例, 未根治 phi merge gap, 需要 v2.11.17+ 重设计"
 - 真因: v2.11.16 Phase 0 audit (user 要求 full regress 跑全 135 tests) 发现 spot-check 不可靠 + stale .s 推断错误 → audit correction 不能信 spot-check 5/12 PASS,flip title to ⏸ DEFERRED 是 canonical 化 body ground truth
 - Iter 2 commit `568d3aa` 实际改动 (per git log + body line 6096-6099):codegen_amd64_state.jhyy + codegen_amd64_emit_call.jhyy emit_phi rewrite + codegen_amd64_emit_ctrl.jhyy + codegen_amd64.jhyy malloc 160→224
 
 **W-023 misclassification** (canonical pattern, 不是 bug):
-- 描述 (../../../workarounds.md line 1965-1967 翻前) 标 `ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)`
+- 描述 (../../../internal/workarounds.md line 1965-1967 翻前) 标 `ACTIVE (yaml 表达式 + bash sub-shell 语义鸿沟, GH Actions 设计就这样)`
 - entry 自身 line 末尾写 "失效条件 N/A (设计如此)" 即承认无 bug
 - 真解: GH Actions msys2 bash 设计如此 — `${VAR}` 不展开 `${{ env.X }}` GH 表达式 (yaml 表达式只 expanded 在 yaml 解析期, msys2 bash sub-shell `run:` block 拿不到)。canonical pattern = `echo "VERSION=${VERSION}"` 必须直接读 `$VERSION` (从 env block 注入)
 - 重新归类:📚 **DOCS / canonical pattern**, 非 ACTIVE workaround
 
-### 5 status flips + 1 reclassify (../../../workarounds.md docs-only)
+### 5 status flips + 1 reclassify (../../../internal/workarounds.md docs-only)
 
 | W-NNN | 翻前 | 翻后 |
 |-------|------|------|
@@ -287,7 +287,7 @@ v2.13.3 = Group A docs-only audit-flip sprint #3 (per user 2026-09-20 决定, �
   - self-backend: **121/142 PASS** (baseline 121/142 HOLD)
   - per `feedback_regress_clean_count` `rm _regress_*.exe` 清 stale artifact, FRESH total 写入 changelog
 - **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.3 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
-- **V.4** Phase 3 aggregate — 5 flips verified (3 status flip + 1 superseder cross-ref + 1 reclassify), ../../../workarounds.md ACTIVE count ~3 → ~1 (剩 W-058 + W-057 vendor-only, ACTIVE workaround count 归零)
+- **V.4** Phase 3 aggregate — 5 flips verified (3 status flip + 1 superseder cross-ref + 1 reclassify), ../../../internal/workarounds.md ACTIVE count ~3 → ~1 (剩 W-058 + W-057 vendor-only, ACTIVE workaround count 归零)
 
 ### Commit history (axis-v2)
 
@@ -324,26 +324,26 @@ v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change,
 ### Phase 1 RCA findings (4 mislabel/PARTIAL flips identified via status line audit)
 
 **W-022** ACTIVE → 📚 DOCS / canonical pattern:
-- 描述 (../../../workarounds.md line 1925 翻前) 标 `ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)`
+- 描述 (../../../internal/workarounds.md line 1925 翻前) 标 `ACTIVE (PowerShell 5.1 在 windows-latest runner 是 default; GH Actions 升级 PS7 之前持续)`
 - entry 自身 line 末尾写 "失效条件 N/A (设计如此,workaround 是规范用法)" 即承认无 bug
 - 真解: GH Actions PS5.1 default 在 windows-latest runner, workaround = `Set bash as default shell step` (v1.5.5 ship 起,canonical pattern)
 - 重新归类:📚 **DOCS / canonical pattern**, 非 ACTIVE workaround
 
 **W-024** ACTIVE → 🌍 ENV-ONLY:
-- 描述 (../../../workarounds.md line 2012 翻前) 标 `ACTIVE (PS5.1 default 在 windows-latest runner)`
+- 描述 (../../../internal/workarounds.md line 2012 翻前) 标 `ACTIVE (PS5.1 default 在 windows-latest runner)`
 - 真因: PS5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF (`PSDefaultParameterValues` 不能 unset);Windows PowerShell 5.1 是 GH Actions `windows-latest` runner default
 - **Jhyy-side 不可修** (不是 jhyy 编译产物问题, 是 GitHub runner PS 版本依赖)
 - 重新归类:🌍 **ENV-ONLY**, 非 ACTIVE workaround (jhyy 不可控, env 限制)
 
 **W-029** 🟢 ACTIVE → 🟢 STABLE-PRODUCTION:
-- 描述 (../../../workarounds.md line 2246 翻前) 标 `🟢 ACTIVE (v1.5.6 ship, commit TBD)`
+- 描述 (../../../internal/workarounds.md line 2246 翻前) 标 `🟢 ACTIVE (v1.5.6 ship, commit TBD)`
 - 真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path() + jh_gcc_invoke() — A 派 Driver 探测" + docs commit `28450d3` "docs(v1.5.6): workarounds W-027 SUPERSEDED + W-029 ACTIVE + changelog v1.5.6 section"
 - **`commit TBD` 是 docs 漏填** (真修 commit 已 ship,只是 entry 当时没补填)
 - 重新归类:🟢 **STABLE-PRODUCTION** 替代 🟢 ACTIVE (后者 label 误导, future contributor 看到 🟢 ACTIVE 误以为还需真修)
 - **非 ACTIVE workaround** (fix ship'd 4+ years stable in production, 无未修项)
 
 **W-074.6 T4-g** ⚠️ PARTIAL → ✅ RESOLVED:
-- 描述 (../../../workarounds.md line 5868 翻前) 标 `⚠️ PARTIAL 2026-09-13 — v2.11.11 ship on axis-v2 + tag v2.11.11。**6/6 self-backend EXIT exact closure NOT 达成** (5/6 maintained, big_test 仍 fail 但改 different reason)`
+- 描述 (../../../internal/workarounds.md line 5868 翻前) 标 `⚠️ PARTIAL 2026-09-13 — v2.11.11 ship on axis-v2 + tag v2.11.11。**6/6 self-backend EXIT exact closure NOT 达成** (5/6 maintained, big_test 仍 fail 但改 different reason)`
 - 真修 ship 在 v2.11.11 commit `e01cb59` "fix(codegen): v2.11.11 W-074.6 T4-g lexer cnew/ceqw silent-skip 真修" + docs `c6a703f` + `f0c1860`
 - 5/6 self-backend EXIT exact closure ship done (big_test EXIT=57 preserved 跨 v2.11.10/11/12/13/15/19/20/21-fix/23 + v2.13.0/1/2/3 全程维持)
 - **6/6 完整 closure NOT 达成** = big_test 6/6 self-backend EXIT exact match **不是本 W-074.6 T4-g scope**, 是 separate deeper bug (W-074.7.9 范围, 已 v2.11.9 + v2.13.1 全 ship 闭环)
@@ -351,7 +351,7 @@ v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change,
 - entry section header (line 5865) 已经写 `✅ RESOLVED (v2.11.12 ship 2026-09-15)`, body status ⚠️ PARTIAL label 不一致 — v2.13.4 closeout flip body status 跟 header canonical 一致
 - **非 ACTIVE workaround**
 
-### 4 status flips (../../../workarounds.md docs-only)
+### 4 status flips (../../../internal/workarounds.md docs-only)
 
 | W-NNN | 翻前 | 翻后 |
 |-------|------|------|
@@ -369,7 +369,7 @@ v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change,
   - QBE: **121/141 PASS** (baseline 121/141 HOLD, v2.13.4 无 new fixture)
   - self-backend: **121/142 PASS** (baseline 121/142 HOLD)
 - **V.3** Phase 2 — D43 closure baseline HOLD (v2.13.4 = docs-only, src0 未改 → 无 re-baseline event expected) on `b743f8a5...`
-- **V.4** Phase 3 aggregate — 4 flips verified (W-022 + W-024 + W-029 + W-074.6 T4-g), ../../../workarounds.md ACTIVE count ~5 → **真 ACTIVE = 0** (剩 W-058 + W-057 + W-074.7 三条真未修, 推后续 sprint)
+- **V.4** Phase 3 aggregate — 4 flips verified (W-022 + W-024 + W-029 + W-074.6 T4-g), ../../../internal/workarounds.md ACTIVE count ~5 → **真 ACTIVE = 0** (剩 W-058 + W-057 + W-074.7 三条真未修, 推后续 sprint)
 
 ### Commit history (axis-v2)
 
@@ -403,14 +403,14 @@ v2.13.4 = Group A docs cleanup sprint (per user 2026-09-20 决定, 0 src change,
 - v2.12.0 audit log: `docs/archive/audit/v2.12.0-audit-log.md` (C.3 12 tests / Misc 32 tests 等 8 类别 119 tests 全 PASS QBE≡SB byte-equal evidence)
 - Memory: `feedback_rca_first_root_cause` (v2.13.4 scope DOWN 关键) + `feedback_doc_refactor_factcheck` (status flip 前 fact-check 真修 cross-ref) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_small_plans_no_docs` (单 stage step-by-step plan 不写 `docs/plans/`) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell)
 
-## v2.13.5 — ../../../workarounds.md format refactor + new docs/workarounds.md ✅ shipped 2026-09-20
+## v2.13.5 — ../../../internal/workarounds.md format refactor + new docs/internal/workarounds.md ✅ shipped 2026-09-20
 
-v2.13.5 = Group B docs refactor sprint (per user 2026-09-20 决定 "格式在拖内容后腿", 跟 v2.13.1/2/3/4 同 docs-only pattern, 0 src change)。在 v2.13.4 ship 基础上重整 `../../../workarounds.md` 格式纪律, 解决 4 类格式痛点 (10+ ad-hoc emoji-laden label / 长叙述塞状态行 / 补登条目无 marker / 编号重用)。
+v2.13.5 = Group B docs refactor sprint (per user 2026-09-20 决定 "格式在拖内容后腿", 跟 v2.13.1/2/3/4 同 docs-only pattern, 0 src change)。在 v2.13.4 ship 基础上重整 `../../../internal/workarounds.md` 格式纪律, 解决 4 类格式痛点 (10+ ad-hoc emoji-laden label / 长叙述塞状态行 / 补登条目无 marker / 编号重用)。
 
 ### Phase 1 调研 findings (v2.13.4 ship 后状态盘点)
 
 - **真 ACTIVE workaround count = 0** (per v2.13.4 closeout, 剩 W-057 / W-058 / W-074.7 三条 DEFERRED) — v2.13.5 = format refactor 优先, 不真修
-- **../../../workarounds.md 体量**: 6710+ LOC, 87 H2 entries, ~76 status lines with 10+ ad-hoc emoji label (✅/🟢/🟡/❌/⏸/📚/🔵/🌍 等)
+- **../../../internal/workarounds.md 体量**: 6710+ LOC, 87 H2 entries, ~76 status lines with 10+ ad-hoc emoji label (✅/🟢/🟡/❌/⏸/📚/🔵/🌍 等)
 - **5-state enum vs reality drift**: 实际 5 态 (ACTIVE/RESOLVED/SUPERSEDED/DEFERRED/INVALID), 但历史只用了 3 态 (ACTIVE/RESOLVED/SUPERSEDED)
 - **长叙述塞 status line**: W-074.6 status line ~1800 char (max ~700 char in W-074.6 sub-entries), 大部分 RCA detail 应进 `### Resolution detail` 子段
 - **补登条目无结构化 marker**: "本 v1.7.3 patch C2 补登" 口头声明无 `[backfilled YYYY-MM-DD]` grep-friendly 标记
@@ -431,9 +431,9 @@ v2.13.5 = Group B docs refactor sprint (per user 2026-09-20 决定 "格式在拖
 - `ACTIVE` / `DEFERRED` / `INVALID` 用 `since` (未闭合 / 未发生)
 - `RESOLVED` / `SUPERSEDED` 用 `closed` (终态)
 
-### Phase 3 顶部 4 sections 重建 (../../../workarounds.md line 6-79)
+### Phase 3 顶部 4 sections 重建 (../../../internal/workarounds.md line 6-79)
 
-v2.13.5 ship 时 ../../../workarounds.md 顶部 4 sections 重写:
+v2.13.5 ship 时 ../../../internal/workarounds.md 顶部 4 sections 重写:
 1. `## 状态行 (v2.13.5 6-field schema)` — 6-field 格式 spec, verb convention, caption ≤120 char
 2. `## 状态枚举 (v2.13.5 refactor)` — 5 态表格 + 转换路径 + 旧 10+ ad-hoc label → 新 enum 映射
 3. `## 编号规则 (锁死)` — W-NNN 永远递增, 不重用; W-NNN.M = sub-entry 独立 status; 索引 reorder 允许但 monotonic
@@ -459,9 +459,9 @@ v2.13.5 ship 时补 3 个 entry 缺 status line:
 - **W-070** (cg_module 阶段 fatal v2.8.1 surface) — 加 `**状态:** RESOLVED closed — (v2.8.2 commit `8b4d43d` + v2.8.3 docker gcc chain, 2026-09-08)`, `**Backfilled:** 2026-09-20`, `**Filed-by:** audit-flip-v2.13.5`
 - **W-075** (renumbered from W-074.6 v2.11.2 PARTIAL detailed) — 加 `**状态:** SUPERSEDED closed — (audit-flip v2.13.5, 0 src change) — v2.11.2 PARTIAL closure DETAILED 文档;整体 multi-func self-backend 在 v2.13.0 ship FULL CLOSED via W-074.6 parent`
 
-### Phase 6 NEW docs/workarounds.md (../../../workarounds.md 编辑纪律)
+### Phase 6 NEW docs/internal/workarounds.md (../../../internal/workarounds.md 编辑纪律)
 
-v2.13.5 ship 时新建 `docs/workarounds.md` (~138 LOC, 6 sections, no emoji per user 2026-09-20 决定 "不要加emoji"):
+v2.13.5 ship 时新建 `docs/internal/workarounds.md` (~138 LOC, 6 sections, no emoji per user 2026-09-20 决定 "不要加emoji"):
 1. **状态枚举** — 5-state enum 表格 + 转换路径 + 历史 10+ ad-hoc label → 新 enum 映射
 2. **状态行 schema** — 6-field 格式 + verb convention + caption ≤120 char
 3. **Backfilled 规则** — 5 条锁死规则 (拿下一个可用编号 / `**Backfilled:**` 必填 / `**Filed-by:**` 必填 / body 含 RCA / 60 行 retention)
@@ -485,8 +485,8 @@ v2.13.5 ship 时同 ship 4 个 scripts:
 | V.1 | regex match 100% H2 entries; 0 emoji in status line | PASS (76 status lines, 0 emoji prefix, 0 ACTIVE entries per v2.13.4 closeout) |
 | V.2 | Index 77 rows ≤120 char/row, status enum-only | PASS (83 rows, max 120 char, 0 emoji in caption, 5-state enum only) |
 | V.3 | MCP `jhyy_workarounds W-XXX` parity (10 sampled) | DEFER to post-merge (MCP 锁 main worktree, axis-v2 ship 后 merge 验) |
-| V.4 | docs/workarounds.md 存在, 6 sections, 0 emoji | PASS (138 LOC, 6 sections + 1 附录, 0 emoji) |
-| V.5 | Single commit `git show <sha> --stat` 5 files modified | PASS (../../../workarounds.md + NEW CLAUDE.md + changelog-v2.11.0.md + ../../../internal/architecture.md + ../../../../README.md); D43 closure HOLD `b743f8a5...`; jhyy.exe sha `3cc0c7752b04e0fd...` HOLD; regress 121/141 PASS QBE + 121/142 PASS self-backend HOLD |
+| V.4 | docs/internal/workarounds.md 存在, 6 sections, 0 emoji | PASS (138 LOC, 6 sections + 1 附录, 0 emoji) |
+| V.5 | Single commit `git show <sha> --stat` 5 files modified | PASS (../../../internal/workarounds.md + NEW CLAUDE.md + changelog-v2.11.0.md + ../../../internal/architecture.md + ../../../../README.md); D43 closure HOLD `b743f8a5...`; jhyy.exe sha `3cc0c7752b04e0fd...` HOLD; regress 121/141 PASS QBE + 121/142 PASS self-backend HOLD |
 
 ### 真剩余 ACTIVE workaround (推后续 sprint, 无变)
 
@@ -500,7 +500,7 @@ v2.13.5 ship 时同 ship 4 个 scripts:
 
 | Sprint | Scope | 状态 |
 |--------|-------|------|
-| **v2.13.5** (本 sprint) | ../../../workarounds.md 格式 refactor + NEW docs/workarounds.md + 编号 dup flip | ✅ shipped |
+| **v2.13.5** (本 sprint) | ../../../internal/workarounds.md 格式 refactor + NEW docs/internal/workarounds.md + 编号 dup flip | ✅ shipped |
 | **v2.13.6** mini | W-057 lexer 放宽 + emit i32 codepoint 字面量 + W-022/W-029/W-024 实际迁 CONTRIBUTING.md + `mcp__jhyy__jhyy_workarounds` enum 更新 | pending |
 | **v2.13.7** mini | W-058 codegen emit binop OpRem 浮点分支 + libm call + 1-2 fixture | pending |
 | **v2.14.0** | W-081 (renumbered W-074.7 dup) phi merge 重设计 + emit_phi noop + match OR/payload 拆 arm block | pending |
@@ -511,7 +511,7 @@ v2.13.5 ship 时同 ship 4 个 scripts:
 - v2.13.5 umbrella changelog (本 section, **不** 创建 standalone `changelog-v2.13.5.md` per [[feedback_changelog_umbrella]])
 - v2.13.4 ship reference: 上一 section v2.13.4 entries (immediate predecessor)
 - v2.13.4 + v2.13.3 + v2.13.2 + v2.13.1 audit-flip precedent (Group A docs-only pattern, 0 src change)
-- 5-state enum + 6-field schema reference: `docs/workarounds.md` § 1 + § 2 (NEW v2.13.5)
+- 5-state enum + 6-field schema reference: `docs/internal/workarounds.md` § 1 + § 2 (NEW v2.13.5)
 - 编号 flip map: v2.13.5 Phase 4 table (7 dup → W-075..W-081)
 - 真修 chain refs: cross-ref 各 dup entry 原文 commit (无新增 src0 改动, v2.13.5 = docs-only refactor)
 - Memory: `feedback_doc_refactor_factcheck` (RCA 链保留 per `### Resolution detail` 段落) + `feedback_changelog_umbrella` (v2.x 单 umbrella 不创建 standalone) + `feedback_plans_per_version` (v2.13.5 = own plan file) + `feedback_no_date_estimates` (无 "几月几月完成" 日期估时) + `feedback_axis_vn_worktree_isolation` (axis-v2 worktree raw bash + 绝对路径) + `feedback_regress_clean_count` (`rm _regress_*.exe` before ship, v2.13.5 = docs-only 所以不需要) + `feedback_ssh_key_same_shell` (SSH push 前 `eval` + `ssh-add` 同 shell) + `feedback_commit_coauthor` (`Co-Authored-By: MiniMax-M3 <noreply@MiniMax>`) + `feedback_no_traditional_chinese` (simplified Chinese only) + `feedback_audit_single_commit_diff` (single commit, 用 `git show <sha>` 验证)
@@ -543,7 +543,7 @@ User 反馈 (2026-09-20): "先看下mcp,你是没改还是改完了服务没生�
 `mcp-jhyy/jhyy_workarounds.py` 加 `_detect_root()` 函数:
 
 1. 默认 = `Path(__file__).resolve().parents[1]` (旧行为,script-derived)
-2. Override: 若 `os.getcwd()` 是 git worktree 且其 `git rev-parse --show-toplevel` ≠ script root 且 `../../../workarounds.md` 存在 → 用 cwd 的 toplevel
+2. Override: 若 `os.getcwd()` 是 git worktree 且其 `git rev-parse --show-toplevel` ≠ script root 且 `../../../internal/workarounds.md` 存在 → 用 cwd 的 toplevel
 3. Fallback: non-git dir / git error → script root
 
 `_default_path()` 在 `search()` 内每次调用 (= runtime-effective,不需 MCP restart,用户 cd 立即跟随)。
@@ -625,7 +625,7 @@ Fix A (5-state enum) 是 module-level change,Python import 时 cache,需 `/resta
 | Plan | `docs/archive/plans/v2/v2.13.7-plan.md` (NEW) | +143 | — | ✅ done |
 | Standalone umbrellas split (v2.12.0 + v2.13.0) | `docs/logs/v2/{changelog-v2.12.0.md, changelog-v2.13.0.md, changelog-v2.11.0.md}` | refactor | — | ✅ done |
 | Changelog (本 section) | `docs/archive/logs/v2/changelog-v2.13.0.md` | +30 | — | ✅ done |
-| Workarounds.md W-057 翻 DEFERRED → RESOLVED | `docs/workarounds.md` | +8 −5 | LOW | ✅ done |
+| Workarounds.md W-057 翻 DEFERRED → RESOLVED | `docs/internal/workarounds.md` | +8 −5 | LOW | ✅ done |
 | README row | `../../../../README.md` | +1 | — | ✅ done |
 
 **Total**: ~115 LOC source + ~170 LOC docs = ~285 LOC, LOW-MED risk.
@@ -666,7 +666,7 @@ Fix A (5-state enum) 是 module-level change,Python import 时 cache,需 `/resta
 | V.7 单 commit `git show <sha> --stat`: 10 files modified | ✅ (commit time 验证) |
 | V.8 tag v2.13.7 push 成功 | ✅ (ship verify) |
 | V.9 main mirror commit 10 files modified | ✅ (mirror time 验证) |
-| V.10 docs/workarounds.md W-057 状态翻 DEFERRED → RESOLVED | ✅ done |
+| V.10 docs/internal/workarounds.md W-057 状态翻 DEFERRED → RESOLVED | ✅ done |
 | V.11 _jhyy_probe.log 留 probe debug 痕迹清理干净 | ✅ (本 sprint 不需 probe log) |
 
 ### Standalone umbrella split (v2.13.7 ship-time)
@@ -689,7 +689,7 @@ v1.7.0 Stage 3 ship 时 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint 
 ### References
 
 - v2.13.7 plan: `../../plans/v2/v2.13.7-plan.md` (143 LOC, NEW)
-- v2.13.7 ship commit: axis-v2 single commit (10 files: lexer.jhyy + parser.jhyy + 2 tests + spec + plan + changelog-v2.12.0.md + changelog-v2.13.0.md + changelog-v2.11.0.md (truncated) + ../../../workarounds.md + ../../../../README.md)
+- v2.13.7 ship commit: axis-v2 single commit (10 files: lexer.jhyy + parser.jhyy + 2 tests + spec + plan + changelog-v2.12.0.md + changelog-v2.13.0.md + changelog-v2.11.0.md (truncated) + ../../../internal/workarounds.md + ../../../../README.md)
 - v2.13.7 mirror commit: main worktree single commit (10 files, per `0cadfba` precedent)
 - v2.13.6.3 ship reference: 上一节 v2.13.6.3 entries (immediate predecessor)
 - Standalone umbrellas: `docs/archive/logs/v2/changelog-v2.12.0.md` (NEW) + `docs/archive/logs/v2/changelog-v2.13.0.md` (NEW)
@@ -709,7 +709,7 @@ v1.7.0 Stage 3 ship 时 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint 
 | Codegen TOKEN_PERCENT + QBE_D/QBE_S 早期 return, emit 5-insn formula (trunc) | `compiler/src0/codegen.jhyy` | +37 −0 | LOW | ✅ done |
 | 3 new tests (basic + negative + f32; negative `+100` 避开 Win NTSTATUS 误判) | `compiler/tests/examples/{fmod_basic,fmod_negative,fmod_f32}.jhyy` | +30 | LOW | ✅ done |
 | Spec 附录 B P3 fmod row 修订 (trunc 段, NOT LIMIT) | `docs/abis/jhyy-lang-spec-v1.3.0.md` | +1 −1 | LOW | ✅ done |
-| Workarounds W-058 翻 DEFERRED → RESOLVED | `docs/workarounds.md` | +45 −5 | LOW | ✅ done |
+| Workarounds W-058 翻 DEFERRED → RESOLVED | `docs/internal/workarounds.md` | +45 −5 | LOW | ✅ done |
 | Plan (NEW) | `docs/archive/plans/v2/v2.13.8-plan.md` (NEW, ~155 LOC) | +155 | — | ✅ done |
 | Changelog (本 section) | `docs/archive/logs/v2/changelog-v2.13.0.md` | +50 | — | ✅ done |
 | Ship-time umbrella append helper (NEW) | `scripts/dev/v2_13_8_umbrella_append.py` (NEW, +117 LOC) | +117 | LOW | ✅ done |
@@ -755,7 +755,7 @@ v1.7.0 Stage 3 ship 时 (commit `b0e9c3c`) 显式 lex reject 3/4-byte codepoint 
 | V.7 single commit `git show <sha> --stat`: 10 files modified (8 src/docs + jhyy.exe + jhyy.il rebuilt) | ✅ (commit time 验证) |
 | V.8 tag v2.13.8 push 成功 | ✅ (ship verify) |
 | V.9 main mirror commit `git show <sha> --stat`: 9 files modified (mirror 完整 minus binaries + plan) | ✅ (mirror time 验证) |
-| V.10 docs/workarounds.md W-058 状态翻 DEFERRED → ✅ RESOLVED | ✅ done |
+| V.10 docs/internal/workarounds.md W-058 状态翻 DEFERRED → ✅ RESOLVED | ✅ done |
 | V.11 fixed-point N=3 closure preserved (新 closure point 若 src0/codegen.jhyy 改了, jhyy.il regenerate, byte-equal v2→v3→v4→v5 PASS) | ✅ (regenerate 后 byte-equal preserved) |
 
 ### Fold op 选 trunc 跨 spec 验证表 (per user 2026-09-21 决定)
@@ -800,7 +800,7 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 
 | 改动 | 文件 | LOC | 风险 | Status |
 |------|------|-----|------|--------|
-| W-081 entry 翻 DEFERRED → ✅ RESOLVED + audit-flip closure 段 (Phase A RCA + 真修 chain refs) | `docs/workarounds.md` | +~15 | LOW | ✅ done |
+| W-081 entry 翻 DEFERRED → ✅ RESOLVED + audit-flip closure 段 (Phase A RCA + 真修 chain refs) | `docs/internal/workarounds.md` | +~15 | LOW | ✅ done |
 | Plan REWRITE (per Phase 1 verification 验证 stale line refs + 真修点 ungrounded → 改为 audit-flip closure scope) | `docs/archive/plans/v2/v2.13.9-plan.md` | rewrite ~250 LOC | LOW | ✅ done |
 | Changelog (本 section) | `docs/archive/logs/v2/changelog-v2.13.0.md` | +~45 | LOW | ✅ done |
 | README row | `../../../../README.md` | +1 | LOW | ✅ done |
@@ -844,14 +844,14 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 | V.2 match.jhyy QBE + self-backend EXIT=20 双 backend 一致 (硬 STOP #3 trigger) | ✅ (审计验证 11 C.3 cluster tests EXIT-exact 双 backend PASS) |
 | V.3 byte-equal D26 5/5 PASS preserved | ✅ |
 | V.4 byte-equal-amd64 V2-B 10/10 PASS preserved | ✅ |
-| V.5 single commit `git show <sha> --stat`: 4-5 files modified (../../../workarounds.md + plan + changelog-v2.13.0.md + ../../../../README.md, NO src0/) | ✅ (commit time 验证) |
+| V.5 single commit `git show <sha> --stat`: 4-5 files modified (../../../internal/workarounds.md + plan + changelog-v2.13.0.md + ../../../../README.md, NO src0/) | ✅ (commit time 验证) |
 | V.6 tag v2.13.9 push 成功 (HTTPS-with-token fallback per `feedback_ssh_key_same_shell` GFW workaround) | ✅ (ship verify) |
 | V.7 main mirror commit `git show <sha> --stat`: 4 files modified (mirror 完整, no src0/ changes to mirror) | ✅ (mirror time 验证) |
 
 ### Scope DOWN vs 原 plan (重大 transparency 记录)
 
 **原 plan 估** (~90-150 LOC source 真修, 4 src0 files touched: codegen.jhyy + codegen_amd64_state.jhyy + codegen_amd64_emit_ctrl.jhyy + codegen_amd64_emit_call.jhyy + 4 docs):
-- Phase A re-RCA B+C 真因 grounded (4-8 hours, RCA doc + ../../../workarounds.md update)
+- Phase A re-RCA B+C 真因 grounded (4-8 hours, RCA doc + ../../../internal/workarounds.md update)
 - Phase B 真修 4 sub-bugs (~90-150 LOC source, MED-MED-HIGH risk)
 - Phase C verification 14 gates
 
@@ -866,7 +866,7 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 ### 真修触发链 (W-081 真因 closures)
 
 - v2.11.13 Iter 4 cne substring 真修 (`e01cb59`) — Sub-bug A ground floor (W-077 main T4-g closure)
-- v2.11.14 Iter 1 attempt — STOP #3 trigger (match.jhyy regress per `../../../workarounds.md:6361` history), reverted, 0 closure
+- v2.11.14 Iter 1 attempt — STOP #3 trigger (match.jhyy regress per `../../../internal/workarounds.md:6361` history), reverted, 0 closure
 - v2.11.15 Iter 2 per-arm injection (`568d3aa`) — Sub-bug A partial closure (5/12 spot-check PASS)
 - v2.11.16 Phase 0 audit — predict "All 12 C.3 tests likely PASS post-Iter 2"
 - v2.11.20 W-074.10 RC-1 + RC-7 (`56be6cf`) — Sub-bug C flag propagate 真修, +7 self-backend tests
@@ -889,14 +889,14 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 ### References
 
 - v2.13.9 plan: `../../plans/v2/v2.13.9-plan.md` (NEW, ~250 LOC, audit-flip closure scope)
-- v2.13.9 ship commit: axis-v2 single commit (4 docs files: ../../../workarounds.md + plan + changelog-v2.13.0.md + ../../../../README.md, NO src0/, per audit-flip closure scope)
+- v2.13.9 ship commit: axis-v2 single commit (4 docs files: ../../../internal/workarounds.md + plan + changelog-v2.13.0.md + ../../../../README.md, NO src0/, per audit-flip closure scope)
 - v2.13.9 mirror commit: main worktree single commit (4 docs files, mirror 完整, no src0/ changes to mirror, per `0cadfba` precedent)
 - v2.13.8 ship reference: 上一节 v2.13.8 entries (immediate predecessor, W-058 fmod emit 真修)
-- W-081 entry: `docs/workarounds.md:6331-6410` (DEFERRED → ✅ RESOLVED via v2.13.9 audit-flip closure)
-- W-082 entry: `docs/workarounds.md:6411-6532` (DEFERRED to v2.13.10 mini)
-- W-074.10 entry: `docs/workarounds.md:6483+` (Sub-bug C flag propagate 真修 reference)
-- W-074.12 entry: `docs/workarounds.md:6552+` (Sub-bug D 真修 reference)
-- W-074.8 audit-flip precedent: `docs/workarounds.md:6409-6411` (per user 2026-09-20 决定)
+- W-081 entry: `docs/internal/workarounds.md:6331-6410` (DEFERRED → ✅ RESOLVED via v2.13.9 audit-flip closure)
+- W-082 entry: `docs/internal/workarounds.md:6411-6532` (DEFERRED to v2.13.10 mini)
+- W-074.10 entry: `docs/internal/workarounds.md:6483+` (Sub-bug C flag propagate 真修 reference)
+- W-074.12 entry: `docs/internal/workarounds.md:6552+` (Sub-bug D 真修 reference)
+- W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
 - Standalone umbrella: `docs/archive/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
 - Memory: `feedback_fix_evaluation_rule` (诚实记录 actual PASS rate: 11 C.3 cluster tests EXIT-exact 双 backend PASS) + `feedback_regress_clean_count` (FRESH baseline HOLD) + `feedback_plans_per_version` (v2.13.9 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, `git show <sha>` 验证 0 src0/ files = audit-flip scope) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev, raw bash + 绝对路径) + `feedback_ssh_key_same_shell` (HTTPS-with-token HTTP/1.1 forced push) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone `changelog-v2.13.0.md` umbrella 内) + `feedback_no_artifacts_in_project` + `feedback_no_date_estimates` + `feedback_rca_first_root_cause` (Phase A re-RCA 强制) + `feedback_doc_refactor_factcheck` (../../plans/v2/v2.13.9-plan.md REWRITE + W-081 entry 翻 RESOLVED)
 
@@ -911,8 +911,8 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 
 | 改动 | 文件 | LOC | 风险 | Status |
 |------|------|-----|------|--------|
-| W-082 entry 翻 DEFERRED → audit-flip + convention enforced + closure 段 (6 段理由 + future 真修路径 + ship 实际 file 列表) | `docs/workarounds.md` | +~25 | LOW | ✅ done |
-| W-082 索引行 (line 158) 同步 flip "DEFERRED" → "audit-flip + convention enforced" + caption 加 v2.13.10 reference | `docs/workarounds.md` | +1 −1 | LOW | ✅ done |
+| W-082 entry 翻 DEFERRED → audit-flip + convention enforced + closure 段 (6 段理由 + future 真修路径 + ship 实际 file 列表) | `docs/internal/workarounds.md` | +~25 | LOW | ✅ done |
+| W-082 索引行 (line 158) 同步 flip "DEFERRED" → "audit-flip + convention enforced" + caption 加 v2.13.10 reference | `docs/internal/workarounds.md` | +1 −1 | LOW | ✅ done |
 | codegen.jhyy line 1003-1005 + 2103-2110 comment 补强 (加 W-082 reference, 纯 comment 不动 emit logic) | `compiler/src0/codegen.jhyy` | +6 −0 | LOW | ✅ done |
 | Convention enforcement regression script NEW (grep `if .*&&.*\|\||if .*\|\|.*&&` in codegen.jhyy, exit 0/1/2 = pass/violate/missing-file) | `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` (NEW) | +~50 | LOW | ✅ done |
 | Plan (NEW) | `docs/archive/plans/v2/v2.13.10-plan.md` (NEW, ~250 LOC) | +250 | LOW | ✅ done |
@@ -949,8 +949,8 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 
 **v2.13.9 plan line 36-38 + 121-123 + 882-885 估的**:
 - vendor QBE 升级 (拉 2026-Q3 主线看 remd/rems) → **不在 backlog** (vendor QBE 升级是 OS 启动链路 follow-up, 非 W-082 依赖)
-- W-074.6 family 后续 → **已 RESOLVED** per ../../../workarounds.md:147 (v2.13.0 ship FULL CLOSED)
-- W-074.7.9 big_test runtime STATUS_INTEGER_OVERFLOW → **已 RESOLVED** per ../../../workarounds.md:151 (v2.11.9 ship + v2.13.1 audit-flip)
+- W-074.6 family 后续 → **已 RESOLVED** per ../../../internal/workarounds.md:147 (v2.13.0 ship FULL CLOSED)
+- W-074.7.9 big_test runtime STATUS_INTEGER_OVERFLOW → **已 RESOLVED** per ../../../internal/workarounds.md:151 (v2.11.9 ship + v2.13.1 audit-flip)
 
 **真实 backlog** (post v2.13.10 ship):
 - ✅ W-057 RESOLVED (v2.13.7)
@@ -970,11 +970,11 @@ v1.7.2 patch A1 ship 时 (per `docs/logs/v1/changelog-v1.7.2.md` A1) fact-check 
 - v2.13.10 ship commit: axis-v2 single commit (5 docs/infra files + 1 codegen.jhyy comment 补强, NO src0 logic 改)
 - v2.13.10 mirror commit: main worktree single commit (5 docs/infra files mirror + codegen.jhyy comment 补强 mirror)
 - v2.13.9 ship reference: 上一节 v2.13.9 entries (immediate predecessor, W-081 audit-flip docs-only — same pattern)
-- W-082 entry: `docs/workarounds.md:6421-6556` (DEFERRED → audit-flip + convention enforced via v2.13.10)
-- W-082 索引行: `docs/workarounds.md:158` (同步 flip)
+- W-082 entry: `docs/internal/workarounds.md:6421-6556` (DEFERRED → audit-flip + convention enforced via v2.13.10)
+- W-082 索引行: `docs/internal/workarounds.md:158` (同步 flip)
 - codegen.jhyy comment 补强: `compiler/src0/codegen.jhyy:1003-1005` + `:2111-2113` (纯 comment 不动 emit logic)
 - Convention enforcement regression script: `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py` (NEW, ~50 LOC)
-- W-074.8 audit-flip precedent: `docs/workarounds.md:6409-6411` (per user 2026-09-20 决定)
+- W-074.8 audit-flip precedent: `docs/internal/workarounds.md:6409-6411` (per user 2026-09-20 决定)
 - Standalone umbrella: `docs/archive/logs/v2/changelog-v2.13.0.md` (本 section 在内, 跟 `changelog-v2.11.0.md` 拆开 per v2.13.7 ship-time split)
 - Memory: `feedback_fix_evaluation_rule` (诚实记录 actual rate: convention grep V.3 exit 0 PASS) + `feedback_plans_per_version` (v2.13.10 = own plan file) + `feedback_audit_single_commit_diff` (单 commit per worktree, codegen.jhyy diff 只 comment) + `feedback_axis_vn_worktree_isolation` (axis-v2 active dev) + `feedback_ssh_key_same_shell` (HTTPS-with-token fallback) + `feedback_commit_coauthor` + `feedback_no_traditional_chinese` + `feedback_changelog_umbrella` (本 section 在 standalone umbrella 内) + `feedback_doc_refactor_factcheck` (W-082 status fact-check pre-plan) + `feedback_document_workarounds_in_docs` (W-082 entry status flip + 索引行 flip + codegen.jhyy comment 补强) + `feedback_rca_first_root_cause` (Phase 1 re-RCA 验证 user-facing 不触发)
 
@@ -1015,7 +1015,7 @@ Plan agent 报告 lexer 不识别 `stosi/dtosi/swtof`, 实际已识别 since v2.
 | 文件 | 改/增 | LOC |
 |------|-----|-----|
 | `compiler/src0/codegen_amd64_emit_sse.jhyy` | 改 `emit_conv_swtof` 函数体 (is_f32 + cvt_suffix + cltq) | ~10 |
-| `docs/workarounds.md` | W-083 NEW entry + W-058 entry line 4082 fix + 索引行 + W-058 status 行 | ~100 |
+| `docs/internal/workarounds.md` | W-083 NEW entry + W-058 entry line 4082 fix + 索引行 + W-058 status 行 | ~100 |
 | `docs/archive/plans/v2/v2.13.11-plan.md` | NEW | ~250 |
 | `docs/archive/logs/v2/changelog-v2.13.0.md` | v2.13.11 section append (本 section) | ~50 |
 | `../../../../README.md` | v2.13.11 row | +1 |
@@ -1099,7 +1099,7 @@ user 2026-09-22 decide → Strategy B+ (skip file I/O, NOT skip QBE IL), plan RE
 |---|---|---|---|
 | `docs/internal/build.md` | MOD | +3 / -0 | regress section v2.15.0 in-mem path 注释 |
 | `docs/internal/architecture.md` | MOD | +60 / -8 | §"In-Mem Pipeline" 段 (codegen_amd64_inmem.jhyy 角色 + env gate contract + W-074.14 关系 + closure + verification) |
-| `docs/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
+| `docs/internal/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
 | `docs/archive/plans/v2/v2.15.0-plan.md` | REWRITE | ~120 / ~120 | 删 "QBE 自写" 章 + 加 Real Implementation 段 |
 | `../../../../README.md` | MOD | +1 | v2.15.0 row |
 | `docs/archive/logs/v2/changelog-v2.13.0.md` | MOD | +50 | v2.15.0 section append (本 section, per `feedback_changelog_umbrella`) |
@@ -1221,7 +1221,7 @@ verification infrastructure expansion sprint (NOT src0 真修, per `docs/archive
 - `../../README.md` v2.14.0 status row (+1 LOC)
 - `docs/internal/architecture.md` "N≥10 fixed point" + "Mutation testing" + "Linux cross-platform" 节 (+~80 LOC)
 - `docs/archive/logs/v2/d43-baseline-archive.md` v2.14.0 row (N=10 long-term hold, baseline sha = `43fee332...`)
-- `docs/workarounds.md` mutation testing protocol 文档化 (新 protocol 非 workaround) (~30 LOC)
+- `docs/internal/workarounds.md` mutation testing protocol 文档化 (新 protocol 非 workaround) (~30 LOC)
 
 **Total scope**: ~1166 LOC (Phase 1: 67 + Phase 2: 426+286+80 = 792 + Phase 3: 223+82 = 305 + 4 docs files)。 Single commit per worktree (per `feedback_audit_single_commit_diff`)。
 
@@ -1240,7 +1240,7 @@ verification infrastructure expansion sprint (NOT src0 真修, per `docs/archive
 | `../../README.md` | v2.14.0 status row | +1 |
 | `docs/internal/architecture.md` | N≥10 + Mutation testing + Linux cross-platform 节 | +~80 |
 | `docs/archive/logs/v2/d43-baseline-archive.md` | v2.14.0 row (N=10 long-term hold, baseline sha = `43fee332...`) | +~15 |
-| `docs/workarounds.md` | mutation testing protocol 文档化 | +~30 |
+| `docs/internal/workarounds.md` | mutation testing protocol 文档化 | +~30 |
 
 **Total**: ~1166 LOC + 6 docs files ~211 LOC = ~1377 LOC. LOW risk (verification infra + docs, 0 src0 changes).
 
@@ -1345,7 +1345,7 @@ user 2026-09-22 decide → Strategy B+ (skip file I/O, NOT skip QBE IL), plan RE
 |---|---|---|---|
 | `docs/internal/build.md` | MOD | +3 / -0 | regress section v2.15.0 in-mem path 注释 |
 | `docs/internal/architecture.md` | MOD | +60 / -8 | §"In-Mem Pipeline" 段 (codegen_amd64_inmem.jhyy 角色 + env gate contract + W-074.14 关系 + closure + verification) |
-| `docs/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
+| `docs/internal/workarounds.md` | MOD | +52 / -0 | W-074.14 NEW entry + index line (~163) |
 | `docs/archive/plans/v2/v2.15.0-plan.md` | REWRITE | ~120 / ~120 | 删 "QBE 自写" 章 + 加 Real Implementation 段 |
 | `../../../../README.md` | MOD | +1 | v2.15.0 row |
 | `docs/archive/logs/v2/changelog-v2.13.0.md` | MOD | +50 | v2.15.0 section append (本 section, per `feedback_changelog_umbrella`) |
@@ -1429,7 +1429,7 @@ user 2026-09-22 decide → Strategy B+ (skip file I/O, NOT skip QBE IL), plan RE
 **Phase 3 — bench.sh + byte_equal upgrade + docs + ship:**
 - `compiler/tests/bootstrap/bench.sh` NEW (~250 LOC): 3 programs (fib(35) / ackermann(3,8) / nqueens(7)) vs gcc -O2 same-source baseline,5-run min trimmed-mean,`--report` 默认 (exit 0 accept first-time baseline) + `--strict` flag (ratio ≤ 1.1x FAIL gate,CI 用)。First-time baseline:nq 0.965x [PASS] / ack 1.000x [PASS] / fib 1.531x [FAIL]。fib 是已知 1.5x 区间 (jhyy-side recursion 没有 -O2 的 inlining / constant propagation 等优化,perf opt 是 v3.x territory per `feedback_no_artifacts_in_project`)。
 - `compiler/tests/bootstrap/byte_equal.sh` MOD: [3/3] .exe byte-equal 升级 V2-only closure (V2 rebuild 4 次 → byte-equal 是 FAIL gate,V1 frozen predates D26 coverage 仍 expected INFO with new audit message);header comment 加 v2.16.0 段。
-- `docs/workarounds.md`: W-085 NEW entry (🟡 ACTIVE) — codegen small-frame `fn(*T, i32, i32)` 第 3 i32 参数 save 寄存器错位 (frame-size threshold < 136B 时 codegen 用 %ecx 覆盖 %r8d);workaround pattern: reorder signature `(i32, i32, *T)` 或加 `_pad` 让 frame ≥ 264B;bench.sh nqueens 用 reorder 已验证 nq 0.965x [PASS];fix deferred to v3.x。
+- `docs/internal/workarounds.md`: W-085 NEW entry (🟡 ACTIVE) — codegen small-frame `fn(*T, i32, i32)` 第 3 i32 参数 save 寄存器错位 (frame-size threshold < 136B 时 codegen 用 %ecx 覆盖 %r8d);workaround pattern: reorder signature `(i32, i32, *T)` 或加 `_pad` 让 frame ≥ 264B;bench.sh nqueens 用 reorder 已验证 nq 0.965x [PASS];fix deferred to v3.x。
 - `docs/internal/build.md`: QBE 引用全删 + "v2.16.0 QBE 完全移除; 自写 backend 是 sole production path" 历史注释 + "Backend history" section 增补。
 - `docs/archive/plans/v2/v2.16.0-plan.md` NEW (per `feedback_plans_per_version` 每个 minor version 一个 plan file): 含 Context + Outcome + 7 verification gates + scope + phase 细节 + risk + out-of-scope + bench.sh spec。
 - `../../README.md`: v2.16.0 row 📋 planned → ✅ shipped;v2.x 末 5 sub-sprint chain final-state note (5/5 ✅)。

@@ -8,7 +8,7 @@
 
 ## 1. 范围 / Scope — docs-only ship, false-active workaround flip
 
-**关键结论**:v3.4.0 = **no-op code sprint**。原计划 `docs/archive/plans/v3/v3.4.0-plan.md` 预测需要真修 codegen `int_arg_alloc` (W-085 emit_call small-frame 3rd i32 arg save-slot collision),RCA 后发现 W-085 已在 V3 v3.3.0 不 reproduce,bench.sh workaround 是 dead code。v3.4.0 ship = **bench.sh revert + ../../../workarounds.md W-085 ✅ flip + changelog**;**src0/ codegen = 0 line diff**。
+**关键结论**:v3.4.0 = **no-op code sprint**。原计划 `docs/archive/plans/v3/v3.4.0-plan.md` 预测需要真修 codegen `int_arg_alloc` (W-085 emit_call small-frame 3rd i32 arg save-slot collision),RCA 后发现 W-085 已在 V3 v3.3.0 不 reproduce,bench.sh workaround 是 dead code。v3.4.0 ship = **bench.sh revert + ../../../internal/workarounds.md W-085 ✅ flip + changelog**;**src0/ codegen = 0 line diff**。
 
 **触发原因 (2026-09-29)**:user 决定 "v3.4.0 go" 后按 ../../plans/v3/v3.4.0-plan.md § Execution steps 真修 `codegen_amd64_xmm_argalloc.jhyy:int_arg_alloc` → wide/narrow sub-pool。Build 后 literal W-085 trigger `fn(*T, i32, i32)` 测试 SEGV(因 sub-pool 让 narrow idx 0 → ecx 跟 wide idx 0 → rcx 物理重叠,movl ecx zero-extend upper 32 bits 覆盖 rcx pointer)。**RCA iter 1**:回退我的 fix,看 v3.3.0 baseline jhyy.exe 同样 literal trigger → EXIT=3 PASS,emit `movq ... %rcx; movl ... %edx; movl ... %r8d` 正确 ABI,**无 save slot collision**。
 
@@ -26,7 +26,7 @@
 | V3 v3.1.0/Ph.1 | `0d9c527` (2026-09-25) | wholesale port V2 v2.16.0 src0 self-backend + W-089 stdlib pointer-flag extension → emit_call arg-save 路径整体重写 |
 | V3 v3.2.3.1 | `a82fb57` | W-080 std_io_print + i32 ret zero-extend 真修 → emit_call 路径再次调,save-slot layout 跟 V2 不再 byte-equal |
 | V3 v3.2.4 | `d760c51` | W-090 bitmap 1024 + W-091 std_ catch-all → emit_call refactor,save-slot collision fix 间接 closed |
-| **v3.4.0 (本 ship)** | (待 ship) | **docs-only flip**:bench.sh revert workaround + ../../../workarounds.md W-085 ✅ + changelog;**src0/ = 0 line diff** |
+| **v3.4.0 (本 ship)** | (待 ship) | **docs-only flip**:bench.sh revert workaround + ../../../internal/workarounds.md W-085 ✅ + changelog;**src0/ = 0 line diff** |
 
 ### 2.2 5/5 ship gate verification (per [[feedback_fix_evaluation_rule]] 5/5 PASS on target test)
 
@@ -36,7 +36,7 @@
 | 2. bench.sh nq ratio (post bench.sh revert) | `bash compiler/tests/bootstrap/bench.sh` | nq ratio ≥ 1.000x | ✅ 1.073x PASS (workaround 1.077x → revert 1.073x 在 timing noise 内) |
 | 3. regress full run | `python regress.py --all` | 145/145 PASS / 0 FAIL / 20 SKIP | ✅ 无 src0 改动 → 保持 145/145 PASS / 0 FAIL / 20 SKIP |
 | 4. D43 closure chain byte-equal | `jhyy_v1.exe.exe --selfhost-check jhyy.exe` | N16 → N17 hold | ✅ 无 src0 改动 → byte-equal hold |
-| 5. ../../../workarounds.md + bench.sh flip | `git diff docs/workarounds.md compiler/tests/bootstrap/bench.sh` | W-085 ACTIVE → ✅ RESOLVED + bench.sh revert | ✅ done (本 commit) |
+| 5. ../../../internal/workarounds.md + bench.sh flip | `git diff docs/internal/workarounds.md compiler/tests/bootstrap/bench.sh` | W-085 ACTIVE → ✅ RESOLVED + bench.sh revert | ✅ done (本 commit) |
 
 **Gate 1 evidence (W-085 不 reproduce literal trigger)**:
 ```
@@ -77,21 +77,21 @@ per `docs/archive/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真
 
 - **src0/ codegen**:0 line diff。V3 self-backend 输出跟 v3.3.0 byte-equal。
 - **bench.sh**:workaround revert(去掉 `solve` sig reorder + L21-23 WARN note)。bench nq ratio 1.077x → 1.073x(noise 内,gate ≥ 1.000x PASS)。
-- **../../../workarounds.md**:W-085 entry 🟡 ACTIVE → ✅ RESOLVED + RCA v3.4.0 段记录 false-active discovery。
+- **../../../internal/workarounds.md**:W-085 entry 🟡 ACTIVE → ✅ RESOLVED + RCA v3.4.0 段记录 false-active discovery。
 - **ACTIVE workaround count**:3 → 2(W-085 flip;剩 W-088 / W-089 推 v3.4.1 / v3.4.2)。
 - **M11 launch 触发**:无影响(W-085 flip 不增不删 blocker;V2-C v2.8.0 仍 M11 硬前置 per `docs/archive/plans/v2-v3/v2.0.0-os-prep.md § 1`)。
 
 ## 5. 引用 / References
 
 - Plan: `docs/archive/plans/v3/v3.4.0-plan.md` (user-authored 2026-09-28, commit `336d819` / `e1a2d6f`)
-- W-085 entry: `docs/workarounds.md` L5817-5840 ✅ flipped
+- W-085 entry: `docs/internal/workarounds.md` L5817-5840 ✅ flipped
 - V2 原始 W-085 发现: V2 v2.16.0 commit `0b4cde5` ship tail message
 - V3 间接修复 candidates: `0d9c527` v3.1.0 wholesale port / `a82fb57` v3.2.3.1 W-080 / `d760c51` v3.2.4 W-090
 - [[feedback_rca_first_root_cause]] (4-reproducer v2.16.0 → 2-iter v3.4.0 RCA chain)
 - [[feedback_codegen_small_frame_arg_corruption]] (V2 触发面路径; V3 path 不存在)
 - [[feedback_changelog_umbrella]] (vX.Y axis = 1 umbrella changelog,不写 v3.4.1.md / v3.4.2.md)
 - [[feedback_plans_per_version]] (v3.4.0 docs-only ship 符合 per-version plan 原则)
-- [[feedback_no_artifacts_in_project]] (RCA evidence 留 in-commit / ../../../workarounds.md,不另写 rca-V3.4.0.md)
+- [[feedback_no_artifacts_in_project]] (RCA evidence 留 in-commit / ../../../internal/workarounds.md,不另写 rca-V3.4.0.md)
 - [[feedback_fix_evaluation_rule]] (5/5 PASS on target test = 必;false-active verification = bench ratio stable + literal trigger EXIT=correct)
 - [[feedback_regress_clean_count]] (ship 前清 stale `_regress_*.exe`;本 sprint 无新 test,无需清理)
 
@@ -107,7 +107,7 @@ per `docs/archive/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真
   2. **5 originally-failing std_* W-088 trigger tests** (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data) 全 EXIT=0
   3. **5 additional corpus tests** (ffi_file + std_io_basic + std_vec_basic + array_test + mixed_const_struct_import + mixed_struct_slice_match) 全 EXIT=0 — 涵盖 alloc-heavy / alloc-light + many-binop / zero-alloc 3 类触发面
   4. **D43 closure**: v3.4.1 self-compile .il `6c6653fd49...` ≠ v3.4.0 self-compile .il `bb6e78c267...` (N17 → N18 expected drift,src0 diff → codegen 1 .il byte drift)
-  5. **../../../workarounds.md + changelog**: W-088 entry ✅ flipped + RCA v3.4.1 段 full record
+  5. **../../../internal/workarounds.md + changelog**: W-088 entry ✅ flipped + RCA v3.4.1 段 full record
 - **RCA chain (per [[feedback_verify_active_reproduces]])**:
   - Step 1: patch out heuristic `derived_count = total_a / 2` (floor 8) → rebuild via stage0 → binary `jhyy_noheuristic.exe`
   - Step 2: regress full = **147/152 PASS, 5 FAIL** (array_test, mixed_const_struct_import, mixed_struct_slice_match, std_io_basic ACCESS_VIOLATION, std_vec_basic HEAP_CORRUPTION) → heuristic is LIVE (跟 W-085 v3.4.0 RCA 不同 pattern,W-088 heuristic 真 reproduce)
@@ -147,7 +147,7 @@ per `docs/archive/plans/v3/v3.4.0-plan.md` 1:3 split(W-085 / W-088 / W-089 3 真
 - **Gate 2**: regress full 152/152 PASS / 0 FAIL / 21 SKIP (从 v3.4.1 152/152/20 → 152/152/21 — +1 新 test SKIP 加入)。
 - **Gate 3**: 6 originally-failing std_* test (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data + std_vec_basic) 全 EXIT=0/65 (期望值, not buggy 0)。
 - **Gate 4**: D43 closure N18 → N19 re-baseline (1 .il drift expected per Path B semantic 真修)。
-- **Gate 5**: ../../../workarounds.md W-089 ACTIVE → ✅ + changelog-v3.4.md v3.4.2 section full + roadmap ACTIVE bucket → empty。
+- **Gate 5**: ../../../internal/workarounds.md W-089 ACTIVE → ✅ + changelog-v3.4.md v3.4.2 section full + roadmap ACTIVE bucket → empty。
 
 **Root cause 总结**:
 - W-089 v3.1.0 whitelist = name-prefix heuristic — V3 stdlib growth 跟 deploy cadence 矛盾 (跟 V2 v2.16.0 同 gap 但 V2 corpus 无触发面,per [[feedback_v3_self_backend_diverges_v2]])。

@@ -889,4 +889,4 @@ file/shm/framebuffer/compositor/surface/seat/buffer 才能真正形成 capabilit
 | [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | ABI 白皮书（锁定 2026-10-24）· §2.5 `Cap<T>` · §12 已知偏离 |
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**）· §7 cap_init |
 | [`docs/plans/v4/README.md`](../plans/v4/README.md) | **版本系列索引** —— 每个版本槽一份 `v4.X.Y-plan.md`（性能线 6 + OS 线 16） |
-| [`docs/workarounds.md`](../workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |
+| [`docs/internal/workarounds.md`](../internal/workarounds.md) | W-NNN 台账（**ACTIVE = 1** —— W-170：`jhyy build` 不处理 `#[link_section]`）· W-105 借用检查最小版 · W-113 `asm!` 内联 · W-136 side-file |

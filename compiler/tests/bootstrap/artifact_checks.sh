@@ -89,7 +89,7 @@ declare -a SKIPPED=()
 # 签名之间是「或」关系 —— 命中任一即视为已知失败。
 # ════════════════════════════════════════════════════════════════════════════
 #
-# ⚠️ 这里每一行都对应 docs/workarounds.md 里一条 **ACTIVE** 条目。
+# ⚠️ 这里每一行都对应 docs/internal/workarounds.md 里一条 **ACTIVE** 条目。
 #    那条转 RESOLVED 时,**删掉这里对应的一行** —— check 会自动变成真门。
 #    不要用「把签名改宽」的方式让它继续绿,那等于把新 bug 一起吞掉。
 #
@@ -119,7 +119,7 @@ ok() {
         printf "  ❌ UNEXPECTED-PASS %s [%s]\n" "$cid" "${w%%|*}"
         echo "    ${1}"
         echo "    这条 check 对应的 workaround 看起来修好了 —— 但 KNOWN_FAIL 里的登记还在。"
-        echo "    去 docs/workarounds.md 确认状态,若是 RESOLVED 就删掉 KNOWN_FAIL 里"
+        echo "    去 docs/internal/workarounds.md 确认状态,若是 RESOLVED 就删掉 KNOWN_FAIL 里"
         echo "    '${cid}' 那一行,check 会自动升级成真门。状态不失真是这一条存在的全部意义。"
         FAIL_N=$((FAIL_N+1)); FAILED+=("$cid(UNEXPECTED-PASS)")
     else
@@ -1248,7 +1248,7 @@ if [ "$SKIP_N" -gt 0 ]; then
     echo "  未跑成(什么都没验到,不算绿): ${SKIPPED[*]}"
 fi
 if [ "$KNOWN_N" -gt 0 ]; then
-    echo "  在位的已知问题(见 docs/workarounds.md):"
+    echo "  在位的已知问题(见 docs/internal/workarounds.md):"
     for k in "${KNOWN[@]}"; do echo "    - $k"; done
 fi
 if [ "$FAIL_N" -gt 0 ]; then

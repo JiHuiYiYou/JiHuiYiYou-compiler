@@ -55,6 +55,6 @@ jhyy_v2 self-build (jhyy_v2 → jhyy_v2.exe.exe) 在 QBE 阶段 fail — `export
 
 ### 引用
 
-- W-011: `docs/workarounds.md`
+- W-011: `docs/internal/workarounds.md`
 - 计划: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 - C-side 镜像: `compiler/src/main.c:159-229` (push/pop 正确实现)

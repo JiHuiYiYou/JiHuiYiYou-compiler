@@ -54,7 +54,7 @@
 
 **真修路径:** jhyy codegen 顶层 `let mut` emit 真正的 store 指令 (不编译期折叠);或加 `static mut` 关键字;或 codegen 加 `.data` section emit。post-v1.4.1 / v2.x 候选。
 
-**完整记录:** [`docs/workarounds.md`](../../../workarounds.md) § W-017
+**完整记录:** [`docs/internal/workarounds.md`](../../../internal/workarounds.md) § W-017
 
 ## 联动文档改动 (本次 commit 范围内)
 
@@ -63,7 +63,7 @@
 | `compiler/src0/jhyy_helpers.c` | +55 行 (5 extern fn + 4 static buffer + GetModuleFileNameA forward decl) |
 | `compiler/src0/main.jhyy` | +24 行 / -5 行 (4 wrapper fn + main_jhyy init) |
 | `compiler/build/bin/jhyy_v1.exe.exe` 等 4 binary | jhyy_v1.exe.exe sha `1c09215f...` → `f36faeadd05c0...` 等 4 个全刷 |
-| `docs/workarounds.md` | +79 行 (W-017 workaround section + index entry) |
+| `docs/internal/workarounds.md` | +79 行 (W-017 workaround section + index entry) |
 | `docs/archive/logs/v1/changelog-v1.4.0.md` | 本文件 (umbrella, v1.4.x 全部 sprint ship 时续写) |
 
 **非本次 commit 范围 (pre-existing 或独立):**
@@ -156,7 +156,7 @@
 
 **workaround:** 接受 .il 字节差异;DWARF 是给 gdb 用的 .s 输出,非 .il byte-equal 目标。Stage 2 (`v2.il = v3.il = v4.il`) 仍是 v1.4.x+ 强约束。
 
-**完整记录:** [`docs/workarounds.md`](../../../workarounds.md) § W-018
+**完整记录:** [`docs/internal/workarounds.md`](../../../internal/workarounds.md) § W-018
 
 ## v1.4.3 ship (本次 commit)
 
@@ -211,7 +211,7 @@
 
 - v1.4.1 父 sprint: [`docs/archive/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.1
 - C-side argv[0] 实现 (前置 commit): commit `caa093b` v1.4.1 step 1
-- W-017 详细: [`docs/workarounds.md`](../../../workarounds.md) § W-017
+- W-017 详细: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) § W-017
 - ABI 路径无关性: [`docs/abis/jhyy-abi-v4.0.0.md`](../../../abis/jhyy-abi-v4.0.0.md) (无路径相关条目, 编译器纯 runtime concern)
 - 上游 umbrella: `docs/archive/logs/v1/changelog-v1.3.0.md` (v1.3.x ship 历史)
 
@@ -251,7 +251,7 @@
 - ✅ regress_v1.py (v1.4.2 baseline `jhyy_v1.exe.exe`) 50/54 PASS, 同样 1 failed
 
 **未达成 (透明声明):**
-- ❌ **gdb_pretty_test.jhyy compile error** — **v1.4.4 新暴露, 不是 pre-existing v1.4.3**。测试用 `Color::Red => 0` (line 50) 和 `MaybeInt::Some(v) => v` (line 53) 这种 enum pattern, jhyy-side parser.jhyy parse_pattern (line 1104+) 不支持: `parser_check(p, TOKEN_COLONCOLON())` 在 match arm 上下文中返回 0,即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支返回,留下 `::` 让上层 expr 解析报 `expected =>, got ::`。v1.4.3 ship 时 production `jhyy.exe` 实际是 C 端 (sha `c9cff76...`),C 端 parser.c 正确处理此 case,所以测试 C 端能过;jhyy-side bug 被遮住。v1.4.4 把 `jhyy.exe` 物理替换成 jhyy-side (sha `37ffc49c...`),bug 首次暴露。**root cause 是 jhyy-side parser.jhyy parse_pattern 的 divergence,不是 codegen,不归 W-019**。详 → [`docs/workarounds.md`](../../../workarounds.md) § W-020 (新增)。修复路径: 改 `compiler/src0/parser.jhyy` parse_pattern `Color::Variant` 分支 (line 1134 附近) + OR-pattern (line 1282-1288),C-side / jhyy-side mirror byte-equal 对齐;v1.4.7 候选, 或 v1.4.6 跟 W-019 合并真修
+- ❌ **gdb_pretty_test.jhyy compile error** — **v1.4.4 新暴露, 不是 pre-existing v1.4.3**。测试用 `Color::Red => 0` (line 50) 和 `MaybeInt::Some(v) => v` (line 53) 这种 enum pattern, jhyy-side parser.jhyy parse_pattern (line 1104+) 不支持: `parser_check(p, TOKEN_COLONCOLON())` 在 match arm 上下文中返回 0,即使下一个 token 实际是 `::`,parser 走 ident-pattern 分支返回,留下 `::` 让上层 expr 解析报 `expected =>, got ::`。v1.4.3 ship 时 production `jhyy.exe` 实际是 C 端 (sha `c9cff76...`),C 端 parser.c 正确处理此 case,所以测试 C 端能过;jhyy-side bug 被遮住。v1.4.4 把 `jhyy.exe` 物理替换成 jhyy-side (sha `37ffc49c...`),bug 首次暴露。**root cause 是 jhyy-side parser.jhyy parse_pattern 的 divergence,不是 codegen,不归 W-019**。详 → [`docs/internal/workarounds.md`](../../../internal/workarounds.md) § W-020 (新增)。修复路径: 改 `compiler/src0/parser.jhyy` parse_pattern `Color::Variant` 分支 (line 1134 附近) + OR-pattern (line 1282-1288),C-side / jhyy-side mirror byte-equal 对齐;v1.4.7 候选, 或 v1.4.6 跟 W-019 合并真修
 - ✅ **Stage 1 byte-equal 7/7 维持** — 新 `jhyy_stage0.exe` 编 src0/main.jhyy 产 _stage1_C.il sha `107445d637ad3b05aec2d3c64bf6111bca8fe029b2e98e8e6a21cee373dc3c97`, 跟 jhyy.il 同 sha, **byte-equal 完全成立**。ship 时 changelog 标 "Stage 1 byte-equal 不 7/7" 是错的(混淆了 W-005 #2 历史 + W-018 DWARF dbgfile 路径非功能差异),实际 v1.0.0 闭环以来 Stage 1 一直 7/7。Stage 2 closure chain v2/v3/v4 也维持 byte-equal sha `073fb8d4b24ac14656d864b1133cbe7417b22bc26e6fec2633f417b4d61ba2e8` (2026-08-14 实测 `jhyy_selfhost_check` 通过)
 - ❌ regress 默认 binary 仍是 `jhyy.exe` (无变化), v1.4.5 才加 `--stage0` flag
 
@@ -279,7 +279,7 @@
 - `compiler/src0/parser.jhyy` — `parse_pattern` + `parse_match` 上移; inline match 改 `parse_match` delegation; `parse_pattern_primary` inline primary (解 mutual recursion); OR pattern `parser_advance(p)` UB 修
 - `compiler/tests/examples/top_level_let_mut_test.jhyy` — 新建 (W-017 真修最小 repro, g_x 顶层 i32 mut + main_jhyy 增 1 后 return, EXPECT=42)
 - `compiler/src0/jhyy_helpers.c` — 加 DEPRECATED 注释 (W-017 真修后不再需要委托 path state)
-- `docs/workarounds.md` — W-017 / W-019 / W-020 全部 ✅ RESOLVED 标注 + 索引表 status 更新
+- `docs/internal/workarounds.md` — W-017 / W-019 / W-020 全部 ✅ RESOLVED 标注 + 索引表 status 更新
 - `compiler/build/bin/jhyy.exe` + `compiler/build/bin/jhyy_stage0.exe` — binary sha 刷新 (改 codegen 预期)
 
 **核心机制:**
@@ -325,7 +325,7 @@
 **引用:**
 - v1.4.6 父 sprint: [`docs/archive/plans/v1/v1.4.0任务清单 + 概要设计.md`](../../plans/v1/v1.4.0任务清单%20+%20概要设计.md) § Sprint v1.4.6
 - 真修详细方案: `docs/plans/v1/v1.4.0详细实现方案.md` (umbrella per changelog umbrella convention)
-- workarounds RESOLVED 标注: [`docs/workarounds.md`](../../../workarounds.md) § W-017 / W-019 / W-020
+- workarounds RESOLVED 标注: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) § W-017 / W-019 / W-020
 
 ---
 

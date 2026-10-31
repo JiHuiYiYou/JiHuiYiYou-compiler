@@ -168,7 +168,7 @@ Always propagate for `add/sub` on L_LOCAL regardless of src1 flag (QBE IL semant
 ### ⚠️ REGRESSION IDENTIFIED
 This bug is a clean illustration of "RCA stopped too early": original v2.11.20 RCA correctly identified that flag propagation was incomplete for slice_index/iterate patterns, but didn't verify the **direction** of propagation on the harder nested case. The fix that passed 5/6 slice tests in v2.11.20 actually introduced the SEGV in the 6th test. Per `feedback_codegen_amd64_multifn`, single-function PASS evidence is insufficient — multi-nested patterns require trace through every temp-id lifetime.
 
-v2.11.20 changelog + ../../workarounds.md W-074.10 description needs amendment (RC-1 description claimed it was "真修" but was actually over-aggressive for nested case).
+v2.11.20 changelog + ../../internal/workarounds.md W-074.10 description needs amendment (RC-1 description claimed it was "真修" but was actually over-aggressive for nested case).
 
 ---
 
@@ -218,7 +218,7 @@ For each: compile under QBE + self-backend, diff .s for fn/call/instruction stru
 | 4 | dungeon_game | `codegen_amd64_emit_ctrl.jhyy:266` (debug + fix label emit) — depends on RCA outcome | 10-80 |
 
 ### Re-baseline impact
-- W-074.10 (v2.11.20 emit_load flag propagate) needs amendment — over-aggressive for nested case; correct semantics is "load does NOT propagate, but add/sub on L_LOCAL always propagate". v2.11.20 changelog + ../../workarounds.md W-074.10 description needs update.
+- W-074.10 (v2.11.20 emit_load flag propagate) needs amendment — over-aggressive for nested case; correct semantics is "load does NOT propagate, but add/sub on L_LOCAL always propagate". v2.11.20 changelog + ../../internal/workarounds.md W-074.10 description needs update.
 - W-074.13 sub-bug 2 (cap_table_basic) description needs correction — not fnarg ID gap but emit_copy heuristic miscounts `%t`.
 - W-074.13 sub-bug 3 (dungeon_game) description needs correction — not multi-file import link but missing label definitions.
 - W-074.13 sub-bug 4 (for_in_slice_nested) description needs correction — not deeper indirect dispatch chain but v2.11.20 RC-1 over-aggressive.
@@ -235,7 +235,7 @@ For each: compile under QBE + self-backend, diff .s for fn/call/instruction stru
 - V.9 D43 closure HOLD (v2/v3/v4/v5 byte-equal) — likely re-baseline per V.7 history
 
 ### Doc updates
-- `docs/workarounds.md` W-074.10/11/12/13 + W-074.6 description amendments
+- `docs/internal/workarounds.md` W-074.10/11/12/13 + W-074.6 description amendments
 - `docs/archive/audit/rca-v2.11.20.md` RC-1 amendment (over-aggressive)
 - `docs/archive/logs/v2/changelog-v2.11.0.md` v2.11.21 ship section
 - `docs/archive/plans/v2/v2.11.21-plan.md` NEW (per `feedback_plans_per_version`)
@@ -252,7 +252,7 @@ For each: compile under QBE + self-backend, diff .s for fn/call/instruction stru
 ## 7. References
 
 - `docs/archive/audit/rca-v2.11.20.md` (v2.11.20 RCA — 4 sub-bugs partially misdiagnosed)
-- `docs/workarounds.md` W-074.6 PARTIAL + W-074.10/11/12 CLOSED + W-074.13 DEFERRED (this RCA refines)
+- `docs/internal/workarounds.md` W-074.6 PARTIAL + W-074.10/11/12 CLOSED + W-074.13 DEFERRED (this RCA refines)
 - `docs/archive/logs/v2/changelog-v2.11.0.md` v2.11.20 ship section
 - `docs/archive/plans/v2/v2.11.20-plan.md` (predecessor plan)
 - `docs/internal/architecture.md` Last updated v2.11.20

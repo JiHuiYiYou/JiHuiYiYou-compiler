@@ -2255,7 +2255,7 @@ fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8
                     // v1.7.1 patch A3: non-binding enum pattern — 仍需 tag compare,
                     // 跟 binding 路径差异只在无 payload slot alias. 没这 fix 时
                     // `Option::None => 200` 走 fallback cmp=1, 永远第一 arm 命中
-                    // (per docs/workarounds.md § Stage 3 已知限制 + W-XXX ACTIVE 段).
+                    // (per docs/internal/workarounds.md § Stage 3 已知限制 + W-XXX ACTIVE 段).
                     //
                     // v1.7.2 patch A2': mirror src/codegen.c:434-442 spill guard.
                     //   matched may be 'w' (literal/reg) when enum fits in a register —

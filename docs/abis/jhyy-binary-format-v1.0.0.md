@@ -7,7 +7,7 @@
 > **QBE 工具链已于 v4.0.0 完全移除**(自研 in-mem amd64 后端)。
 > ⇒ **本稿里的 QBE 提法是历史过渡路径**(D42 那条)，不是现状；
 > **本稿未按 v4 的 ABI 修订**,只按事实订正了 Cap wire 布局(§ 2)。
-> 仓内现行事实见 [`docs/FACTS.md`](../FACTS.md)。
+> 仓内现行事实见 [`docs/internal/FACTS.md`](../internal/FACTS.md)。
 **目标**: 为 jhyy_OS user-space + jhyy 编译器自身(M11)+ GDB attach 三重角色,定义一个 **jhyy 原生** 的二进制格式
 **不在范围**: 实施 sprint 划分 / 工作量估算 / 时间表(per memory `feedback_no_date_estimates`)
 **关联**: D44(决策登记,2026-09-04 user 锁) | OS 侧镜像已于 2026-10-30 随 OS 文档整体清理(commit `f98d83d`)⇒ **OS 侧重写时从本文档镜像,不得反向** | 跨项目背景见 [`docs/coordination/JHYY_OS侧设计终版.md`](../coordination/JHYY_OS侧设计终版.md) | plan 文件 `c-jihuiyiyou-twinkling-frog.md`(个人 plan,不随仓分发)

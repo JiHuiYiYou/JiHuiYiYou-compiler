@@ -172,13 +172,15 @@ emit 层消费寄存器），不是那个被注释掉的 XMM 分配器。
 它**自己**编 `compiler/src0/main.jhyy`。`make` 的闭环门比的是**跨代 `.s` 逐字节相同**
 （迭代到不动点），而不是 `.il`。
 
-⇒ 改 `compiler/src0/*.jhyy` 的代价见
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md) § 工作规约「jhyy 编译器本身的特殊规则」。
+⇒ 改 `compiler/src0/*.jhyy` 的代价：**加局部变量会移位模块级 temp 编号** ⇒ 自举产物
+行为漂移 ⇒ 要走「刷新锚点 + D43 re-pin + 全量回归」一整套发版级流程。**纯注释改动是
+免费的**（lexer 在 codegen 前剥掉注释 ⇒ `jhyy.exe` 逐字节不变）—— 订正过期注释别夹带
+逻辑改动。
 
 ---
 
 ## 相关
 
 - 构建 / 门 / 工具链 ⇒ [`docs/internal/build.md`](build.md)
-- 事实（回归数 / 排期）⇒ [`docs/FACTS.md`](../FACTS.md)
-- 台账 ⇒ [`docs/workarounds.md`](../workarounds.md)
+- 事实（回归数 / 排期）⇒ [`docs/internal/FACTS.md`](FACTS.md)
+- 台账 ⇒ [`docs/internal/workarounds.md`](workarounds.md)

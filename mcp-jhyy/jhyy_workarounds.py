@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""jhyy_workarounds.py — 解析 + 搜索 docs/workarounds.md
+"""jhyy_workarounds.py — 解析 + 搜索 docs/internal/workarounds.md
 
 Sprint mcp-1 (2026-08-11). 处理中英字段混用 (workarounds.md 实际有 ID/状态/日期/触发面/...).
 
@@ -66,9 +66,11 @@ def _git_path() -> Optional[str]:
     return None
 
 
-# 2026-10-30:台账从 docs/internal/ 搬到 docs/(文档大重构)。新位置优先,
-# 旧位置作回落 —— 机器上可能还有 v4.1.2 之前的旧 worktree。
-LEDGER_REL = "docs/workarounds.md"
+# 2026-10-31:台账搬回 docs/internal/(与 FACTS.md 同属「对内」文档)。新位置优先,
+# 旧位置作回落 —— 机器上可能还有 2026-10-30 ~ 2026-10-31 之间的旧 worktree
+# (那时台账在 docs/ 下)。
+LEDGER_REL = "docs/internal/workarounds.md"
+# 旧位置(2026-10-30 ~ 10-31 那两天台账在 docs/ 下)—— 只作回落,故意保持旧路径。
 LEGACY_LEDGER_REL = "docs/workarounds.md"
 
 
@@ -413,7 +415,7 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
         status: 可选过滤 5-state enum: "ACTIVE" / "RESOLVED" / "SUPERSEDED" / "DEFERRED" / "INVALID"
                 v2.13.6 mini 起严格 token match (不再是 substring), 避免 W-051 RESOLVED
                 但 body 写 "强标 ACTIVE 不解决任何 active 问题" 的误分类.
-        path: 可选 workarounds.md 路径 (默认 = cwd git worktree 的 docs/workarounds.md,
+        path: 可选 workarounds.md 路径 (默认 = cwd git worktree 的 docs/internal/workarounds.md,
               v2.13.6 mini worktree 探测; fallback to script parents[1])
 
     Returns:

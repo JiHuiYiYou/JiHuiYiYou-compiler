@@ -170,7 +170,7 @@ alloc_pool_size = 8192 + per_fn_alloc
 
 | 门 | 结果 |
 |---|---|
-| `regress jhyy.exe` | ✅ 全绿(基线见 [FACTS § 2](../../FACTS.md#2-回归与门)) |
+| `regress jhyy.exe` | ✅ 全绿(基线见 [FACTS § 2](../../internal/FACTS.md#2-回归与门)) |
 | `artifact_checks.sh` | ✅ **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**(14 → 16,多的两条是本版新增) |
 | `closure_check.sh` | ✅ PASS(v2.s == v3.s,sha `8f706fe76d5fc0b7`) |
 | `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(N=10) |
@@ -495,7 +495,7 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 1. 改 → 全量 regress → 自举闭环 → `artifact_checks` → perf 数字
 2. `make` 后 `git add compiler/build/bin/jhyy.exe`(CI 的 artifact-fresh 步会比对它)
 3. 往 [`docs/archive/plans/v4/version-schedule.md`](../../archive/plans/v4/version-schedule.md) 记实际做完的内容
-4. 往 [`docs/workarounds.md`](../../workarounds.md) 登记新发现的 workaround
+4. 往 [`docs/internal/workarounds.md`](../../internal/workarounds.md) 登记新发现的 workaround
 
 > ⚠️ **改 codegen 不会让任何 sha 基线变红** —— 所有门都是运行时算 sha 比两次运行。
 > 真正会红的是 `artifact_checks.sh` 的 4 条汇编文本断言(v4.3.1 处理)和

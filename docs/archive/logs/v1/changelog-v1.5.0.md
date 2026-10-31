@@ -46,7 +46,7 @@
 - **Burn bundle 结构**: `<Bundle>` 顶层 + `<BootstrapperApplication>` wrapper + `<bal:WixStandardBootstrapperApplication>` child (per WiX 4 / BalCompiler.cs ParsePossibleKeyPathElement case "BootstrapperApplication" 要求 BA 子元素必须在 wrapper 内)
 - **`Theme="rtfLicense"`** 配 `LicenseFile="license.rtf"` (RTF license dialog); 可选 `ThemeFile="Theme.xml"` 覆盖默认布局加 MSYS2 提示
 - **`wix build -arch x64`** 一致性 (Bundle 跟 MSI 都是 64-bit)
-- **Bal extension DLL 通过绝对路径引** (workaround): `wix extension add -g WixToolset.Bal.wixext` 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`), wix CLI 7.0.0+b8977d6 的 `-ext WixToolset.Bal.wixext` 名字查找会 WIX0144 fail, workaround 是 -ext 传 DLL 绝对路径。详细见 `docs/workarounds.md`
+- **Bal extension DLL 通过绝对路径引** (workaround): `wix extension add -g WixToolset.Bal.wixext` 装的 DLL 文件名是 `WixToolset.BootstrapperApplications.wixext.dll` (不是 `WixToolset.Bal.wixext.dll`), wix CLI 7.0.0+b8977d6 的 `-ext WixToolset.Bal.wixext` 名字查找会 WIX0144 fail, workaround 是 -ext 传 DLL 绝对路径。详细见 `docs/internal/workarounds.md`
 - **力度 1 检测+引导** (per user 决策 2026-08-14): Burn 不打包 GCC toolchain; Welcome page 提示用户先装 MSYS2; Success page 提示 post-install 步骤
 - **`JHYY_BUNDLE_INSTALL=1`** MsiProperty 传到 MSI (让 MSI 知道被 Burn chain 装的, 可以用来调 UI/behavior; 当前 MSI 不读这 property, 留作未来扩展)
 
@@ -100,7 +100,7 @@ Bundle manifest 含:
 - 6 个 UX payload (thm.xml / thm.wxl / logo.png / license.rtf / wixstdba.exe / BootstrapperApplicationData.xml)
 - `WixAttachedContainer` (529KB) 嵌入 MSI
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-001 Bal extension DLL 绝对路径引用**: WiX 7.0.0+b8977d6 CLI 的 `-ext WixToolset.Bal.wixext` 名字查找 WIX0144 fail (DLL 名是 `WixToolset.BootstrapperApplications.wixext.dll`, 不是预期命名), workaround 是 -ext 传 DLL 绝对路径。
 - **W-XXX Bundle 验证留 release 阶段**: headless bash 无法跑 interactive install (per-machine MSI 要 UAC elevation); 完整 install/uninstall 验证推到 v1.5.5 release 时跑。
@@ -252,7 +252,7 @@ Bundle manifest 含:
 - Bundle Size=995KB (MSI 压缩后), InstallSize=1.3MB (解压后)
 ```
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - 无新 workaround; v1.5.4 9 个 WiX 4 schema fix 都是 inline 修正 (comment 解释在 .wxs 里)
 
@@ -372,7 +372,7 @@ gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
 # 期望: GH Actions UI run → 14 step 全 green → 无 Release 创建 → summary 在 console
 ```
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-022 (新增) Add-Content vs Out-File -Encoding utf8 for $GITHUB_ENV**: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM, GH parser 解析 $GITHUB_ENV fail; workaround `Add-Content` (BOM-safe)
 - **W-023 (新增) MSYS2 bash `${VAR}` 不展开 `${{ env.X }}`**: GH 表达式仅 yaml 解析时替换; bash step 要 `echo $VAR` 拿 export 过的 env var, 不 `${VAR}` 占位符
@@ -399,7 +399,7 @@ gh workflow run release.yml -f version=1.5.5-rc1 -f dry_run=true
 - ✅ `mcp-jhyy/jhyy_regress.py` — `_build_subprocess_env` 删 W-027 v4 MSYS2 探测段 (~30 行), 仅保留基础 env; 新增 `SETENV` 注释 directive 注入 env var 到 test
 - ✅ `.github/workflows/release.yml` — 删 "Propagate MSYS2 paths to subprocess PATH" step (12 行); Run regress 注释更新指向 W-027/W-029 superseder
 - ✅ `.gitignore` — 加 `compiler/tests/examples/_tmp_jhyy_home/` (p2 测试 env.txt setup 目录)
-- ✅ `docs/workarounds.md` — W-027 标 "RESOLVED → SUPERSEDED by W-029"; 新增 W-029 ACTIVE 记录新设计
+- ✅ `docs/internal/workarounds.md` — W-027 标 "RESOLVED → SUPERSEDED by W-029"; 新增 W-029 ACTIVE 记录新设计
 - ⚠️ **Linux/macOS 跨平台探测** (Priority 4 SearchPathA / 多 magic 路径) 推迟到 v2.x manifest lite sprint (jhyy.exe toolchain 必须用绝对路径, 不靠 PATH 解析 — 类型 4 升级)
 - ⚠️ **p4/p5 严格测试** (SearchPathA / fallback "gcc") 推迟到 v2.x (本机测试环境无法构造 magic 全不存在的状态)
 - ⚠️ **Real GH Actions CI dry-run** 等 commit 后 user 触发 (手动 `git push`, auto-push hook 已弃用)
@@ -447,7 +447,7 @@ let r = system(invoke_buf);
 - "Propagate MSYS2 paths to subprocess PATH" step 整段删 (12 行). release.yml 从 13 step → 12 step.
 - 删后逻辑: jhyy.exe 启动时自己调 jh_gcc_path() 探测 gcc 路径, Python / GH Actions 不再操心 MSYS2 在哪. 跨 3 文件 8 个版本的 workaround (W-027 v1-v8) 全部收敛到 jhyy.exe 内部一处.
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-027 (RESOLVED → SUPERSEDED by W-029)** `setup-msys2@v2` 装 MSYS2 到 `$RUNNER_TEMP\msys64` (CI) / `C:\msys64` (local): 跨 3 文件 8 个版本探测逻辑收敛到 jhyy.exe `jh_gcc_path()` 内部, regress.py / release.yml 不再 prepend MSYS2 bin 到 PATH
 - **W-028 (RESOLVED)** Windows process exit code 8-bit (mod 256): v1.5.5 实施, v1.5.6 保持
@@ -455,7 +455,7 @@ let r = system(invoke_buf);
 - **W-030 (RESOLVED)** WiX 4 Theme.xml schema — Font 顶层 / 删 Weight bold / 加 FontId / Caption 替 Title
 - **W-031 (RESOLVED)** MSI LaunchCondition 4-source probe + INSTALLDIR resolution `<SetProperty>` 替 `<SetDirectory>`
 - **W-032 (RESOLVED → SUPERSEDED by W-033)** 试图加独立 `<Page Name="License">` — 错方向, wixstdba 默认 license 整合在 Install page
-- **W-033 (RESOLVED — v1.5.6 hotfix)** Theme.xml XML 1.0 well-formedness (line 10 comment `--` 违 spec) + WiX 4 thmutil schema + wixstdba 默认控件名 (EulaAcceptCheckbox / InstallButton / InstallCancelButton / EulaRichedit) + Bundle.zh-CN.wxl string IDs 全对齐 (InstallAcceptCheckbox / InstallInstallButton / InstallCancelButton 等). 修后 `v1.5.6-rc1.exe` 静默模式 exit 0 + UI 模式 Burn log 走到 i199 detect complete. 完全基于 wixstdba 默认 RtfTheme.xml / RtfTheme.wxl 重写, 加 MSYS2 prereq warning (Install page) + post-install hint (Success page) JHYY customization. 详见 `docs/workarounds.md` W-033
+- **W-033 (RESOLVED — v1.5.6 hotfix)** Theme.xml XML 1.0 well-formedness (line 10 comment `--` 违 spec) + WiX 4 thmutil schema + wixstdba 默认控件名 (EulaAcceptCheckbox / InstallButton / InstallCancelButton / EulaRichedit) + Bundle.zh-CN.wxl string IDs 全对齐 (InstallAcceptCheckbox / InstallInstallButton / InstallCancelButton 等). 修后 `v1.5.6-rc1.exe` 静默模式 exit 0 + UI 模式 Burn log 走到 i199 detect complete. 完全基于 wixstdba 默认 RtfTheme.xml / RtfTheme.wxl 重写, 加 MSYS2 prereq warning (Install page) + post-install hint (Success page) JHYY customization. 详见 `docs/internal/workarounds.md` W-033
 
 ### 后续工作 (v1.5.0 umbrella ship)
 
@@ -483,7 +483,7 @@ let r = system(invoke_buf);
 - ✅ `installer/GUIDS.md` — 加 Component GUID 条目
 - ✅ `installer/winget/manifests/j/JiHuiYiYou/JHYY/1.5.6/` — 复制 1.5.5, 改 version + ReleaseNotes
 - ✅ `docs/archive/plans/v1/v1.5.6任务清单 + 概要设计.md` — 加 patch2 段
-- ✅ `docs/workarounds.md` — 加 W-041 entry (RESOLVED)
+- ✅ `docs/internal/workarounds.md` — 加 W-041 entry (RESOLVED)
 - ⚠️ **MSI smoke build** + **Burn bundle smoke build** + **真机 install 验证** 等 user 触发
 
 ### 核心机制
@@ -519,7 +519,7 @@ Step 3: powershell -File <configure-coderunner.ps1> -JHY_DIR <INSTALLDIR>
 - Directory="BinDir" (装到 `INSTALLDIR\bin\configure-coderunner.ps1`)
 - CustomAction `InstallVSCodeExtCmd` 加 2 args:`/CONFIGURE_PS1="[INSTALLDIR]bin\configure-coderunner.ps1"` `/JHY_DIR="[INSTALLDIR]"`
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-041 (新增 RESOLVED in v1.5.6-patch2)** VSCode Code Runner 集成: `configure-coderunner.ps1` parse + add + re-serialize 算法 (`install-vsix.bat` 3 步流程; MSI Component `ConfigureCodeRunnerPS1`)。永久 work around — PowerShell 5.1 兼容,Windows 10+ ships。
 
@@ -537,7 +537,7 @@ Step 3: powershell -File <configure-coderunner.ps1> -JHY_DIR <INSTALLDIR>
 ### 完成定义
 
 - ✅ `compiler/src0/main.jhyy:744-756` — `link_with_gcc` 失败分支 echo `invoke_buf` (gcc path + args), 镜像 `run_qbe:684-686` 已有 pattern
-- ✅ `docs/workarounds.md` — W-042 ACTIVE entry (Tier 1)
+- ✅ `docs/internal/workarounds.md` — W-042 ACTIVE entry (Tier 1)
 - ⚠️ **Tier 2 (stderr capture via pipe) + Tier 3 (post-link .exe stat)** 推迟 v1.5.7, 待 user repro 输出决定 scope
 - ⚠️ **真机 install 验证** 等 user 触发 (`jhyy run 新建文本文档.jhyy` 应输出实际 gcc cmd_buf)
 
@@ -567,7 +567,7 @@ jh_fputs_stderr("\n" as *u8);
 - jhyy_v1 stage1 byte-equal preserved (W-001/W-002/W-006 dormant)
 - 不动 `jh_run` / `jh_gcc_invoke` / CreateProcessA path → W-038/W-039/W-040 不受影响
 
-### 已知 workarounds (已入 `docs/workarounds.md`)
+### 已知 workarounds (已入 `docs/internal/workarounds.md`)
 
 - **W-042 (新增 ACTIVE)** `link_with_gcc` 失败时 echo `invoke_buf` (Tier 1 镜像 run_qbe pattern); Tier 2 (stderr capture) + Tier 3 (post-link stat) deferred v1.5.7
 
@@ -589,7 +589,7 @@ regress 走 layout (b) (source-tree), 看不见; 自 v1.5.2 第一个 MSI 起就
 - ✅ `installer/compiler/jhyy-compiler.wxs:282-308` — 2 个新 MSI Components (`RuntimeC` + `HelpersC`) 追加到 `ComponentGroup JHYYBinFiles`
 - ✅ `installer/build.ps1:134-139` — `Copy-Item` 把 `compiler/runtime/runtime.c` + `compiler/src0/jhyy_helpers.c` 拷到 `$binDir/`
 - ✅ `installer/GUIDS.md` — Component GUID 表 +2 行 (含 v1.5.6 W-043 标记)
-- ✅ `docs/workarounds.md` — W-043 RESOLVED entry
+- ✅ `docs/internal/workarounds.md` — W-043 RESOLVED entry
 - ✅ `jhyy_helpers.c` 不动 (W-037 invariant, layout a 路径逻辑)
 - ✅ `compiler/runtime/runtime.c` 不动
 
@@ -626,7 +626,7 @@ W-043 ship 了 `runtime.c` 但漏了 sibling header `runtime.h` (429 B)。W-043 
 - ✅ `installer/compiler/jhyy-compiler.wxs:308-322` — 1 个新 MSI Component (`RuntimeH` `D5C2880A-...`) ship `runtime.h` 到 `<INSTALLDIR>\bin\`
 - ✅ `installer/build.ps1:139` — 1 行 `Copy-Item` 把 `compiler/runtime/runtime.h` 拷到 `$binDir/`
 - ✅ `installer/GUIDS.md` — Component GUID 表 +1 行 (含 v1.5.6 W-044 标记)
-- ✅ `docs/workarounds.md` — W-044 RESOLVED entry (含 lesson: MSI payload 必须 map 完整 include graph)
+- ✅ `docs/internal/workarounds.md` — W-044 RESOLVED entry (含 lesson: MSI payload 必须 map 完整 include graph)
 - ✅ Fragment comment block (`jhyy-compiler.wxs:234-243`) 更新提 runtime.h
 - ✅ `compiler/runtime/runtime.c` / `runtime.h` source **不动**
 - ✅ `compiler/src0/jhyy_helpers.c` source **不动** (W-043 已 complete)
@@ -944,7 +944,7 @@ code --install-extension formulahendry.code-runner
 
 ### Workaround 状态更新
 
-- **W-051 (新增 ACTIVE)** MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决 (`docs/workarounds.md` § W-051)
+- **W-051 (新增 ACTIVE)** MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决 (`docs/internal/workarounds.md` § W-051)
 
 ### 关联决策
 
@@ -959,7 +959,7 @@ code --install-extension formulahendry.code-runner
 ## 关联文档
 
 - [`docs/archive/plans/v1/v1.5.0任务清单 + 概要设计.md`](../../plans/v1/v1.5.0任务清单 + 概要设计.md) — 完整 5-sprint 计划 + 决策点
-- [`docs/workarounds.md`](../../../workarounds.md) — v1.5 Burn / MSI / WiX 工具链已知 workaround
+- [`docs/internal/workarounds.md`](../../../internal/workarounds.md) — v1.5 Burn / MSI / WiX 工具链已知 workaround
 - [`installer/README.md`](../../../../installer/README.md) — installer 构建步骤 + 验证清单
 
 ## Sprint 决策记录

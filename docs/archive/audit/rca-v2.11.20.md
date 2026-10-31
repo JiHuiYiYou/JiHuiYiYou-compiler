@@ -160,7 +160,7 @@ Frame 1816B, deepest -1792,24B margin → frame size 算对。但 regress 报 ST
 | dungeon_game | `compile failed: imports start` — 编译期 import resolution fail (per W-074.6 PARTIAL 已有,新暴露) |
 | match_range | `0..10` 范围 match arm 翻译 cmp + jmp 多 case dispatch 不全 (可能 phi 在 jump table path) |
 | mixed_struct_slice_match | 综合 = slice + struct + match range + for-in 4 feature 复合,多个 cluster bug 叠加 |
-| top_level_let_mut_test/types | **W-017 ACTIVE** (../../workarounds.md 注册): module-level `let mut` global let mut 已被 文档化 ACTIVE,jhyy-side 不 implement,delegate 给 C-side jhyy_helpers.c runtime;self-backend 走 jhyy-side path 完全不写回 `$g_x` → 读永远 = init value (41) + 0/1 garbage = 106 等 |
+| top_level_let_mut_test/types | **W-017 ACTIVE** (../../internal/workarounds.md 注册): module-level `let mut` global let mut 已被 文档化 ACTIVE,jhyy-side 不 implement,delegate 给 C-side jhyy_helpers.c runtime;self-backend 走 jhyy-side path 完全不写回 `$g_x` → 读永远 = init value (41) + 0/1 garbage = 106 等 |
 
 ---
 
@@ -247,7 +247,7 @@ if dst_qt == QBE_L_LOCAL() {
 ## 5. References
 
 - `docs/archive/logs/v2/changelog-v2.11.0.md` v2.11.19 section + v2.11.20 ship section (per `feedback_changelog_umbrella` umbrella convention)
-- `docs/workarounds.md` W-074.6 PARTIAL + W-074.10 CLOSED + W-074.11 CLOSED + W-074.12 CLOSED + W-074.13 DEFERRED + W-017 ACTIVE (v1.4.6)
+- `docs/internal/workarounds.md` W-074.6 PARTIAL + W-074.10 CLOSED + W-074.11 CLOSED + W-074.12 CLOSED + W-074.13 DEFERRED + W-017 ACTIVE (v1.4.6)
 - `docs/internal/architecture.md` last updated v2.11.20
 - `docs/archive/plans/v2/v2.11.20-plan.md` (per `feedback_plans_per_version`)
 - Memory: [[feedback_rca_first_root_cause]], [[feedback_codegen_amd64_multifn]], [[feedback_fix_evaluation_rule]], [[feedback_codegen_amd64_run_zerobyte]]

@@ -47,9 +47,9 @@
 | N=4 byte-equal closure sha | `3d84bece...` (v1.7.3 ship 记录) | **`03a1cdd4...`** (v1.8.0 ship, src0/sema.jhyy 改 → 新 sha, v2/v3/v4 byte-equal hold) | closure hold (sha 变是因为 src/src0 改, expected per `feedback_audit_single_commit_diff`) |
 | 新 test 数 | — | +6 SKIP 启用 (3 defer + 2 enum + 1 nested struct) | 0 new file (6 SKIP-removed existing) |
 | 文档 spec/abi 锁定 | spec v1.3.0 | **spec v1.3.0** (不动, v1.8.0 = bug 真修不涉及 spec 修订) | 锁定不动 |
-| `../../../workarounds.md` W-059 status | 🟡 DEFERRED v1.8 | **✅ RESOLVED 2026-08-28** | RESOLVED |
-| `../../../workarounds.md` W-060 status | 🟡 DEFERRED v1.8 | **❌ INVALID 2026-08-28** | INVALID |
-| `../../../workarounds.md` W-061 status | 🟡 DEFERRED v1.8 | **❌ INVALID 2026-08-28** | INVALID |
+| `../../../internal/workarounds.md` W-059 status | 🟡 DEFERRED v1.8 | **✅ RESOLVED 2026-08-28** | RESOLVED |
+| `../../../internal/workarounds.md` W-060 status | 🟡 DEFERRED v1.8 | **❌ INVALID 2026-08-28** | INVALID |
+| `../../../internal/workarounds.md` W-061 status | 🟡 DEFERRED v1.8 | **❌ INVALID 2026-08-28** | INVALID |
 
 ---
 
@@ -103,7 +103,7 @@
 - **Author 必须 `JHYY <15901598712@163.com>`** + Co-author `MiniMax-M3 <noreply@MiniMax>`
 - **No date estimates**
 - **Audit single-commit diff** (Phase 1A 0 src/src0, jhyy.exe sha 不变)
-- **Doc fact-check 逐条** (../../../workarounds.md master table W-059 status 改, history 段保留)
+- **Doc fact-check 逐条** (../../../internal/workarounds.md master table W-059 status 改, history 段保留)
 
 ### 验证 (Phase 1A 必达)
 
@@ -117,7 +117,7 @@
 
 - 0 src/src0 改动
 - 0 jhyy.exe rebuild
-- 1 commit ship: ../../../workarounds.md (master table W-059 status 段) + changelog-v1.8.0.md (本文件 Phase 1A 段)
+- 1 commit ship: ../../../internal/workarounds.md (master table W-059 status 段) + changelog-v1.8.0.md (本文件 Phase 1A 段)
 
 ### 后续 (Phase 1B 起点)
 
@@ -169,18 +169,18 @@ static Type *infer_type(SemaContext *ctx, Node *n) { ... }
 ### 关键约束 (per feedback_*, 跟 v1.7.x 同型)
 
 - **Audit single-commit diff** (Phase 1B commit 包含 debug print + 还原, 但 ship 后 working tree 干净 — Phase 1B commit 跟 Phase 2 fix 合并在 1 个 commit 也可, per plan 决策)
-- **Doc fact-check 逐条** (../../../workarounds.md W-059 section body "根因" 段更新)
+- **Doc fact-check 逐条** (../../../internal/workarounds.md W-059 section body "根因" 段更新)
 
 ### 验证 (Phase 1B 必达)
 
 - bisect 定位: crash 在 `infer_type(ctx, expr)` actual call 时 (jhyy-side `infer_type` 是 3-arg, 漏 `ta` arg) ✓
-- 文件:行号: `compiler/src0/sema.jhyy:1435` (事实 fix 后行号会变 — fact-check 2026-08-28: 实际 line 是 1410 (per ../../../workarounds.md Resolution 段), 跟原 1435 差距 25 行, 因为 Phase 1B debug print 加在原 1410 之前 + bisect 期间调整. **修正: Phase 1B bisect 定位 = `src0/sema.jhyy` 漏 `ta` arg**, 具体行号待 Phase 2 实改时 verify)
+- 文件:行号: `compiler/src0/sema.jhyy:1435` (事实 fix 后行号会变 — fact-check 2026-08-28: 实际 line 是 1410 (per ../../../internal/workarounds.md Resolution 段), 跟原 1435 差距 25 行, 因为 Phase 1B debug print 加在原 1410 之前 + bisect 期间调整. **修正: Phase 1B bisect 定位 = `src0/sema.jhyy` 漏 `ta` arg**, 具体行号待 Phase 2 实改时 verify)
 - regress 96/96+10 (baseline lock hold, debug print 还原) ✓
 
 ### 净 ship 计数
 
 - 0 src/src0 改动 net (debug print 临时加, 还原)
-- 1 commit ship (跟 Phase 2 fix 合并 或 独立, per plan 决策): ../../../workarounds.md (W-059 section body "根因" 段更新) + changelog-v1.8.0.md (Phase 1B 段)
+- 1 commit ship (跟 Phase 2 fix 合并 或 独立, per plan 决策): ../../../internal/workarounds.md (W-059 section body "根因" 段更新) + changelog-v1.8.0.md (Phase 1B 段)
 
 ### 后续 (Phase 2 起点)
 
@@ -225,8 +225,8 @@ Phase 2: 1-line fix `compiler/src0/sema.jhyy` line 1410 `let _v = infer_type(ctx
 
 - **Author 必须 `JHYY <15901598712@163.com>`** + Co-author `MiniMax-M3 <noreply@MiniMax>`
 - **No date estimates**
-- **Audit single-commit diff** (Phase 2 1 commit: src/src0 fix + 3 test fix + ../../../workarounds.md RESOLVED + changelog-v1.8.0.md Phase 2 段 + jhyy.exe rebuild)
-- **Doc fact-check 逐条** (../../../workarounds.md W-059 master table + section body)
+- **Audit single-commit diff** (Phase 2 1 commit: src/src0 fix + 3 test fix + ../../../internal/workarounds.md RESOLVED + changelog-v1.8.0.md Phase 2 段 + jhyy.exe rebuild)
+- **Doc fact-check 逐条** (../../../internal/workarounds.md W-059 master table + section body)
 - **workaround 标 RESOLVED 不删除** per `feedback_document_workarounds_in_docs.md` — W-059 section body history 段保留, 新加 Resolution (2026-08-28 v1.8.0) 段
 
 ### 验证 (5/5 PASS 必达 + Stage 2 byte-equal closure 保留)
@@ -248,7 +248,7 @@ Phase 2: 1-line fix `compiler/src0/sema.jhyy` line 1410 `let _v = infer_type(ctx
 - 1 行 src0/sema.jhyy fix
 - 0 行 src/sema.c (不需 mirror)
 - 3 test file 改 (SKIP directive 删 + extern fn → local fn + EXPECT fix)
-- 1 commit ship: `src0/sema.jhyy` + 3 test files + `../../../workarounds.md` (W-059 RESOLVED) + `changelog-v1.8.0.md` Phase 2 段 + `jhyy.exe` rebuild
+- 1 commit ship: `src0/sema.jhyy` + 3 test files + `../../../internal/workarounds.md` (W-059 RESOLVED) + `changelog-v1.8.0.md` Phase 2 段 + `jhyy.exe` rebuild
 
 ### 反思 (ship 流程 gap, v1.3.6 教训)
 
@@ -283,8 +283,8 @@ v1.3.6 defer ship 时 0 accept-path test 验证 (commit `169759c` ship 时 defer
 
 ### 关键约束 (per feedback_*, 跟 v1.7.x 同型)
 
-- **Audit single-commit diff** (Phase 3 1 commit: 3 test SKIP 删 + ../../../workarounds.md INVALID + changelog-v1.8.0.md Phase 3 段)
-- **Doc fact-check 逐条** (../../../workarounds.md W-060 + W-061 master table + section body)
+- **Audit single-commit diff** (Phase 3 1 commit: 3 test SKIP 删 + ../../../internal/workarounds.md INVALID + changelog-v1.8.0.md Phase 3 段)
+- **Doc fact-check 逐条** (../../../internal/workarounds.md W-060 + W-061 master table + section body)
 - **workaround 标 INVALID 不删除** per `feedback_document_workarounds_in_docs.md` — W-060/W-061 section body history 段保留, 新加 INVALID status (2026-08-28 v1.8.0) 段
 
 ### 验证 (3 SKIP test PASS 必达)
@@ -300,7 +300,7 @@ v1.3.6 defer ship 时 0 accept-path test 验证 (commit `169759c` ship 时 defer
 
 - 0 src/src0 改动
 - 3 test file 改 (SKIP directive 删)
-- 1 commit ship: 3 test files + `../../../workarounds.md` (W-060 + W-061 INVALID) + `changelog-v1.8.0.md` Phase 3 段
+- 1 commit ship: 3 test files + `../../../internal/workarounds.md` (W-060 + W-061 INVALID) + `changelog-v1.8.0.md` Phase 3 段
 
 ### 教训 (fact-check 流程 gap, v1.7.3 教训)
 
@@ -355,13 +355,13 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 - regress (jhyy.exe) 102/102+4 ✓
 - regress (jhyy_stage0.exe) parity 102/102+4 ✓
 - 5/5 PASS on each target test (3 defer + 2 enum + 1 nested struct) per `feedback_fix_evaluation_rule` ✓
-- ../../../workarounds.md 3 status: W-059 RESOLVED + W-060 INVALID + W-061 INVALID ✓
+- ../../../internal/workarounds.md 3 status: W-059 RESOLVED + W-060 INVALID + W-061 INVALID ✓
 - baseline lock hold: jhyy_stage0.exe sha `a7673a35...` 不变 + jhyy.exe sha `f4cf9d8c...` (rebuild 后新 sha, recorded in `.sha256`)
 
 ### 净 ship 计数
 
-- 1 commit ship Phase 2 (W-059 fix + 3 defer test SKIP 删 + ../../../workarounds.md RESOLVED + changelog-v1.8.0.md Phase 2 段 + jhyy.exe rebuild)
-- 1 commit ship Phase 3 (3 enum/nested test SKIP 删 + ../../../workarounds.md INVALID + changelog-v1.8.0.md Phase 3 段)
+- 1 commit ship Phase 2 (W-059 fix + 3 defer test SKIP 删 + ../../../internal/workarounds.md RESOLVED + changelog-v1.8.0.md Phase 2 段 + jhyy.exe rebuild)
+- 1 commit ship Phase 3 (3 enum/nested test SKIP 删 + ../../../internal/workarounds.md INVALID + changelog-v1.8.0.md Phase 3 段)
 - tag `v1.8.0` post-Phase-3-commit
 - push origin v1.8.0
 
@@ -432,7 +432,7 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 - `vscode-ext/icon.png` / `icon.svg`(VSCode ext 自有图标,不同源)
 - `installer/jhyy-icon.ico`(6-frame Vista+,256×256 RGBA 已合用)
 - `docs/abis/jhyy-lang-spec-v1.3.0.md` / `jhyy-abi-v1.0.0.md`(图标不在 spec/ABI 范围)
-- `docs/workarounds.md`(这是 fix 不是 workaround)
+- `docs/internal/workarounds.md`(这是 fix 不是 workaround)
 
 **umbrella**:本 patch 进 `changelog-v1.8.0.md`(per `feedback_changelog_umbrella.md`,v1.x 轴单 umbrella CHANGELOG);commit tag `fix(v1.8.0):` 对齐最近 5 个 commit 格式。
 
@@ -480,7 +480,7 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 | `installer/common/manual-fix-icon-cache.ps1`(改) | (a) 从 Path A-only 改为 Path B primary + Path A fallback;(b) try/catch 包 jhyy-setuc 调用,失败自动降级 Path A;(c) Path A: `reg delete HKCU FileExts\.jhyy` + `reg delete HKCU\Software\Classes\jhyy_auto_file`,让 Explorer 退回 HKLM `JHYY.SourceFile`(`jhyy.exe,0` icon, v1.8.1 ship 的 fallback);(d) 不论 Path A/B 都跑 explorer 重启 + iconcache_*.db + thumbcache_*.db 删除 (brute-force icon cache flush) |
 | `installer/common/install-configure-all.bat`(改) | append step 5:`reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.jhyy" /f`(idempotent, VSCode UserChoice 残留清理);step 6:`powershell -File manual-fix-icon-cache.ps1`(Path B write, self-elevate via UAC) |
 | `installer/compiler/jhyy-compiler.wxs`(改) | 新增 3 个 Component 到 `JHYYBinFiles` ComponentGroup:`ManualFixIconCachePS1` (Guid A2F4B7E9-..., ships `manual-fix-icon-cache.ps1` to INSTALLDIR\common\) + `JHYYSetUCExe` (Guid B3D5C8F2-..., ships `jhyy-setuc.exe` to INSTALLDIR\common\jhyy-setuc\bin\Release\net8.0-windows\) |
-| `docs/workarounds.md`(改) | 加 W-062 段:VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 hijack, 状态 RESOLVED in v1.8.2 |
+| `docs/internal/workarounds.md`(改) | 加 W-062 段:VSCode UserChoice hijack + MSYS2 OpenWithProgids 双层 hijack, 状态 RESOLVED in v1.8.2 |
 | `docs/internal/build.md`(改) | 加 v1.8.2 note:重装 MSI 自动应用 UserChoice Hash write(透过 RunOnce step 6 + jhyy-setuc.exe) |
 
 **icon chain 修复后 (Path B 成功)**:
@@ -519,7 +519,7 @@ sha256sum $PWD/compiler/build/bin/jhyy_v{2,3,4}.il
 **W-062 补丁闭环**:
 - `installer/common/jhyy-setuc/Program.cs` (改) — CLI 拆 `<openExe> [openArg]>`(避免 embedded quotes 被 CommandLineToArgvW 拆);捕获 `UnauthorizedAccessException` → exit 2 + stderr manual instructions
 - `installer/common/manual-fix-icon-cache.ps1` (改) — `Start-Process -ArgumentList array` → `[System.Diagnostics.ProcessStartInfo]` 单字串;识别 exit 2 → 跳过 Path A(UCPD block 场景) → 印 3 条 manual workaround
-- `docs/workarounds.md` (改) — W-062 加 UCPD 真实限制段 (FIELD DIAGNOSIS 2026-08-29):`sc stop` exit 5 + Windows shell 自动重建 UserChoice + 3 条 manual workaround
+- `docs/internal/workarounds.md` (改) — W-062 加 UCPD 真实限制段 (FIELD DIAGNOSIS 2026-08-29):`sc stop` exit 5 + Windows shell 自动重建 UserChoice + 3 条 manual workaround
 - `docs/archive/logs/v1/changelog-v1.8.0.md` (改) — 本段 (v1.8.2 patch update 段)
 
 **唯一可行的 user-side workaround** (v1.8.2 不支援自动):
@@ -1017,7 +1017,7 @@ WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 varian
 
 **scope**:
 - ✅ 改 `compiler/src/codegen.c:1541` (1 行 fix + 10 行 WHY 注释)
-- ✅ 改 `docs/workarounds.md` W-063 entry (status `✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)` → `✅ RESOLVED 2026-09-01 (v1.8.3.2 jhyy-side + v1.8.3.3 C-side)`; master table 同步; "失效条件" 段加 v1.8.3.3 patch 描述)
+- ✅ 改 `docs/internal/workarounds.md` W-063 entry (status `✅ RESOLVED 2026-09-01 (v1.8.3.2 patch)` → `✅ RESOLVED 2026-09-01 (v1.8.3.2 jhyy-side + v1.8.3.3 C-side)`; master table 同步; "失效条件" 段加 v1.8.3.3 patch 描述)
 - ✅ 改 `docs/archive/logs/v1/changelog-v1.8.0.md` 加本段 (umbrella 续 v1.8.3.2)
 - ❌ 不动 ABI / spec / src0 codegen.jhyy / QBE / runtime / installer
 - ❌ 不创建 standalone `changelog-v1.8.3.3.md` (per `feedback_changelog_umbrella.md`)
@@ -1064,7 +1064,7 @@ WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 varian
 
 **scope**:
 - ✅ 改 `installer/wix/compiler/jhyy-compiler.wxs:622` (1 行 fix + 9 行 WHY 注释)
-- ✅ 改 `docs/workarounds.md` W-066 entry 新增
+- ✅ 改 `docs/internal/workarounds.md` W-066 entry 新增
 - ✅ 改 `docs/archive/logs/v1/changelog-v1.8.0.md` 加本段 (umbrella 续 v1.8.3.3 patch)
 - ❌ 不动 build.ps1 (-b assets=installer/assets 早就在, 不用再传)
 - ❌ 不动 Bundle.wxs (已 OK)
@@ -1102,7 +1102,7 @@ WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 varian
 
 - **spec** `docs/abis/jhyy-lang-spec-v1.3.0.md` — 锁定 (v1.8.0 不修订, v1.x FINAL 锁)
 - **abi** `docs/abis/jhyy-abi-v1.0.0.md` — 锁定 (v1.8.0 不修订)
-- **workarounds** `docs/workarounds.md` — master table W-059 ✅ RESOLVED + W-060 ❌ INVALID + W-061 ❌ INVALID + section bodies history 段保留 + Resolution (v1.8.0) / Status (v1.8.0) 段
+- **workarounds** `docs/internal/workarounds.md` — master table W-059 ✅ RESOLVED + W-060 ❌ INVALID + W-061 ❌ INVALID + section bodies history 段保留 + Resolution (v1.8.0) / Status (v1.8.0) 段
 - **W-028 fix** `mcp-jhyy/jhyy_regress.py` line 243-263 mod-256 equalize 比较 (per `feedback_qbe_crlf_root_cause.md` + `feedback_fix_evaluation_rule.md`)
 - **feedback_git_identity_canonical** — author `JHYY <15901598712@163.com>` (JHYY@local 不算主页绿格子, 永不接受)
 - **feedback_commit_coauthor** — co-author `MiniMax-M3 <noreply@MiniMax>`
@@ -1111,7 +1111,7 @@ WHY 注释 10 行解释 root cause (subject type → KIND_ENUM → 反查 varian
 - **feedback_audit_single_commit_diff** — audit commit 改动只用 `git show <sha>` / `git diff <sha>~1 <sha>`, **不要** 用累计跨 commit diff
 - **feedback_doc_refactor_factcheck** — docs 重构前逐条 fact-check: 限制是否仍存在 / 是否已 ship / 是否措辞过时
 - **feedback_changelog_umbrella** — vX.Y axis 只用 1 个 umbrella changelog, 不创建 standalone changelog-vX.Y.Z.md
-- **feedback_document_workarounds_in_docs** — workaround 必须详细记录到 `docs/workarounds.md`, 不止代码注释; superseded 标 RESOLVED 不删除
+- **feedback_document_workarounds_in_docs** — workaround 必须详细记录到 `docs/internal/workarounds.md`, 不止代码注释; superseded 标 RESOLVED 不删除
 - **feedback_small_plans_no_docs** — 单 stage step-by-step plan 不写 `docs/plans/`, 走 plan mode 或直接执行
 - **v1.7.3 ship commit** `57f89dc` (2026-08-28) — 32 candidates 完整 ship (Stage 1-5 + v1.7.1/2/3 patches), tag `v1.7.3` = v1.x FINAL marker, spec v1.3.0 locked
 - **v1.3.6 ship commit** `169759c` (defer ship 时 0 accept-path test 验证 — ship 流程 gap, v1.8.0 反思闭环)

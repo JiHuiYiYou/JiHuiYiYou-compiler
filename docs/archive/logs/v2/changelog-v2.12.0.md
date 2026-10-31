@@ -94,7 +94,7 @@ v2.12.0 = **首个 audit sprint (无抽样)** — 全 119 active PASS tests 跨 
 ### Side-effects / Co-products
 
 1. **NEW directory + file**: `docs/archive/audit/v2.12.0-audit-log.md` — audit log 落点,后续 v2.13+ audit 复用格式
-2. **../../../workarounds.md** — `feedback_codegen_amd64_multifn` + `feedback_codegen_amd64_run_zerobyte` 标 **RESOLVED** (per audit 全 PASS)
+2. **../../../internal/workarounds.md** — `feedback_codegen_amd64_multifn` + `feedback_codegen_amd64_run_zerobyte` 标 **RESOLVED** (per audit 全 PASS)
 3. **../../../internal/architecture.md** — Last updated v2.12.0 + 1-line summary 追加
 4. **mcp-jhyy/jhyy_regress.py / jhyy_run.py** — 不动 (utilities, audit 用 raw bash 不调 MCP — per `feedback_mcp_jhyy_run_workspace` axis-v2 不走 MCP)
 

@@ -211,7 +211,7 @@
 
       v1.8.3 patch: add JHYYSetUCForAllUsers CustomAction to write per-user
       UserChoice directly from SYSTEM context. SYSTEM trust chain bypasses
-      UCPD.sys (Win10 2024-02+) — see docs/workarounds.md W-062.
+      UCPD.sys (Win10 2024-02+) — see docs/internal/workarounds.md W-062.
       The CA runs in deferred sequence after InstallFiles so jhyy-setuc.exe
       is already on disk; Impersonate="no" ensures SYSTEM context (LocalSystem
       perMachine install); Return="ignore" so a CA failure doesn't rollback
@@ -259,7 +259,7 @@
       v1.8.3.1 deferred CustomAction: invoke jhyy-setuc.exe with the
       system-context flag. Enumerates HKEY_USERS S-1-5-21-… SIDs and writes
       each user's UserChoice directly. SYSTEM trust chain bypasses UCPD.sys
-      kernel filter (verified 2026-08-29 — see docs/workarounds.md
+      kernel filter (verified 2026-08-29 — see docs/internal/workarounds.md
       W-062).
 
       Execute="deferred" + Impersonate="no" = SYSTEM context (LocalSystem).
@@ -292,7 +292,7 @@
       is needed because runtime.c line 1 does #include "runtime.h"
       and gcc resolves it from runtime.c's dir. Regress uses
       source-tree layout (b), which is why these only manifest in
-      fresh-install scenarios. See docs/workarounds.md § W-043
+      fresh-install scenarios. See docs/internal/workarounds.md § W-043
       (RESOLVED) + § W-044 (RESOLVED).
 
       NOT included: GCC toolchain (per `力度 1 检测+引导` 决策, user 装 v1.5.2
@@ -518,7 +518,7 @@
       (jh_path_stdlib → layout (a) <bindir>\std). Before W-103 there was no
       fallback, so the modules under compiler/src0/std/ were reachable by
       **nobody** — the tests had to carry inline copies, and those copies
-      endorsed the mocks (see docs/workarounds.md W-103).
+      endorsed the mocks (see docs/internal/workarounds.md W-103).
 
       One Component with 8 Files (only the first is the KeyPath) — MSI allows
       a Component to hold several files as long as exactly one is the KeyPath.

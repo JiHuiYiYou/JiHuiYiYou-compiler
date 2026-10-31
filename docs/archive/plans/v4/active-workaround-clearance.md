@@ -29,7 +29,7 @@ W-109 → **RESOLVED**(真修 `958c2b8`);W-118 新登记(B 组之外,
 (一出一进),但**其中 9 条现在每次 CI 都有门在验** —— 详见下方优先级表的「门」列。
 
 **基线:** `d2f5361`(2026-10-15)6 条首次进台账 → `93cdf3d` 补 W-109 → 补 W-110..W-116。
-台账里的条目:`docs/workarounds.md` W-103..W-107 / W-105.1 / **W-118** / W-109..W-116。
+台账里的条目:`docs/internal/workarounds.md` W-103..W-107 / W-105.1 / **W-118** / W-109..W-116。
 
 **优先级(高 → 低),并标出「现在有门吗」:**
 
@@ -73,7 +73,7 @@ W-105.1 / W-118)。补掉前三条的排期见
 > **`测试翻不了红的时候,RCA 也是不完整的`。**
 > 现状(2026-10-15 终值):**零信号已清零** —— regress 173/173 全部有断言,
 > NOASSERT 0 / VACUOUS 0(此前 53 个)。真断言 102 → **160**。
-> 补断言的过程又挖出 W-112 / W-113 / W-114 三条真 bug。见 `docs/FACTS.md` 与
+> 补断言的过程又挖出 W-112 / W-113 / W-114 三条真 bug。见 `docs/internal/FACTS.md` 与
 > `scripts/dev/audit_test_assertions.py`。修 W-109/W-110 的同时应该把比例压下去,
 > 否则下一个 bug 还是这样活下来。
 
@@ -239,7 +239,7 @@ W-105.1 / W-118)。补掉前三条的排期见
 - **16 处裸偏移指针访问**(ast / codegen / mono / sema)—— 首轮 audit 提到,
   至今**没有一条复核过**。这类写法正是 W-102(address-holder 池重叠)的同族形态,
   优先级可能被低估
-- `docs/workarounds.md` 索引 **103** 行 vs 台账 **104** 个条目 —— 漏的是
+- `docs/internal/workarounds.md` 索引 **103** 行 vs 台账 **104** 个条目 —— 漏的是
   W-025 / W-070(两条都是 RESOLVED,故不影响 ACTIVE 计数)。成因:W-025 有
   follow-up H3 打乱解析,W-070 状态行带 `✅` 前缀且日期不合 schema
 
@@ -521,7 +521,7 @@ W-079 当年挡的是 **QBE**;QBE 随 v4.0.0 完全移除,实测 mixed-width ext
 它的 RESOLVED 只是没覆盖 std_os 这一半。
 
 修法与验收见 [`docs/archive/plans/v4/version-schedule.md`](version-schedule.md) § v4.0.16
-与台账 `docs/workarounds.md` 的 W-103 条目。下面保留本节原文作为
+与台账 `docs/internal/workarounds.md` 的 W-103 条目。下面保留本节原文作为
 **审计轨迹**(桥的名字从 `jh_open/jh_close/...` 改成 `jh_os_open/jh_os_close/...`
 —— 前缀跟已有 `jh_os_*` 家族对齐,避免跟 runtime.c 的 C 侧符号撞名)。
 
@@ -569,7 +569,7 @@ W-080 实际只动了 `std/io.jhyy` 和 `emit_call`。**(b) 从来没人动过�
 
 实际根因比本节原先写的更大:不是「分类器接错」,是**整个 struct 参数退化成按指针传**。
 修法与验收见 [`docs/archive/plans/v4/version-schedule.md`](version-schedule.md) § v4.0.11 / § v4.0.12
-与台账 `docs/workarounds.md` 的 W-104 条目。摘要:
+与台账 `docs/internal/workarounds.md` 的 W-104 条目。摘要:
 
 - ≤16B → 按 eightbyte 分类(INTEGER→GPR,SSE→XMM);>16B → MEMORY class 整体落栈
 - 常驻门 `sysv_abi_cross.sh` 扩成**三方向**(small jhyy→gcc / big jhyy→gcc /
@@ -716,7 +716,7 @@ regress jhyy.exe              → 不低于 162/162 PASS + 23 SKIP
 regress jhyy_v2.exe           → 不低于 162/162 PASS + 23 SKIP   ← self-hosted 也跑
 closure_check.sh              → PASS, v2.s == v3.s byte-identical
 fixed_point.sh N=5            → 7 PASS / 0 FAIL / 0 INFO
-../../../workarounds.md 索引           → ACTIVE 0 / DEFERRED 0
+../../../internal/workarounds.md 索引           → ACTIVE 0 / DEFERRED 0
 ```
 
 **两条经验(2026-10-15 这轮学到的,别再踩):**
@@ -737,7 +737,7 @@ fixed_point.sh N=5            → 7 PASS / 0 FAIL / 0 INFO
 
 ## Cross-ref
 
-- 台账:`docs/workarounds.md` W-103..W-107
+- 台账:`docs/internal/workarounds.md` W-103..W-107
 - 既有排期冲突:v4.6+ 语言特性链的 lifetime 项(Polonius)—— 本文档决策点 B/C 选项所指
 - 门修复:commit `4a117a1`
 - 台账登记 + 索引修复:commit `d2f5361`

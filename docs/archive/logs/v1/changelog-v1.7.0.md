@@ -87,7 +87,7 @@
   - `compiler/tests/examples/ptr_arith_diff.jhyy` — `*T - *T` + `d + 100i64` → EXIT=102 (强断言 d != 0)
   - `compiler/tests/examples/ptr_arith_subscript.jhyy` — `p[2]` → EXIT=30
 - ✅ 删 `_ptr_arith_limit.jhyy` — W-055 LIMIT 标记, RESOLVED 后无用 (git rm)
-- ✅ `docs/workarounds.md:3663-` W-055 状态 ACTIVE → RESOLVED + 加 Resolution 段
+- ✅ `docs/internal/workarounds.md:3663-` W-055 状态 ACTIVE → RESOLVED + 加 Resolution 段
 
 ### 已知限制 (Stage 2 不修, 推后续)
 
@@ -135,7 +135,7 @@
 - ✅ 2 existing test 改类型 (Step 7):
   - `compiler/tests/examples/char_literal.jhyy` — 8 个 `: u8 → : i32` + 3 个 BMP case 追加
   - `compiler/tests/examples/char_pattern.jhyy` — `fn classify(c: u8) → c: i32` + call sites 去掉 `as u8` cast
-- ✅ `docs/workarounds.md` 加 W-056 UTF-8 char literal (NEW → ✅ RESOLVED) + Stage 3 同步坑段
+- ✅ `docs/internal/workarounds.md` 加 W-056 UTF-8 char literal (NEW → ✅ RESOLVED) + Stage 3 同步坑段
 - ✅ `compiler/build/bin/jhyy.exe.sha256` 新 baseline 重锁 (Stage 3 N=4 byte-equal closure sha `7552aa94...`)
 
 ### 已知限制 (Stage 3 不修, 推后续)
@@ -392,11 +392,11 @@ v1.7.0 umbrella 5/5 ship 后, 主动扫 v1.8 候选必要性 (用户问 "还用�
 #### Axis B Installer 2 docs-only
 
 ##### B1. W-021 ACTIVE → RESOLVED (WiX 7 Bal.wixext)
-- `docs/workarounds.md` master table + W-021 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B1, permanent workaround shipped v1.5.3)
+- `docs/internal/workarounds.md` master table + W-021 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B1, permanent workaround shipped v1.5.3)
 - 真实根因: WiX 7.0.0+b8977d6 把 Bal extension DLL 命名 `WixToolset.BootstrapperApplications.wixext.dll` (跟 extension name 不一致). 短期/中期 WiX 上游不会改 DLL 命名, 长期推 v2.x 自写 BAFunctions. 接受 permanent workaround 化
 
 ##### B2. W-051 ACTIVE → RESOLVED (MSI deferred CA 1721 → HKLM RunOnce)
-- `docs/workarounds.md` master table 新增 W-051 row + W-051 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B2, permanent workaround shipped v1.5.7-rc1)
+- `docs/internal/workarounds.md` master table 新增 W-051 row + W-051 段标题改 RESOLVED 2026-08-28 (v1.7.1 patch B2, permanent workaround shipped v1.5.7-rc1)
 - 真实根因: MSI deferred CA type 34 在 SYSTEM token 下 CreateProcess argv mis-tokenize cmd/c 链. WiX/MSI engine 升级不可预期, 强标 ACTIVE 不解决任何 active 问题. 接受 permanent workaround 化
 
 #### Axis C Test-only
@@ -421,7 +421,7 @@ v1.7.0 umbrella 5/5 ship 后, 主动扫 v1.8 候选必要性 (用户问 "还用�
 | A2 char_utf8_expr: `=> r = N` 自然范式 → EXIT=5 | ✅ 双 binary (jhyy.exe + jhyy_stage0.exe) EXIT=5 (之前 stage0 EXIT=0, 现在 EXIT=5) |
 | A3 enum_match_arm_tag_check: `Option::None` → 200 (not 100) | ✅ 双 binary EXIT=200 |
 | A4 u32_let_inferred: `let a: u32 = 10` 不 type mismatch | ✅ 双 binary EXIT=55 |
-| B1/B2 docs: ../../../workarounds.md W-021/W-051 master table + 段标题 改 RESOLVED | ✅ docs-only |
+| B1/B2 docs: ../../../internal/workarounds.md W-021/W-051 master table + 段标题 改 RESOLVED | ✅ docs-only |
 | full regress (jhyy.exe) | ✅ 91/93 PASS + 4 SKIP (vs v1.7.0 Stage 5 91/91, **2 净 new tests** A3+A4; 2 已知失败 gdb_pretty_test + min_enum per W-019/W-020 不变) |
 | full regress (jhyy_stage0.exe) | ✅ **93/93 PASS** + 4 SKIP (vs Stage 5 91/91, **+2 new tests** + **5 隐藏修复**: char_utf8_expr / match_exhaustive / 等等之前 stage0 broken 的全修了, 因为 A2 真修同时 fix 了 cg_expr 缺 NODE_ASSIGN case 的根因) |
 | v1.7.1 patch N=4 byte-equal closure | ✅ jhyy_v1.il (sha `073c0a9c...`) ≠ jhyy_v2.il = v3.il = v4.il (sha `3843271f...`). v1 是 stage0 编 (C-side), v2-v4 是 jhyy-side 编 (post-fix parity), jhyy-side 4 阶段 byte-equal 闭 (跟 Stage 5 同型, v1 stage0 跟 v2+ jhyy-side 不同 sha 是预期 — Stage 1 不同 compiler, Stage 2+ 自我编) |
@@ -494,15 +494,15 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 
 #### Axis C Docs-only 1 候选
 
-##### C1. ../../../workarounds.md master table vs section body fact-check 统一
+##### C1. ../../../internal/workarounds.md master table vs section body fact-check 统一
 - **类别**: Doc hygiene (per `feedback_doc_refactor_factcheck` + `feedback_document_workarounds_in_docs.md`)
-- **文件**: `docs/workarounds.md`
+- **文件**: `docs/internal/workarounds.md`
 - **范围**:
   - **W-006** section body line 710 "Status 保持 ACTIVE (dormant)" 措辞修订 — 跟 master table line 33 ✅ RESOLVED 统一, "dormant" 改成"根因标 dormant 提醒未来 reader 不要 reset codegen stack-slot allocator"
   - **W-007** section body line 1170 "🟡 ACTIVE (partial — struct field + global var 路径仍漏)" → ✅ RESOLVED (master table line 34 transitive 2026-08-12 验证 "5x5 PASS verified on 4 BAD variants — 单 return value + struct field + global var 全路径 cover")
   - **W-042** master table 缺 row (v1.7.1 patch A1 ship 后没补 row) → 加 ✅ RESOLVED 2026-08-28 row; section body line 2941 "🟡 ACTIVE (v1.5.6)" → ✅ RESOLVED 2026-08-28 (v1.7.1 patch A1 Tier 1+2+3 全链 ship)
   - **W-051** section body line 3287 + 3289 自相矛盾 ("✅ RESOLVED" + "🟡 ACTIVE" 同段) → 删 line 3289 "🟡 ACTIVE" 段 (master table line 53 + line 3287 已统一 ✅)
-- **行数**: ~10 行 (../../../workarounds.md 局部修订)
+- **行数**: ~10 行 (../../../internal/workarounds.md 局部修订)
 - **状态**: docs-only, **不增 W-NNN**
 
 ### 关键约束 (per feedback_*, 跟 v1.7.0 Stage 1-5 + v1.7.1 patch 同型)
@@ -531,7 +531,7 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 | B1 sizeof promote: _sizeof_basic/derived → sizeof_basic/derived 进 default regress | ✅ PASS |
 | B2 min_enum fix: min_enum.jhyy EXIT=1 (after A2' + B2 both ship) | ✅ PASS |
 | B3 gdb_pretty annotation: line 15-18 注释更新 + 行为不变 | ✅ PASS |
-| C1 docs: grep ../../../workarounds.md 验证 5 处 status 字段一致 (W-006 RESOLVED, W-007 RESOLVED, W-042 RESOLVED + master row, W-051 no self-contradicting ACTIVE) | ✅ PASS |
+| C1 docs: grep ../../../internal/workarounds.md 验证 5 处 status 字段一致 (W-006 RESOLVED, W-007 RESOLVED, W-042 RESOLVED + master row, W-051 no self-contradicting ACTIVE) | ✅ PASS |
 | full regress (jhyy.exe, fresh rebuild) | ✅ **95/95 PASS + 4 SKIP** (vs v1.7.1 91/91+4, **+4 net**: A1' sizeof_basic + sizeof_derived promoted + A2' min_enum + gdb_pretty_test fixed) |
 | full regress (jhyy_stage0.exe parity — C-side src 没改) | ✅ **95/95 PASS + 4 SKIP** (parity) |
 | v1.7.2 patch N=4 byte-equal closure | ✅ jhyy_v1.il (sha `37ffc49c...` stage0-compiled) ≠ jhyy_v2.il = v3.il = v4.il (sha `04543cdb...` jhyy-side compiled — **fact-check 2026-08-28 v1.7.3 ship**: 此 sha 引用不准确, 实际当前 closure sha `3d84bece...`, v1.7.2 ship 当时可能记录错误或 closure 有 non-deterministic 输出, 不影响 ship 正确性**). 新 sha 跟 v1.7.1 ship `3843271f...` 不同 — **expected**, A1'+A2' 改 src0/codegen.jhyy, jhyy-side 4 阶段 byte-equal 闭 |
@@ -543,7 +543,7 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 - **2 test promote** (B1 sizeof_basic + sizeof_derived)
 - **1 test bug fix** (B2 min_enum test 设计)
 - **1 annotation fact-check** (B3 gdb_pretty_test W-019 stale 注释)
-- **1 docs-only RESOLVED** (C1 ../../../workarounds.md 5 处 fact-check 统一: W-006/W-007/W-042 master row add/W-042 section body/W-051 self-contradiction 删)
+- **1 docs-only RESOLVED** (C1 ../../../internal/workarounds.md 5 处 fact-check 统一: W-006/W-007/W-042 master row add/W-042 section body/W-051 self-contradiction 删)
 - **1 deferred-to-nothing** (A1 浮点 `%=` 推 v2.x, vendor QBE 不支持 remd/rems)
 - **净**: 6 候选 ship + 1 deferred = **7 行项**, 实际改 ~16 行 src/src0 + ~8 行 test + ~10 行 docs + 2 git renames = **4 文件改 + 2 git renames + 1 changelog + 1 binary (jhyy.exe rebuild) + 1 sha256 baseline** ≈ 比 v1.7.1 patch 还小
 
@@ -571,7 +571,7 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 **v1.7.2 patch ship 后 fact-check 出 6 类缺口** (per spec + test coverage + workarounds + deferred 候选全扫描):
 1. **spec `jhyy-lang-spec-v1.3.0.md` 4 类不一致** — 文件名/标题错位、§4.4 缺 BMP-only 限制、附录 D 缺 v1.4-v1.7 增量、附录 C 启动条件缺 v1.7
 2. **CLAUDE.md:24 锁定 spec 主轴错** (引用 v1.1.0 而非 v1.3.0)
-3. **../../../workarounds.md W-055 master table stale** (标 ACTIVE 但 spec §9.5 + changelog v1.7.0 Stage 2 都明确 SHIPPED — dangling reference)
+3. **../../../internal/workarounds.md W-055 master table stale** (标 ACTIVE 但 spec §9.5 + changelog v1.7.0 Stage 2 都明确 SHIPPED — dangling reference)
 4. **test coverage 5 类缺漏** — defer v1.3.6 ship 后 0 test、u32 8 primitive 缺 5、Pattern binding 多 binding + 嵌套缺、gdb_pretty nested struct DWARF 缺
 5. **deferred-to-v2.x 候选 4 类归档不全** — W-055 stale / A1 fmod (vendor QBE 不支持 remd/rems) 缺独立 W-NNN / 3-byte 4-byte UTF-8 缺独立 W-NNN / M5 一致不动
 6. **gdb_pretty_test.jhyy:15-18 注释 stale** ("deferred to v1.8" outdated)
@@ -629,12 +629,12 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 
 ### Axis C workarounds 4 候选 (dangling reference 真修 + 新登 DEFERRED)
 
-#### C1. ../../../workarounds.md:58 master table W-055 ACTIVE → RESOLVED stale fix
+#### C1. ../../../internal/workarounds.md:58 master table W-055 ACTIVE → RESOLVED stale fix
 - **类别**: dangling reference 真修
 - **范围**: W-055 row "🆕 ACTIVE 2026-08-27" → "✅ RESOLVED 2026-08-28 (v1.7.0 Stage 2 commits `6216138`+`187e8ab`)" (跟 section body line 3671+ 一致)
 
 #### C2. W-057 UTF-8 3/4-byte codepoint 新登 (🟡 DEFERRED v2.x)
-- **类别**: dangling reference 归档 (changelog-v1.7.0 line 131 + ../../../workarounds.md:3819 推 v2.x 无独立 W-NNN)
+- **类别**: dangling reference 归档 (changelog-v1.7.0 line 131 + ../../../internal/workarounds.md:3819 推 v2.x 无独立 W-NNN)
 - **范围**: master table row 新登 + section body 新加 ~20 行 ("vendor QBE 不支持 3/4-byte codepoint 编译期折叠, v1.7.0 Stage 3 显式 lex reject, 推 v2.x 自研 backend")
 
 #### C3. W-058 fmod 浮点取模 新登 (🟡 DEFERRED v2.x)
@@ -643,17 +643,17 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 
 #### C4. spec 附录 B fmod row 加 cross-ref W-058
 - **类别**: spec / workaround 双向 cross-ref
-- **范围**: 附录 B 表 P3 fmod row "推 v2.x" → "推 v2.x, 详见 ../../../workarounds.md W-058 🟡 DEFERRED v2.x"
+- **范围**: 附录 B 表 P3 fmod row "推 v2.x" → "推 v2.x, 详见 ../../../internal/workarounds.md W-058 🟡 DEFERRED v2.x"
 
 ### 已知 limitation (v1.7.3 不修, 推 v2.x / 留 v1.8 决策)
 
 | 候选 | 归档位置 | 触发面 | 推 v2.x / v1.8 原因 |
 |------|---------|------|-------------------|
-| **W-057 UTF-8 3/4-byte codepoint** | ../../../workarounds.md master row + section body + spec §4.4 BMP-only 限制 | `'你'` (3-byte) / `'🎉'` (4-byte) lex fail | vendor QBE 不支持 3/4-byte codepoint 编译期折叠, 推 v2.x |
-| **W-058 fmod 浮点取模** | ../../../workarounds.md master row + section body + spec 附录 B fmod row | 浮点 `%=` / `a % b` reject | vendor QBE 不支持 remd/rems, 推 v2.x |
-| **W-059 defer codegen silent crash** | ../../../workarounds.md + 3 SKIP directive in regress | `defer sink();` codegen EXIT=0 无 .il/.s/.exe | v1.3.6 ship 时 0 accept-path test, 推 v1.8 真修 |
-| **W-060 enum variant payload ABI** | ../../../workarounds.md + 2 SKIP directive in regress | `Mixed::I(1234)` match 走 wildcard path | v1.3.7 Pattern binding ship 时只覆盖 single-payload single-binding, 推 v1.8 |
-| **W-061 nested struct field offset** | ../../../workarounds.md + 1 SKIP directive in regress | `Outer { tag, inner }` read EXIT=51 ≠ 307 | W-019 RESOLVED 修 1-layer, 2-field Inner + Outer 字段序后置是 W-061 扩展, 推 v1.8 |
+| **W-057 UTF-8 3/4-byte codepoint** | ../../../internal/workarounds.md master row + section body + spec §4.4 BMP-only 限制 | `'你'` (3-byte) / `'🎉'` (4-byte) lex fail | vendor QBE 不支持 3/4-byte codepoint 编译期折叠, 推 v2.x |
+| **W-058 fmod 浮点取模** | ../../../internal/workarounds.md master row + section body + spec 附录 B fmod row | 浮点 `%=` / `a % b` reject | vendor QBE 不支持 remd/rems, 推 v2.x |
+| **W-059 defer codegen silent crash** | ../../../internal/workarounds.md + 3 SKIP directive in regress | `defer sink();` codegen EXIT=0 无 .il/.s/.exe | v1.3.6 ship 时 0 accept-path test, 推 v1.8 真修 |
+| **W-060 enum variant payload ABI** | ../../../internal/workarounds.md + 2 SKIP directive in regress | `Mixed::I(1234)` match 走 wildcard path | v1.3.7 Pattern binding ship 时只覆盖 single-payload single-binding, 推 v1.8 |
+| **W-061 nested struct field offset** | ../../../internal/workarounds.md + 1 SKIP directive in regress | `Outer { tag, inner }` read EXIT=51 ≠ 307 | W-019 RESOLVED 修 1-layer, 2-field Inner + Outer 字段序后置是 W-061 扩展, 推 v1.8 |
 | **M5 boot-from-scratch** | 不动 (per 2026-08-14 决策推迟到 v2.x 末 + v3.x 末) | OS 启动依赖 | 推 v2.x QBE 重写 + freestanding + v3.x `&mut` lifetime + runtime.c 重写 |
 
 ### 关键约束 (per feedback_*, 跟 v1.7.0 Stage 1-5 + v1.7.1/v1.7.2 patch 同型)
@@ -688,7 +688,7 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 | C1 W-055 master table stale fix: master table ✅ RESOLVED (跟 section body 一致) | ✅ PASS |
 | C2 W-057 UTF-8 3/4-byte 新登: master table row + section body, 🟡 DEFERRED v2.x | ✅ PASS |
 | C3 W-058 fmod 新登: master table row + section body, 🟡 DEFERRED v2.x | ✅ PASS |
-| C4 spec 附录 B fmod cross-ref: "see ../../../workarounds.md W-058" | ✅ PASS |
+| C4 spec 附录 B fmod cross-ref: "see ../../../internal/workarounds.md W-058" | ✅ PASS |
 | full regress (jhyy.exe) | ✅ **96/96 PASS + 10 SKIP** (vs v1.7.2 95/95+4, **+1 net PASS**: A4 u32_let_inferred_5; **+6 net SKIP**: A1-A3 + A5-A7 SKIP via W-059/060/061) |
 | full regress (jhyy_stage0.exe) | ✅ **96/96 PASS + 10 SKIP** (parity, sha `a7673a35...` 不变) |
 | N=4 byte-equal closure | ✅ jhyy_v2.il = v3.il = v4.il byte-equal (sha `3d84bece...` 当前实际值, 跟 v1.7.2 ship 记录的 `04543cdb...` 不同 — closure sha 可能因 non-determinism 漂移, jhyy.exe + jhyy_stage0.exe binary baseline lock hold 是 ship 真正保证), v1.il ≠ (stage0-compiled 不同 sha, 跟 v1.7.2 ship 一致) |
@@ -719,7 +719,7 @@ v1.7.1 patch ship 后, 主动扫 v1.7.2 候选 (用户决策). Explore + fact-ch
 - ✅ **ACTIVE user-space workaround**: 0 (W-055 master table stale C1 修后真 0)
 - ✅ **DEFERRED-to-v2.x workaround**: 2 (W-057 UTF-8 3/4-byte + W-058 fmod, 明确归档不 dangling)
 - ✅ **DEFERRED-to-v1.8 workaround**: 3 (W-059 defer + W-060 enum variant + W-061 nested struct, 暂加 SKIP directive)
-- ✅ **spec v1.3.0 + CLAUDE.md + ../../../workarounds.md** 全 fact-check 统一 (4 类 spec 不一致 + W-055 stale + W-057/W-058 缺独立 W-NNN + CLAUDE.md:24 锁定主轴错, 全修)
+- ✅ **spec v1.3.0 + CLAUDE.md + ../../../internal/workarounds.md** 全 fact-check 统一 (4 类 spec 不一致 + W-055 stale + W-057/W-058 缺独立 W-NNN + CLAUDE.md:24 锁定主轴错, 全修)
 - ✅ **test coverage 5 类缺漏全补** (defer + u32 8 primitive + Pattern binding 多 binding + 嵌套 + nested struct DWARF)
 - ⏸ **后续 sprint = v2.x ‖ v3.x 并行启动** (per `../../plans/v2-v3/v2-v3-parallel-sprint-plan.md`):
   - **v2.x 主线**: QBE 完整重写 + 升级 vendor QBE 主线 + amd64_sysv + freestanding + W-055 pointer comparison + W-057 UTF-8 3/4-byte + W-058 fmod + jh_gcc_path 跨平台 Linux/macOS
@@ -740,7 +740,7 @@ git tag -l "v1.7*"  # verify
 
 - spec `docs/abis/jhyy-lang-spec-v1.3.0.md` § 4.4 (字符字面量 BMP-only 限制) / § 4.5 (Float suffix) / § 9.5 (Pointer arithmetic — 权威) / 附录 B P3 (fmod row, C4 v1.7.3 patch 加 cross-ref W-058) / 附录 C (v1.x 启动条件 v1.0-v1.7 全 ✅ 达成, B3 v1.7.3 patch 加 v1.4-v1.7 增量) / 附录 D (D.9/D.10/D.11/D.12 v1.4-v1.7 增量, B4 v1.7.3 patch 加) / 附录 E (v1.x 已知限制)
 - `docs/archive/plans/v1/v1.7.0任务清单 + 概要设计.md` (v1.7.0 Stage 1-5 master)
-- `docs/workarounds.md` W-042 / W-021 / W-051 / W-055 (C1 v1.7.3 patch master table ✅ RESOLVED stale fix) / W-056 / **W-057** (C2 v1.7.3 patch 新登 🟡 DEFERRED v2.x) / **W-058** (C3 v1.7.3 patch 新登 🟡 DEFERRED v2.x) / **W-059** (C5 v1.7.3 patch 新登 🟡 DEFERRED v1.8) / **W-060** (C6 v1.7.3 patch 新登 🟡 DEFERRED v1.8) / **W-061** (C7 v1.7.3 patch 新登 🟡 DEFERRED v1.8)
+- `docs/internal/workarounds.md` W-042 / W-021 / W-051 / W-055 (C1 v1.7.3 patch master table ✅ RESOLVED stale fix) / W-056 / **W-057** (C2 v1.7.3 patch 新登 🟡 DEFERRED v2.x) / **W-058** (C3 v1.7.3 patch 新登 🟡 DEFERRED v2.x) / **W-059** (C5 v1.7.3 patch 新登 🟡 DEFERRED v1.8) / **W-060** (C6 v1.7.3 patch 新登 🟡 DEFERRED v1.8) / **W-061** (C7 v1.7.3 patch 新登 🟡 DEFERRED v1.8)
 - `docs/archive/logs/v1/changelog-v1.6.0.md` (v1.6.0 前 ship, 提供 v1.4-v1.6 增量事实源) / `changelog-v1.5.0.md` (DWARF + gdb_pretty + jhyy.exe flip) / `changelog-v1.4.0.md` (DWARF debug) / `changelog-v1.3.0.md` (Pattern binding ship)
 - `feedback_small_plans_no_docs.md` (用户 2026-08-27 / 2026-08-28 节奏决策, v1.7.1/v1.7.2/v1.7.3 patch 均不写 docs/plans/)
 - `feedback_doc_refactor_factcheck.md` (A2 NOT A BUG 误诊教训 — fact-check 不只看 source 矛盾, B3/B4 严格逐条 fact-check v1.4-v1.7 changelog)

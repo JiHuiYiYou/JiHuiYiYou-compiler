@@ -159,7 +159,7 @@ switch ($Target) {
         #   sibling bindpath layout. Without these, gcc link fails because the
         #   cmdline lists them but the files are absent on disk. Regress
         #   uses source-tree layout (b) so this only manifests in fresh
-        #   installs. See docs/workarounds.md § W-043.
+        #   installs. See docs/internal/workarounds.md § W-043.
         #   v1.5.6 W-044: also ship runtime.h (runtime.c line 1 does
         #   #include "runtime.h", gcc resolves from runtime.c's dir).
         Copy-Item -Path "compiler/runtime/runtime.c"    -Destination "$binDir/runtime.c"       -Force

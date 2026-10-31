@@ -4,6 +4,9 @@
 > 每个 workaround 必须在此登记后才能应用到代码里。
 >
 > **本文件永不归档** —— 它是活的台账，不是历史。
+>
+> 文中出现的 `feedback_*` 是历史工作规约的代号 —— 规约正文已移出仓内（只在维护者
+> 的本地笔记里），代号保留作审计线索，可按代号检索。
 
 ---
 
@@ -71,7 +74,7 @@
 | Fix 推到后续 sprint，当前 sprint 不修 | 新 entry | `DEFERRED`（caption 必填版本目标） |
 | 归档时误判为 bug，后确认是 test artifact | 新 entry | `INVALID` |
 | 代码中已有 workaround 注释但未登记 entry | **Backfilled 补登** | 视当时实际状态 |
-| Canonical pattern（设计如此，不是 bug） | 迁 [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 不进本文件（`SUPERSEDED` 残留仅用于跨 sprint audit trail） |
+| Canonical pattern（设计如此，不是 bug） | 迁 [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | 不进本文件（`SUPERSEDED` 残留仅用于跨 sprint audit trail） |
 
 **动手前**先写条目（是什么 / 触发条件 / 怎么绕 / 绕在哪 / 什么修法能取代它），
 **动手后**回填真实 file:line。根因修好后标 `RESOLVED` + 日期 + commit，**不要删**。
@@ -84,7 +87,7 @@
 4. caption ≤ 120 char，no emoji
 5. body 含 RCA 段（最少：症状 / 根因 / workaround / 影响范围 / 失效条件）
 6. 引用真实 commit sha（不是 `<TBD>`）
-7. 索引表重建：`python scripts/dev/v2_13_5_rebuild_index.py docs/workarounds.md docs/workarounds.md`
+7. 索引表重建：`python scripts/dev/v2_13_5_rebuild_index.py docs/internal/workarounds.md docs/internal/workarounds.md`
 
 ### 5. entry 模板
 
@@ -497,7 +500,7 @@ W-002 revert 实施时产生的 archive 文件保留作为可重放参考:
 # 历史: v0.8 commit 7 (`0453cef`) 引入 W-002 (绕 hash_string *i32 overread)
 #       v0.8 commit 9 (`d570c72`) W-001 真修后 W-002 失效
 #       v0.9 wip commit 2.12 (`8a9de1c`) 211 revert 回原名
-# 状态: RESOLVED (per docs/workarounds.md § W-002)
+# 状态: RESOLVED (per docs/internal/workarounds.md § W-002)
 # 用途: archive — 保留作为可重放参考; 未来若需重新引入 W-002 可直接当 input
 # ════════════════════════════════════════════════════════════════
 ```
@@ -606,7 +609,7 @@ store_byte_i32(nul1, 0 as i32);
 - W-003 workaround 代码 `let _ = fncall()` style 在 src0/ 24 处 通过 v1.2.2 (`f49e64d`) 全部 revert 回 `let _X = fncall()` 描述性名 风格 (cg_expr / cg_emit_store / cg_copy_struct / ir_emit_ret / ir_emit_str / ir_emit_jmp 6 类 call)
 - 跟 v1.2.0 plan out-of-scope "v3 workaround 29 处" (line 342) 实际工作已经 ship — v1.2.2 24 处 + v1.2.3/1.4 关联 = 完整 29 处 revert
 - W-003 状态:**code 撤回完, v0 fix ship 已闭环**
-- 详情见 [docs/archive/logs/v1/changelog-v1.2.0.md](archive/logs/v1/changelog-v1.2.0.md)
+- 详情见 [docs/archive/logs/v1/changelog-v1.2.0.md](../archive/logs/v1/changelog-v1.2.0.md)
 
 ---
 
@@ -670,7 +673,7 @@ fn ab() -> i32 {                              // fn 长度 2，但其它都长
 
 **引用:**
 - v0 codegen Bug 6 (let-mut assignment) + Bug 1 (hash_string overread)
-- W-002 (`docs/workarounds.md` § W-002) 修了 211 个全局/函数名，未覆盖局部 var
+- W-002 (`docs/internal/workarounds.md` § W-002) 修了 211 个全局/函数名，未覆盖局部 var
 - 复现测试 `tmp/test_w4.jhyy` ~ `tmp/test_w8.jhyy`
 
 ### 验证状态 2026-08-05 (v0.9 wip commit 2.14) — BLOCKED
@@ -863,7 +866,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 
 **引用:**
 - v0 codegen Bug 6 (let-mut assignment) + Bug 7b (nested let-mut)
-- W-003 (`docs/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
+- W-003 (`docs/internal/workarounds.md` § W-003) 修了 `let _X = fncall()` 顶层 direct call 模式，未覆盖 let-mut + assign
 - W-004 修了短 var 名导致 symtab hash 撞死循环，未覆盖 let-mut + assign segfault
 - 复现测试 `tmp/test_w4_lit.jhyy` / `tmp/test_w4_v1.jhyy`
 
@@ -871,7 +874,7 @@ fn run_qbe_v1(il_path_v1: *u8, asm_path_v1: *u8) -> i32 {
 - W-005 workaround 代码 `let mut xxx_vN` style 在 src0/ 16 处 通过 v1.2.1 (`2c92cf4`) 全部 revert 回 `let mut xxx` 自然风格
 - W-005 workaround 残留 `_vN` 后缀 99 处 通过 v1.2.3 (`1c24841`) + v1.2.4 (`0026098`) 全部 cleanup
 - W-005 状态:**code 撤回完, v0 fix ship 已闭环** — 跟 v0.9 wip commit 2.13 + v0.9 wip commit 2.11 真修 chain 形成完整闭环
-- 详情见 [docs/archive/logs/v1/changelog-v1.2.0.md](archive/logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.3](archive/logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.4](archive/logs/v1/changelog-v1.2.0.md)
+- 详情见 [docs/archive/logs/v1/changelog-v1.2.0.md](../archive/logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.3](../archive/logs/v1/changelog-v1.2.0.md) + [§ v1.2 wip commit 1.4](../archive/logs/v1/changelog-v1.2.0.md)
 
 ---
 
@@ -1000,13 +1003,13 @@ v1.1 wip commit 1.1 最初版本把 W-006 标 "RESOLVED (escaped — codegen fix
 **superseder**: closed (root cause = W-005 #2 family)
 
 **引用**:
-- [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](archive/plans/v1/v1.1.0任务清单 + 概要设计.md) — W-006 编排 (从 1st sprint 移到 "已真修" 状态)
+- [docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md](../archive/plans/v1/v1.1.0任务清单 + 概要设计.md) — W-006 编排 (从 1st sprint 移到 "已真修" 状态)
 - `memory/project_sprint4_21_phase_b_c_d_g_done.md` — Sprint 4.21 Phase C (cg_copy_struct const IRVal*)
 - `memory/project_sprint4_25_a_prime_sentinel_guard.md` — Sprint 4.25 A' sentinel 真修
 - Stage 1 byte-equal 7/7 PASS (持平 baseline)
 
 **引用**:
-- v1.1.0 plan [`docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md`](archive/plans/v1/v1.1.0任务清单 + 概要设计.md) § Sprint v1.1.1
+- v1.1.0 plan [`docs/archive/plans/v1/v1.1.0任务清单 + 概要设计.md`](../archive/plans/v1/v1.1.0任务清单 + 概要设计.md) § Sprint v1.1.1
 - 触发面扫描 2026-08-05: 见上方"### 触发面扫描 2026-08-05 — dormant (0 活跃触发面)" 段
 - v1.1 wip commit 1.1 (this commit) — doc-only RESOLVED status flip
 
@@ -1878,9 +1881,9 @@ export function w $unwrap_or(w %opt, ...)  ← ❌ callee 声明 w!
 **失效条件:** 不再写 `l` 类声明 large enum param,或者 enum ABI 改成 all-by-value(无 slot 概念)。
 
 **引用:**
-- v1.3.7 fix ship (umbrella): [`docs/archive/logs/v1/changelog-v1.3.0.md`](archive/logs/v1/changelog-v1.3.0.md) § v1.3.7 fix ship
+- v1.3.7 fix ship (umbrella): [`docs/archive/logs/v1/changelog-v1.3.0.md`](../archive/logs/v1/changelog-v1.3.0.md) § v1.3.7 fix ship
 - v1.3.7 父 sprint: `docs/archive/plans/v1/v1.3.0任务清单 + 概要设计.md` § v1.3.7
-- ABI spec: [`docs/abis/jhyy-abi-v4.0.0.md`](abis/jhyy-abi-v4.0.0.md) § enum pass semantics (大 enum = slot 传)
+- ABI spec: [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) § enum pass semantics (大 enum = slot 传)
 
 <a id="w-017"></a>
 ## W-017: jhyy 顶层 `let mut *u8 = 0` codegen 常量折叠 → 全局状态失效
@@ -2133,7 +2136,7 @@ match tag { 0 => ..., 1 => ..., 2 => ... }
 
 **引用:**
 - repro: `compiler/tests/examples/gdb_pretty_test.jhyy:50,53`;最小 repro `_min_enum.jhyy`
-- v1.4.4 ship 时 changelog 把此 bug 误标 "pre-existing v1.4.3" 已更正 → [`docs/archive/logs/v1/changelog-v1.4.0.md`](archive/logs/v1/changelog-v1.4.0.md) § v1.4.4 ship
+- v1.4.4 ship 时 changelog 把此 bug 误标 "pre-existing v1.4.3" 已更正 → [`docs/archive/logs/v1/changelog-v1.4.0.md`](../archive/logs/v1/changelog-v1.4.0.md) § v1.4.4 ship
 - W-019 是 codegen 嵌套 struct,跟 W-020 (parser enum pattern) 不同面,但同样等真修;建议 v1.4.6 合并
 
 <a id="w-021"></a>
@@ -5273,7 +5276,7 @@ if av != bv { match_ok = 0 as i32; }
 **scope:**
 - ✅ 改 `installer/build.ps1` (新增 ~17 行 GITHUB_ENV export block in psHost detection 段)
 - ✅ 改 `.github/workflows/release.yml` (删除 "Compute JHY_VERSION_DISPLAY" mirror step, 改为 comment 说明 single source)
-- ✅ 改 `docs/workarounds.md` W-067 entry (本段)
+- ✅ 改 `docs/internal/workarounds.md` W-067 entry (本段)
 - ❌ 不动 src/src0/ABI/spec/QBE/runtime/installer assets
 - ❌ 不创建 standalone changelog (umbrella, per `feedback_changelog_umbrella`)
 
@@ -5340,7 +5343,7 @@ if av != bv { match_ok = 0 as i32; }
 - ✅ 改 `installer/wix/Theme.xml` line 45 (1 行, ImageControl ImageFile 改 plain `logo.png`)
 - ✅ 改 `installer/build.ps1:363` (1 行, JHY_LOGO_BMP_PATH 从 `jhyy-icon-128.png` 改成 `jhyy-logo-128.png`)
 - ✅ 改 `installer/SHA256.txt` (rebuild bundle + gen-sha256.ps1 重写)
-- ✅ 改 `docs/workarounds.md` W-068 entry (本段)
+- ✅ 改 `docs/internal/workarounds.md` W-068 entry (本段)
 - ❌ 不动 src/src0/ABI/spec/QBE/runtime/jhyy.exe
 - ❌ 不创建 standalone changelog (umbrella v1.8.x 范畴, per `feedback_changelog_umbrella`)
 
@@ -5434,7 +5437,7 @@ compiler/src0/codegen_amd64_peephole.jhyy:539:32: error: type mismatch in binary
 - ✅ gate: `make` + `regress 104/104` + D43 closure sha hold + `JHY_SELF_BACKEND=1 regress 104/104` (首次 e2e 验证自写后端 dispatch)
 - ✅ `byte_equal_amd64.sh` Phase 4 Commit 5: prepend `JHY_SELF_BACKEND=1` + remove `SELF_DEFERRED=1` flag + 更新 script header
 - ✅ 改 `docs/logs/v2/changelog-v2.6.x.md` v2.6.5 sub-section
-- ✅ 改 `docs/workarounds.md` W-068 entry: 🟡 DEFERRED → ✅ RESOLVED
+- ✅ 改 `docs/internal/workarounds.md` W-068 entry: 🟡 DEFERRED → ✅ RESOLVED
 
 **净 ship 计数:** 4 真改 (2 文件 import/sema + 1 文件 wire-up + 1 doc changelog + workarounds.md) + 1 verify script update, ~35 LOC 改动。预计 1 commit ship v2.6.5。
 
@@ -5451,7 +5454,7 @@ workaround (`c251658` inert) 的失效条件 = 任何 commit 真打开 self path
 - `compiler/src0/main.jhyy:44` / `:121` / `:783-815` (workaround 注释 + inert dispatch)
 - `compiler/src0/parser.jhyy:730-760` (struct-literal field loop — 根因 #1 的 parser-side 入口)
 - `docs/archive/plans/v2/batch-V2-B-plan.md` § Commit 5 (byte_equal_amd64.sh 真 path — pending v2.6.5)
-- `docs/workarounds.md` 索引 line 68 (W-068 entry)
+- `docs/internal/workarounds.md` 索引 line 68 (W-068 entry)
 
 ### 验证
 
@@ -6057,7 +6060,7 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 
 **superseder:** v3.0.9 ship commit (待 ship tag)。
 
-**引用:** [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 ≠ V2 self-backend = 1 真债 + 145 共享特性) ; V2.16.0 同 bug 维基 (V2 regress 0 FAIL 跟 W-087 同 pattern, 仅 corpus 缺触发面); `feedback_rca_first_root_cause` (single cluster 19/142 = 13% 但实际 19/19 = 100% 同一根因 — frame size 不含 alloc pool 越界); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_basic 等 10 个 std_* test); `feedback_audit_single_commit_diff` (本 commit 仅 W-087 真修, 跟 Ph.5 QBE removal 分开 commit)。
+**引用:** `feedback_v3_self_backend_diverges_v2` (V3 ≠ V2 self-backend = 1 真债 + 145 共享特性) ; V2.16.0 同 bug 维基 (V2 regress 0 FAIL 跟 W-087 同 pattern, 仅 corpus 缺触发面); `feedback_rca_first_root_cause` (single cluster 19/142 = 13% 但实际 19/19 = 100% 同一根因 — frame size 不含 alloc pool 越界); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_basic 等 10 个 std_* test); `feedback_audit_single_commit_diff` (本 commit 仅 W-087 真修, 跟 Ph.5 QBE removal 分开 commit)。
 
 **延伸 (post-v3.0.9 QBE removal):** 删 QBE 后 self-backend 成为 sole production path, frame_size 必须 = `max(formula_pool, 8192 + per_fn_alloc)` 才能保证不越界 — W-087 真修是 Ph.5 QBE removal 的 mandatory 前置(per v3.0.6 plan § "mandatory 前置 Ph.5a `qbe/` git rm")。
 
@@ -6112,7 +6115,7 @@ if alloc_pool_base > frame_size { frame_size = alloc_pool_base; }
 
 **superseder:** v3.4.1 (本 ship, 2026-09-29)
 
-**引用:** [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 self-backend 真债 vs V2 v4.0.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同一 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (heuristic partial fix 单 commit ship, 跟 W-089 fix 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 derived-address pre-scan 缺); [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#工作规约) (v3.4.1 verification-first 模式,W-088 heuristic live RCA 链:Step 1 patch out + regress 5 FAIL → Step 4 Path B 真修 → Step 4 V3'' max(heuristic, count_l_add) achieve 5/5)。
+**引用:** `feedback_v3_self_backend_diverges_v2` (V3 self-backend 真债 vs V2 v4.0.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同一 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (heuristic partial fix 单 commit ship, 跟 W-089 fix 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 derived-address pre-scan 缺); `feedback_verify_active_reproduces` (v3.4.1 verification-first 模式,W-088 heuristic live RCA 链:Step 1 patch out + regress 5 FAIL → Step 4 Path B 真修 → Step 4 V3'' max(heuristic, count_l_add) achieve 5/5)。
 
 <a id="w-089"></a>
 ## W-089: V3 self-backend emit_call 不 flag l-typed call results as address-holder → `*(call_ret as *T)` 模式 load 错字节 (推 v3.1.0 后 / v3.x)
@@ -6165,11 +6168,11 @@ V2.16.0 有同一 gap: V2 `emit_call` 也不 mark call results as address-holder
 
 **superseder:** v3.4.2 ship 真修 (SymbolReturnTypeMap + emit_call semantic lookup), per [v3.4.2 plan § B1](#) — 替换 v3.1.0 byte-prefix whitelist.
 
-**引用:** [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 self-backend 真债 vs V2 v4.0.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (whitelist partial fix 单 commit ship, 跟 W-088 heuristic 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 call-result address-holder 缺); V2.16.0 同 gap 但 V2 corpus 无触发面 (per [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) 同 pattern)。
+**引用:** `feedback_v3_self_backend_diverges_v2` (V3 self-backend 真债 vs V2 v4.0.0); `feedback_codegen_amd64_multifn` (单 function .il PASS 但 2+ function 静默 fail — 同 pattern); `feedback_fix_evaluation_rule` (5/5 PASS on target tests = std_arena_calloc 等 5 个 std_* test); `feedback_audit_single_commit_diff` (whitelist partial fix 单 commit ship, 跟 W-088 heuristic 同一 commit); `feedback_rca_first_root_cause` (5/19 fail = 26% 是 1 个根因 + 下游症状, 5 fail 全部 call-result address-holder 缺); V2.16.0 同 gap 但 V2 corpus 无触发面 (per `feedback_v3_self_backend_diverges_v2` 同 pattern)。
 
 **v3.4.2 真修 (RESOLVED — 2026-09-29):**
 
-RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#工作规约) + v3.4.0 W-085 docs-only flip 跟 v3.4.1 W-088 真修 同 pattern):
+RCA-first 模式 (per `feedback_verify_active_reproduces` + v3.4.0 W-085 docs-only flip 跟 v3.4.1 W-088 真修 同 pattern):
 
 **Step 1 — verify ACTIVE 真 trigger:**
 - Path B 真修 (per v3.4.2-plan.md `feedback_verify_active_reproduces` 路径选择) 替换 194 LOC byte-prefix whitelist → sema Pass 1.6 populate SymbolReturnTypeMap
@@ -6194,7 +6197,7 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 - `compiler/src0/main.jhyy` +14 LOC (compile() + run_backend() 传 map args)
 - `compiler/tests/examples/codegen_call_return_types.jhyy` NEW (8 sub-test 验证 W-089 真修, SKIP in default regress per archive/plans/v3/v3.4.0-plan.md L89)
 
-**Step 4 — Verification (per [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) 5/5 PASS):**
+**Step 4 — Verification (per `feedback_fix_evaluation_rule` 5/5 PASS):**
 - regress full: 152/152 PASS / 0 FAIL / 21 SKIP (从 v3.4.1 153/153/20 → 152/152/21 — 153-152+1 = +1 新 test SKIP 加入, -1 旧 test 因为 sub-set 移到 SKIP)
 - W-089 reproducer test: `codegen_call_return_types.jhyy` 8 sub-test 全 PASS (EXIT=0)
 - 6 originally-failing std_* test (std_arena_calloc + std_fmt_hex + std_fmt_i64 + std_fmt_str + std_string_data + std_vec_basic) 全 EXIT=0/65 (期望值, not buggy 0)
@@ -6241,9 +6244,9 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 
 **影响范围:** 5 line 修改 (state.jhyy 3 处 + helpers.c 2 处) + 1 binary rebuild。Logic 影响所有 V3 self-backend run (default QBE backend 用户无感,只有 `JHY_SELF_BACKEND=1` 路径感知)。bitmap 1024 = 1KB per compile,negligible arena overhead。
 
-**superseder:** v4.0.0 (V2+V3 converge per [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) plan,届时 V2 也 bump 1024)。
+**superseder:** v4.0.0 (V2+V3 converge per `feedback_plans_per_version` plan,届时 V2 也 bump 1024)。
 
-**引用:** [`feedback_regress_clean_count`](../CONTRIBUTING.md#工作规约) (rm stale _regress_*.exe 前置); [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (1 fail = 1 根因,deep dive 进 bitmap bound 不是猜); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (单 commit ship); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (std_vec_basic EXIT=0 gate); [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 stdlib 触发 V2 unseen gaps); [`feedback_no_date_estimates`](../CONTRIBUTING.md#工作规约) (无 v3.2.4 ship date 估时,sprint 序列相对顺序)。
+**引用:** `feedback_regress_clean_count` (rm stale _regress_*.exe 前置); `feedback_rca_first_root_cause` (1 fail = 1 根因,deep dive 进 bitmap bound 不是猜); `feedback_audit_single_commit_diff` (单 commit ship); `feedback_fix_evaluation_rule` (std_vec_basic EXIT=0 gate); `feedback_v3_self_backend_diverges_v2` (V3 stdlib 触发 V2 unseen gaps); `feedback_no_date_estimates` (无 v3.2.4 ship date 估时,sprint 序列相对顺序)。
 
 <a id="w-091"></a>
 ## W-091: V3 self-backend emit_call `std_` 前缀 whitelist 缺 → std::vec 派生 fn std_vec_get 等返回 pointer 不 flag → `*(call_ret as *T)` 错字节 (推 v3.2.4)
@@ -6277,9 +6280,9 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 
 **影响范围:** 1 file modified (emit_call.jhyy), +12 LOC (new is_prefix_std_any 比较 + comment)。Logic 影响所有 V3 self-backend run (default QBE backend 用户无感)。
 
-**superseder:** v4.0.0 (V2+V3 converge per [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) plan);full 真修 v3.x mid: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。
+**superseder:** v4.0.0 (V2+V3 converge per `feedback_plans_per_version` plan);full 真修 v3.x mid: caller-side inter-procedural pointer-typing analysis (cross-function call graph + 每个 fn return type 从 AST 推断 — 不依赖 name prefix heuristic)。
 
-**引用:** [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (W-090 修后 EXIT 109 = 下一根因,深 RCA 进 whitelist miss 不是猜); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (5/5 PASS on std_vec_basic + regress 145/145); [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 stdlib 触发 V2 unseen gaps); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (单 commit ship 跟 W-090 同); W-089 (parent heuristic,本次扩 catch-all 是 W-089 follow-up); [`feedback_v2_self_backend_w089_unfixed`](../CONTRIBUTING.md#工作规约) (V2 v4.0.0 同 W-089/W-091 gap,V3 单独修,V4 converge 时同步)。
+**引用:** `feedback_rca_first_root_cause` (W-090 修后 EXIT 109 = 下一根因,深 RCA 进 whitelist miss 不是猜); `feedback_fix_evaluation_rule` (5/5 PASS on std_vec_basic + regress 145/145); `feedback_v3_self_backend_diverges_v2` (V3 stdlib 触发 V2 unseen gaps); `feedback_audit_single_commit_diff` (单 commit ship 跟 W-090 同); W-089 (parent heuristic,本次扩 catch-all 是 W-089 follow-up); `feedback_v2_self_backend_w089_unfixed` (V2 v4.0.0 同 W-089/W-091 gap,V3 单独修,V4 converge 时同步)。
 
 <a id="w-092"></a>
 ## W-092: V3 self-backend bitmap 1024 暴露 big_test v0.5.0-era 隐性 W-085 fn arg corruption → segfault (推 v3.2.4)
@@ -6296,17 +6299,17 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 - pre-W-090 (bitmap 256): big_test EXIT=57 PASS — `movl -2104(%rbp), %eax` 只读低 4 byte 拿到正确 i32 值
 - 14/165 144 PASS 测试全保,只 big_test 1 FAIL
 
-**W-092 根因嫌疑 (W-093 推翻):** 隐性 W-085 (per [`feedback_codegen_small_frame_arg_corruption`](../CONTRIBUTING.md#工作规约)) — `point_scale(p: Point, k: i32)` 这种 fn,QBE IL `call $point_scale(l %t1, w %t2)` 在 MS x64 ABI 走 `movq %rdx, -<off>(%rbp)` 8-byte 写 slot,但实际 `%rdx` 是 i32 `k` 值 (QBE L ↔ Win ABI %rdx 8-byte slot 不对齐 i32 4-byte 用法)。bitmap 1024 让这个 8-byte 写的 slot 被 flag 为 address-holder (per emit_copy L1543-1544 FNARG path `if dst_qt == QBE_L_LOCAL() { flag }`),后续 load 走 indirect dispatch deref 这个 slot 当 pointer → segfault。
+**W-092 根因嫌疑 (W-093 推翻):** 隐性 W-085 (per `feedback_codegen_small_frame_arg_corruption`) — `point_scale(p: Point, k: i32)` 这种 fn,QBE IL `call $point_scale(l %t1, w %t2)` 在 MS x64 ABI 走 `movq %rdx, -<off>(%rbp)` 8-byte 写 slot,但实际 `%rdx` 是 i32 `k` 值 (QBE L ↔ Win ABI %rdx 8-byte slot 不对齐 i32 4-byte 用法)。bitmap 1024 让这个 8-byte 写的 slot 被 flag 为 address-holder (per emit_copy L1543-1544 FNARG path `if dst_qt == QBE_L_LOCAL() { flag }`),后续 load 走 indirect dispatch deref 这个 slot 当 pointer → segfault。
 
 **superseder:** ✅ W-093 真修 (bitmap 1024 → 4096, 见 W-093 entry)。
 
-**W-092 假设错在哪里 (W-093 RCA per [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约)):**
+**W-092 假设错在哪里 (W-093 RCA per `feedback_rca_first_root_cause`):**
 - W-085 ACTIVE trigger pattern = `fn f(p: *T, a: i32, b: i32)` (pointer 在前 + 2 个 i32, 3 参数), `frame < 136B` 时 emit_call 第 3 i32 save 寄存器错位。
 - big_test `point_scale(p: Point, k: i32)` signature 是 **struct + i32** (2 参数), 不是 `*T + 2 i32` (3 参数)。W-085 描述明确 point_scale 不触发 W-085。
 - 真正触发 segfault 的 fn 不是 `point_scale`,而是 `t_swap_via_ptr` (per `_dbg_big_first36.jhyy` bisect — 在 35 个 prior test 之后调用 segfault, 单独调用 exit=0)。t_swap_via_ptr 签名是 `fn(*i32, *i32)`, 也不在 W-085 pattern 内。
 - 真根因 = bitmap 1024 bound 不够 cover big_test max temp_id (1932)。emit_copy / emit_load / emit_store 在 temp_id > 1024 时走 slot direct path 而非 indirect dispatch, 错字节 / segfault。W-093 真修 bitmap 1024 → 4096 覆盖 big_test max + 2x safety。
 
-**引用:** [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (1 fail = 1 根因 — 但 W-092 这次 1 fail 根因是 bitmap bound, 不是 W-085); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (target test big_test EXIT=0 post-W-093, regress 145/145 collateral); [`feedback_codegen_small_frame_arg_corruption`](../CONTRIBUTING.md#工作规约) (W-085 ACTIVE parent, W-092 误以为是 trigger, 实际不是); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (W-092 单独立 entry 跟 W-090/W-091 分开 ship, W-093 真修单独 commit); [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 stdlib 测试触发 V2 unseen gaps, big_test 是 v0.5.0 corpus, V2 同 latent 但被 bitmap 256 隐藏); [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) (W-093 = v3.2.4.1 patch, 跟 v3.2.4 main ship 分开)。
+**引用:** `feedback_rca_first_root_cause` (1 fail = 1 根因 — 但 W-092 这次 1 fail 根因是 bitmap bound, 不是 W-085); `feedback_fix_evaluation_rule` (target test big_test EXIT=0 post-W-093, regress 145/145 collateral); `feedback_codegen_small_frame_arg_corruption` (W-085 ACTIVE parent, W-092 误以为是 trigger, 实际不是); `feedback_audit_single_commit_diff` (W-092 单独立 entry 跟 W-090/W-091 分开 ship, W-093 真修单独 commit); `feedback_v3_self_backend_diverges_v2` (V3 stdlib 测试触发 V2 unseen gaps, big_test 是 v0.5.0 corpus, V2 同 latent 但被 bitmap 256 隐藏); `feedback_plans_per_version` (W-093 = v3.2.4.1 patch, 跟 v3.2.4 main ship 分开)。
 
 ---
 
@@ -6354,7 +6357,7 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 
 **superseder:** ✅ W-094 (slot table bump 256 → 4096, partial) + ✅ W-095 (emit_load record dst 真修, 推 v3.2.4.2) — W-093 + W-094 + W-095 联合 chain 闭环 big_test 真修。
 
-**引用:** [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (W-092 假设 W-085 错, W-093 RCA 部分真相 = bitmap bound, W-094+W-095 RCA 完整真相); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (target test big_test EXIT=57 post-W-095 chain, regress 145/145 collateral); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (W-093/W-094/W-095 分开 commit per RCA iter); [`feedback_v3_self_backend_diverges_v2`](../CONTRIBUTING.md#工作规约) (V3 stdlib 测试触发 V2 unseen gaps, big_test v0.5.0 corpus 是 V2 同 latent 但被 bitmap 256 隐藏); [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) (W-093 = v3.2.4.1 patch, W-094 + W-095 = v3.2.4.2 follow-up patch); [`feedback_rerum_basic`](../CONTRIBUTING.md#工作规约) W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 → 1 fail → 0 fail 闭环 (per user 2026-09-26 反馈 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-095 是真修, 不是 workaround)。
+**引用:** `feedback_rca_first_root_cause` (W-092 假设 W-085 错, W-093 RCA 部分真相 = bitmap bound, W-094+W-095 RCA 完整真相); `feedback_fix_evaluation_rule` (target test big_test EXIT=57 post-W-095 chain, regress 145/145 collateral); `feedback_audit_single_commit_diff` (W-093/W-094/W-095 分开 commit per RCA iter); `feedback_v3_self_backend_diverges_v2` (V3 stdlib 测试触发 V2 unseen gaps, big_test v0.5.0 corpus 是 V2 同 latent 但被 bitmap 256 隐藏); `feedback_plans_per_version` (W-093 = v3.2.4.1 patch, W-094 + W-095 = v3.2.4.2 follow-up patch); `feedback_rerum_basic` W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 → 1 fail → 0 fail 闭环 (per user 2026-09-26 反馈 "这个不算 workaround 吧, 你这也没 work 呀, 还是 fail 呢, 你先修呗" — W-095 是真修, 不是 workaround)。
 
 <a id="w-094"></a>
 ## W-094: V3 self-backend alloc-tracking slot table bound 256 不够 → cg_record_temp_slot no-op → formula fallback 跟 alloc pool 物理 collision → struct data 跟 formula slot 覆盖 (推 v3.2.4.2)
@@ -6371,7 +6374,7 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 - **post-W-094 (slot table 4096) PARTIAL**: `cg_record_temp_slot` 现在正常 record 所有 temp_id < 4096 的 alloc result + derived-address temp (per v2.11.23 Phase 2 design)。但 **emit_load 的 dst result temp 不调 cg_record_temp_slot** → dst 仍走 formula → 仍 collision → t_rect_area 仍 fail
 - post-W-094+W-095 (full chain): big_test EXIT=57 (= 12345 mod 256, deterministic success per test design), regress 145/145 PASS / 0 FAIL / 20 SKIP
 
-**根因 (W-093 RCA 错位 → W-094 RCA 修正):** W-093 假设 = bitmap bound 不够 → emit_copy/emit_load/emit_store 走 slot direct path。实际 W-094 RCA (per [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) `1 fail = 1 根因` + `5 line 修改 RCA`):bitmap bump 让 flag 正常生效 (t_triple 不再 SEGV),但 t_rect_area 仍 fail → 进一步 RCA:t_rect_area 不是 bitmap 问题,是 **slot table bound 不够**。emit_alloc 调 `cg_record_temp_slot(state, 1005, -8216)` 但 t1005 = 1005 > 256 → no-op → t1005 后续 lookup 走 formula `-(32 + 1005*8)` = -8072 ≠ -8216。emit_add (per codegen_amd64_emit_call.jhyy:1959) 派生 address 时也调 `cg_record_temp_slot(state, dst_id, alloc_slot)` 但 dst_id > 256 → no-op → 派生 ptr slot 也走 formula 跟 alloc pool 重叠。
+**根因 (W-093 RCA 错位 → W-094 RCA 修正):** W-093 假设 = bitmap bound 不够 → emit_copy/emit_load/emit_store 走 slot direct path。实际 W-094 RCA (per `feedback_rca_first_root_cause` `1 fail = 1 根因` + `5 line 修改 RCA`):bitmap bump 让 flag 正常生效 (t_triple 不再 SEGV),但 t_rect_area 仍 fail → 进一步 RCA:t_rect_area 不是 bitmap 问题,是 **slot table bound 不够**。emit_alloc 调 `cg_record_temp_slot(state, 1005, -8216)` 但 t1005 = 1005 > 256 → no-op → t1005 后续 lookup 走 formula `-(32 + 1005*8)` = -8072 ≠ -8216。emit_add (per codegen_amd64_emit_call.jhyy:1959) 派生 address 时也调 `cg_record_temp_slot(state, dst_id, alloc_slot)` 但 dst_id > 256 → no-op → 派生 ptr slot 也走 formula 跟 alloc pool 重叠。
 
 **Code 真修 (W-094):**
 - `compiler/src0/codegen_amd64_state.jhyy` `cg_max_temp_slots()` 256 → 4096 (1 line 修改, 跟 cg_max_temp_holds_address 同步 bump per W-093 RCA 1 fail = 1 根因模式)
@@ -6389,7 +6392,7 @@ RCA-first 模式 (per [`feedback_verify_active_reproduces`](../CONTRIBUTING.md#�
 
 **superseder:** ✅ W-095 (emit_load record dst 真修, 见 W-095 entry) — W-094 + W-095 联合 ship 闭环 big_test 真修。
 
-**引用:** [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (W-093 修了部分根因, W-094 RCA 进一步挖 slot table bound; 5 line 修改 RCA 1 fail = 1 根因 per step); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (W-094 partial, 不达 5/5 PASS — 跟 W-095 联合 ship 才闭环); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (W-094 单独立 entry 跟 W-093 分开 commit per RCA iter); [`feedback_codegen_amd64_multifn`](../CONTRIBUTING.md#工作规约) (V3 self-backend 静默 fail pattern: 单 fn PASS / 2+ fn FAIL 提示 codegen state corruption — slot table 状态是 codegen state 的一部分); [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) (W-094 = v3.2.4.2 patch, 跟 W-093 v3.2.4.1 分开 commit)。
+**引用:** `feedback_rca_first_root_cause` (W-093 修了部分根因, W-094 RCA 进一步挖 slot table bound; 5 line 修改 RCA 1 fail = 1 根因 per step); `feedback_fix_evaluation_rule` (W-094 partial, 不达 5/5 PASS — 跟 W-095 联合 ship 才闭环); `feedback_audit_single_commit_diff` (W-094 单独立 entry 跟 W-093 分开 commit per RCA iter); `feedback_codegen_amd64_multifn` (V3 self-backend 静默 fail pattern: 单 fn PASS / 2+ fn FAIL 提示 codegen state corruption — slot table 状态是 codegen state 的一部分); `feedback_plans_per_version` (W-094 = v3.2.4.2 patch, 跟 W-093 v3.2.4.1 分开 commit)。
 
 <a id="w-095"></a>
 ## W-095: V3 self-backend emit_load's dst result temp 不 record 进 slot table → formula fallback 跟 alloc pool 物理 collision → struct pass-by-value field copy SEGV (推 v3.2.4.2 真修)
@@ -6431,7 +6434,7 @@ emit_load 现在对每个 dst result temp 都分配 dedicated alloc pool slot (c
 
 **superseder:** 无 — W-095 是 emit_load 的 真修; emit_copy/emit_loadsub 同 pattern fix 推 W-096 v3.x mid。
 
-**引用:** [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约) (W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 4-iter RCA chain, 1 fail = 1 根因 per iter); [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) (target test big_test EXIT=57 post-W-095, regress 145/145 collateral, user "1 fail = 真修" 反馈闭环); [`feedback_audit_single_commit_diff`](../CONTRIBUTING.md#工作规约) (W-093/W-094/W-095 分开 commit per RCA iter, 可独立 audit); [`feedback_codegen_amd64_multifn`](../CONTRIBUTING.md#工作规约) (V3 self-backend 单 fn PASS / 2+ fn FAIL hint at codegen state corruption — slot table + formula pool 是 codegen state 的一部分,emit_load 不 record dst 是 state leak 模式); [`feedback_codegen_amd64_run_zerobyte`](../CONTRIBUTING.md#工作规约) (V3 self-backend body 0-byte bug 同 pattern:codegen state 不 fully initialized → 部分 temp 不 record → 错字节); [`feedback_jhyy_dbgfile_cwd_sensitive`](../CONTRIBUTING.md#工作规约) (RCA 期间用 `cd $JHYY_ROOT` 保证 jhyy.exe emit .il cwd-relative baseline 一致); [`feedback_plans_per_version`](../CONTRIBUTING.md#工作规约) (W-095 = v3.2.4.2 patch, 跟 W-094 联合 ship, 跟 W-093 v3.2.4.1 main ship 分开 commit)。
+**引用:** `feedback_rca_first_root_cause` (W-092 误诊 → W-093 partial → W-094 partial → W-095 真修 4-iter RCA chain, 1 fail = 1 根因 per iter); `feedback_fix_evaluation_rule` (target test big_test EXIT=57 post-W-095, regress 145/145 collateral, user "1 fail = 真修" 反馈闭环); `feedback_audit_single_commit_diff` (W-093/W-094/W-095 分开 commit per RCA iter, 可独立 audit); `feedback_codegen_amd64_multifn` (V3 self-backend 单 fn PASS / 2+ fn FAIL hint at codegen state corruption — slot table + formula pool 是 codegen state 的一部分,emit_load 不 record dst 是 state leak 模式); `feedback_codegen_amd64_run_zerobyte` (V3 self-backend body 0-byte bug 同 pattern:codegen state 不 fully initialized → 部分 temp 不 record → 错字节); `feedback_jhyy_dbgfile_cwd_sensitive` (RCA 期间用 `cd $JHYY_ROOT` 保证 jhyy.exe emit .il cwd-relative baseline 一致); `feedback_plans_per_version` (W-095 = v3.2.4.2 patch, 跟 W-094 联合 ship, 跟 W-093 v3.2.4.1 main ship 分开 commit)。
 
 <a id="w-096"></a>
 ## W-096: per-fn-local temp_id counter → emit slot offset 用 global t → main.jhyy 997 fns frame over-reserve 484KB → Stage 2 closure SEGFAULT (推 v3.x mid 真修)
@@ -7124,7 +7127,7 @@ if ret_temp_id == (0 as i64) {
     5. **commit cadence split (`feedback_audit_single_commit_diff`)** — attempt #6 一次性 4-file 108 LOC 引入 post-emit hidden trap, attempt #7 拆 4 commits 独立 verify, 每 commit 单独 ship, audit diff 容易 review
   - **结论 (7 attempts, attempt #7 SUCCESS, audit ledger closed)**: W-101 真根因 = `cg_offset_for_temp_with_target` 对 high temp_id (>= 1024) address-holder init/lookup 路径 + alloc/formula pool 物理 overlap (per audit `docs/archive/audit/v4.0.3-codegen-deep-audit.md` 维度 2 错方向 + § 5 separate address-holder pool 正确方向). attempt #7 走 audit § 5 direction + 3-arg `cg_alloc_slot` 防 caller 写错, 1-iter RCA 严格按 attempt #6 gdb evidence, 5/5 PASS target = main.jhyy (覆盖 emit_load + cg_is_address_holder path), 1.5h 完成 7th attempt SUCCESS.
   - **W-101 status ✅ RESOLVED 2026-10-12 (v4.0.6 wip attempt #7 SUCCESS)** — fix ship, 5/5 PASS on main.jhyy, .s diff 0 字节 regression, jhyy.exe + jhyy_v1.exe.exe binary slot 同步更新, jhyy.exe.sha256 sidecar refresh to `2d14b2b8...`. v4.0.0 final tag ship gate 准备就绪 (per user 政策 "v4 不发" 缓解, ACTIVE = 0)
-  - **changelog**: [`changelog-v4.0.6.md`](archive/logs/v4/changelog-v4.0.0.md#v406) (W-101 attempt #7 SUCCESS audit ledger, 7 attempts 全记录, .s diff 0 字节 regression evidence)
+  - **changelog**: [`changelog-v4.0.6.md`](../archive/logs/v4/changelog-v4.0.0.md#v406) (W-101 attempt #7 SUCCESS audit ledger, 7 attempts 全记录, .s diff 0 字节 regression evidence)
 
 **引用:**
 - SEGV 现场: `compiler/build/bin/_w099_v2.exe.s` 中 `parser__parse_expr` 函数体 + 0xD350 (54146) offset
@@ -7160,13 +7163,13 @@ V2 v4.0.0 bench.sh nqueens 期间 4 个 reproducer 拆解 + assembly dump RCA �
 
 **superseder:** ✅ v3.4.0 RCA (commit `<sha>`, 2026-09-29) — `git diff --stat HEAD~1 HEAD` 验证 src0/ 无 codegen 改动,只 docs flip + bench.sh revert。
 
-**RCA v3.4.0 (per [`feedback_rca_first_root_cause`](../CONTRIBUTING.md#工作规约)):**
+**RCA v3.4.0 (per `feedback_rca_first_root_cause`):**
 - v3.4.0 sprint 启动时按 plan archive/plans/v3/v3.4.0-plan.md § Critical files 真修 `int_arg_alloc` → wide/narrow sub-pool → 实际 ship 后 literal W-085 trigger `fn(*T, i32, i32)` 测试 SEGV(因 sub-pool 让 narrow idx 0 → ecx 跟 wide idx 0 → rcx 物理重叠)。**RCA iter 1**:看 v3.3.0 baseline jhyy.exe 直接编 literal trigger pattern `fn t3_f(p: *i32, a: i32, b: i32)` → EXIT=3 PASS,emit `movq ... %rcx; movl ... %edx; movl ... %r8d` 正确 ABI,无 save slot collision。
 - **RCA iter 2**:v3.3.0 直接编 nqueens W-085 trigger sig `fn solve(cols: *i32, N: i32, row: i32, sols: *i32)` → EXIT=40 (correct),bench nq ratio 1.073x(跟 workaround 1.077x 在 timing noise 内)。
 - **结论**:W-085 在 V2 v4.0.0 期间是 real bug(commit `0b4cde5` 4-reproducer RCA),但 V3 self-backend port 期间(`a82fb57` v3.2.3.1 W-080 / `d760c51` v3.2.4 W-090 / `0d9c527` v3.1.0 wholesale V2 port)某 iter 修了 save-slot collision(可能 W-080 std_io i32 zero-extend 触发的 emit_call refactor 改了 save-slot layout,或者 v3.1.0 wholesale port 时重写了 emit_call arg-save 路径)。bench.sh reorder 从此变 dead code,W-085 entry 误标 ACTIVE。
 - **修复**:v3.4.0 ship = bench.sh revert + workarounds.md ✅ flip + changelog。无 codegen 改动 src0/ = 0 line diff。
 
-**Verification (per [`feedback_fix_evaluation_rule`](../CONTRIBUTING.md#工作规约) 5/5 PASS on target test, 但 W-085 是 false-active 所以 verification = 文档 flip + bench ratio stable):**
+**Verification (per `feedback_fix_evaluation_rule` 5/5 PASS on target test, 但 W-085 是 false-active 所以 verification = 文档 flip + bench ratio stable):**
 - bench.sh nq ratio:workaround 1.077x → revert 后 1.073x(noise 内,gate ≥ 1.000x PASS)
 - nqueens W-085 trigger sig:EXIT=40 (correct answer)
 - literal trigger `fn(*T, i32, i32)` standalone:test EXIT=3 PASS,v3.3.0 emit `movq ... %rcx; movl ... %edx; movl ... %r8d` 正确 ABI
@@ -8532,7 +8535,7 @@ W-048: rename temp exe failed (kept at C:\...\Temp\jhe0000000e.exe)
 **⚠️ 这条的真正价值不在它自己,而在它**解释了 W-106 的谜团**:2026-10-18
 那次「删掉 workaround ⇒ 偶发失败 ⇒ workaround 承重」的对照实验,**归错了因**
 —— 真凶是本条(临时名碰撞),而那个 workaround 只是**改变了时序**。
-详见 [`docs/workarounds.md`](workarounds.md) W-106 条目的
+详见 [`docs/internal/workarounds.md`](workarounds.md) W-106 条目的
 「2026-10-20 第四次更正」段。
 
 **引用:**
@@ -8551,7 +8554,7 @@ W-048: rename temp exe failed (kept at C:\...\Temp\jhe0000000e.exe)
 
 **触发面:** `scripts/dev/v2_13_5_rebuild_index.py` 的 `H2_RE` + `STATUS_RE`。
 
-**症状:** `docs/workarounds.md` 的索引表只有 **16 行**,而台账有
+**症状:** `docs/internal/workarounds.md` 的索引表只有 **16 行**,而台账有
 **96 个 W-NNN 条目**。重建索引跑完不报错,只 print 一个行数 —— 少掉的条目
 不会留下任何痕迹。长期后果:读索引的人以为台账里只有 16 件事,于是
 「索引表 ACTIVE/DEFERRED = 0」这个结论被反复引用并写进 workarounds.md,
@@ -8588,7 +8591,7 @@ ACTIVE 6 / RESOLVED 80 / SUPERSEDED 4 / INVALID 2 / DEFERRED 0
 
 **引用:**
 - 脚本 `scripts/dev/v2_13_5_rebuild_index.py:18-20`(H2_RE / STATUS_RE)
-- 台账 `docs/workarounds.md`(96 个 W-NNN 条目 vs 16 行索引)
+- 台账 `docs/internal/workarounds.md`(96 个 W-NNN 条目 vs 16 行索引)
 - 修复 commit:见本次改动
 
 <a id="w-109"></a>
@@ -8685,9 +8688,9 @@ f32 的全部四个序比较。
 **引用:**
 - 源码 `compiler/src0/codegen_amd64_lexer.jhyy:1628-1653`
 - 测试 `compiler/tests/examples/float_cmp.jhyy:4, 36-49`
-- 规范 [`docs/abis/jhyy-lang-spec-v4.0.0.md`](abis/jhyy-lang-spec-v4.0.0.md)
+- 规范 [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md)
   §P2(该行的归因「用 QBE 默认指令」也已过时 —— QBE 早在 v3.1.0 移出生产路径)
-- ABI [`docs/abis/jhyy-abi-v4.0.0.md`](abis/jhyy-abi-v4.0.0.md) § 11.1 A5 / § 11.2 B2
+- ABI [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) § 11.1 A5 / § 11.2 B2
 
 
 
@@ -9300,7 +9303,7 @@ SysV(同款):     同样的用例在 amd64_sysv 目标下 217 ✅
 - 源码 `compiler/src0/codegen_amd64_state.jhyy`(`cg_offset_for_temp_with_target`
   —— 见 W-119)
 - 受影响测试 `compiler/tests/examples/gdb_pretty_test.jhyy`
-- 相关:`docs/workarounds.md` enum match arm tag check 段(v1.7.1 patch A3)
+- 相关:`docs/internal/workarounds.md` enum match arm tag check 段(v1.7.1 patch A3)
 
 <a id="w-115"></a>
 ## W-115: W-089 标着 RESOLVED,但它自己的 reproducer 至今 STACK_OVERFLOW
@@ -9476,7 +9479,7 @@ W-089 的 reproducer codegen_call_return_types.jhyy:EXIT=0 ✅(XFAIL 摘掉)
 - 测试 `compiler/tests/examples/closure_capture_unsupported.jhyy`(新,EXPECT-ERROR)
 - 源码 `compiler/src0/sema.jhyy`(`SemaContext.in_closure` + 闭包分支 + `NODE_IDENT` 分支)
 - 源码 `compiler/src0/main.jhyy`(`SemaContext` struct literal 补字段)
-- W-089 entry(`docs/workarounds.md`)—— 它的 reproducer 现在跑通了 ✓
+- W-089 entry(`docs/internal/workarounds.md`)—— 它的 reproducer 现在跑通了 ✓
 - `archive/plans/v3/v3.4.0-plan.md:89`(当初把它排除出 CI gate 的那行)
 
 <a id="w-116"></a>
@@ -10547,7 +10550,7 @@ jhyy 侧的 address-holder bitmap 按**实际 max temp id 动态扩容**
 - 源码 `compiler/src0/codegen_amd64_emit_mem.jhyy:598`(`emit_loadsub` 的 flag 分派 —— 受害者)
 - 门 `compiler/tests/bootstrap/artifact_checks.sh`(`holds_bitmap` / `holds_cap_source` /
   `selfhost_target_flag`)
-- 同族历史 `docs/workarounds.md` W-120(temp 表动态化)与 W-097(load/store 无条件 indirect)
+- 同族历史 `docs/internal/workarounds.md` W-120(temp 表动态化)与 W-097(load/store 无条件 indirect)
 - 不涉及 ABI 本身 ⇒ `docs/abis/jhyy-abi-v4.0.0.md` 无对应条目
 
 ---
@@ -11141,7 +11144,7 @@ msys2 step 用的 MSYS2 python。
 - `mcp-jhyy/tests/`(41 个测试,**现在全部进 CI**)
 - `.github/workflows/ci.yml`(`build-and-test` job 末尾两步)
 - commit `2ab0f24`(2026-10-25)
-- 同族:`docs/FACTS.md`
+- 同族:`docs/internal/FACTS.md`
 
 ---
 
@@ -11488,7 +11491,7 @@ new_lines = lines[:idx_start] + new_index_lines + lines[idx_end:]
 - 加 `--check` 模式:只检查不写,报缺失/重复,退出码 1 = 有问题。
 
 **门:**
-- `python scripts/dev/v2_13_5_insert_anchors.py --check docs/workarounds.md`
+- `python scripts/dev/v2_13_5_insert_anchors.py --check docs/internal/workarounds.md`
   ⇒ **0 缺失 / 0 重复**;
 - `rebuild_index.py` 连跑两遍 ⇒ 逐字节相同(幂等);
 - 索引里 141 条链接**全部能解析**(改之前有 1 条死链 + 83 条老条目没锚点)。
@@ -12504,8 +12507,8 @@ jhyy build hello.jhyy -o hello
 - 替代写法统一为 **`jhyy --help` 的首行**(`jhyy compiler v<版本> (self-hosted)`);
   不带参数跑 `jhyy` 也打同一行。
 - `installer/changelog-template.md` / `installer/README.md` / `docs/internal/build.md`
-  / `docs/plans/v4/*.md` / [`changelog-v4.0.2.md`](archive/logs/v4/changelog-v4.0.0.md#v402) /
-  `docs/workarounds.md` 里全部相关表述订正。
+  / `docs/plans/v4/*.md` / [`changelog-v4.0.2.md`](../archive/logs/v4/changelog-v4.0.0.md#v402) /
+  `docs/internal/workarounds.md` 里全部相关表述订正。
 - ⚠️ **两类历史记录要区别对待**(改错就把 audit trail 改成假的了):
   | 记录类型 | 例子 | 改法 |
   |---|---|---|
@@ -12794,7 +12797,7 @@ v4.x 换成 **in-mem 自研后端**后,约束对象(QBE 的 nested phi)**已不�
 **失效条件:** 已失效 —— v4.x 的 in-mem 后端短路正确。
 
 **superseder:** 「**行为回归门** `compiler/tests/examples/logical_nested.jhyy`
-(2026-10-30 新增)+ `CONTRIBUTING.md` § 短路语义(新增)」
+(2026-10-30 新增)+ 语言规范 § 4.2 的短路语义」
 
 **2026-10-30 处置:**
 1. **删掉** `scripts/dev/v2_13_10_codegen_cond_no_nested_sc.py`(静态风格检查,
@@ -12812,7 +12815,7 @@ v4.x 换成 **in-mem 自研后端**后,约束对象(QBE 的 nested phi)**已不�
 **引用:**
 - 源码:`compiler/src0/codegen.jhyy`(短路实现:右侧只在 `sc_eval` 块求值)
 - 门:`compiler/tests/examples/logical_nested.jhyy`(新)/ `logical.jhyy`(平铺,旧)
-- 约定落点:`CONTRIBUTING.md` § 短路语义(新)
+- 约定落点:[`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) § 4.2(短路求值)
 - 相关:**W-168**(`jhyy build` 不解析 `-o`)—— 同日仓库清理时挖出
 
 <a id="w-170"></a>

@@ -1,7 +1,7 @@
 # archive — 历史归档
 
 > **这里放「已经发生过的」东西。**
-> **不要在这里找现状** —— 当前状态在 [`docs/FACTS.md`](../FACTS.md)，当前计划在
+> **不要在这里找现状** —— 当前状态在 [`docs/internal/FACTS.md`](../internal/FACTS.md)，当前计划在
 > [`docs/plans/v4/`](../plans/v4/)，规范在 [`docs/abis/`](../abis/)。
 >
 > 归档的内容**不改**（那是审计轨迹）。它描述的是当时的世界，可能与现在矛盾 —— 那正是
@@ -63,10 +63,10 @@ v4.0.0 … v4.0.7，以及已完结的排期轴与清零审计）· `plans/boots
 ## `[[feedback_*]]` 代号说明
 
 本目录（以及仓内其它文档）里出现的 `[[feedback_xxx]]` / `feedback_xxx` 是**旧
-memory 文件的代号**。那批 memory 已于 2026-10-30 合并进仓库根
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md) § 工作规约 —— 通用规约（提交身份 /
-验证纪律 / Git 破坏性操作 / 文档与措辞 / 台账纪律 / jhyy 编译器特有规则）现在在那里，
-按代号可查。
+memory 文件的代号**。那批 memory 于 2026-10-30 合并成一份「工作规约」，
+2026-10-31 又随工作规约**整体移出仓内** —— 工作规约是对内的，不该出现在给外人看的
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md) 里 ⇒ 代号在仓内**只作审计线索**保留，
+按代号可检索。
 
 > 本目录的这些代号是**历史脚注**，保留原文不改。
 
@@ -74,6 +74,6 @@ memory 文件的代号**。那批 memory 已于 2026-10-30 合并进仓库根
 
 ## 相关
 
-- 当前事实：[`docs/FACTS.md`](../FACTS.md) · 当前计划：[`docs/plans/v4/`](../plans/v4/)
+- 当前事实：[`docs/internal/FACTS.md`](../internal/FACTS.md) · 当前计划：[`docs/plans/v4/`](../plans/v4/)
 - 全仓文档索引：[`docs/internal/README.md`](../internal/README.md)
-- 台账（永不归档）：[`docs/workarounds.md`](../workarounds.md)
+- 台账（永不归档）：[`docs/internal/workarounds.md`](../internal/workarounds.md)

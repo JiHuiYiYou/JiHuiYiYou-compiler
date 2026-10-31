@@ -492,7 +492,7 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
             if exp_cmp != act_cmp:
                 return (False, f"failed (expected={expected}, got={exit_code}, "
                                f"cross={cross_mode}) — 期望值不匹配(W-116 等"
-                               f"SysV 缺陷见 docs/workarounds.md)")
+                               f"SysV 缺陷见 docs/internal/workarounds.md)")
         return (True, f"passed (exit={exit_code}, cross={cross_mode})")
     except subprocess.TimeoutExpired:
         return (False, f"timeout ({timeout}s, cross={cross_mode})")

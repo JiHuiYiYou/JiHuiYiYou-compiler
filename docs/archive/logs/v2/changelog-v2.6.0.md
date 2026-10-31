@@ -211,7 +211,7 @@
 - ✅ inline_imports re-parse path 全过 (真 import 启用后 stage0 compile clean)
 - ⚠️ regress 104/104 deferred to v2.6.6 (W-069 toolchain issue 拆账 — jhyy.exe binary corrupt + ld exit 5)
 - ⚠️ D43 closure sha hold deferred to v2.6.6 (同 W-069)
-**净 ship 计数:** 3 source files 真改 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy + main.jhyy) + 1 ../../../workarounds.md doc (W-068 RESOLVED + W-069 DEFERRED)
+**净 ship 计数:** 3 source files 真改 (codegen_amd64.jhyy + codegen_amd64_peephole.jhyy + main.jhyy) + 1 ../../../internal/workarounds.md doc (W-068 RESOLVED + W-069 DEFERRED)
 **W-069 拆账 (新登):** v2.6.5 真改 ship 后 surface 两类 toolchain issue — (1) `OSError [WinError 1392] 文件或目录损坏且无法读取` (jhyy.exe 文件头坏), (2) `ld exit 5` "errors listed above" (libc undefined symbols, gcc auto-link 失效)。baseline v2.6.4 inert 跑同命令不挂 → W-068 source-level fix 不是直接因。**scope v2.6.6**: clean stage0 rebuild + 排查 cmd_compile invoke_buf `-lc` 漏 + ld 5 fail echo invoke_buf (per W-045 pattern)。
 
 ## v2.6.6 (2026-09-06, W-069 真修)
@@ -232,7 +232,7 @@ compiler/src/codegen.c             | 80 ++++++++++++++++++++++++++++++++++++-
 compiler/src0/codegen.jhyy          | 79 ++++++++++++++++++++++++++++++++++++-
 compiler/build/bin/jhyy.exe         | Bin 515678 -> 589323 bytes
 compiler/build/bin/jhyy_v1.exe.exe  | Bin 510826 -> 583673 bytes (rebuilt via stage0 + jhyy.exe)
-docs/workarounds.md        | (W-069 RESOLVED + detail)
+docs/internal/workarounds.md        | (W-069 RESOLVED + detail)
 docs/archive/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
 ```
 
@@ -249,10 +249,10 @@ docs/archive/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
 **scope (实际落地):**
 - ✅ `compiler/src/codegen.c` (C-side CGFnDef + helpers + cg_module Pass A.5 + NODE_CALL is_extern fallback, ~80 LOC)
 - ✅ `compiler/src0/codegen.jhyy` (jhyy-side mirror, ~80 LOC; CGCONTEXT_SIZE 128→144 jhyy-side only)
-- ✅ docs update (本 entry + ../../../workarounds.md W-069 RESOLVED + D43 re-baseline)
+- ✅ docs update (本 entry + ../../../internal/workarounds.md W-069 RESOLVED + D43 re-baseline)
 - ❌ byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — 推到 v2.6.7 (per 2026-09-06 user Q1 决策)
 
-**净 ship 计数:** 2 source files 真改 (codegen.c + codegen.jhyy) + 2 binaries rebuilt (jhyy.exe + jhyy_v1.exe.exe) + 2 docs (../../../workarounds.md + changelog-v2.6.0.md)
+**净 ship 计数:** 2 source files 真改 (codegen.c + codegen.jhyy) + 2 binaries rebuilt (jhyy.exe + jhyy_v1.exe.exe) + 2 docs (../../../internal/workarounds.md + changelog-v2.6.0.md)
 
 ## v2.6.7 (2026-09-06, byte_equal_amd64.sh Commit 5 — real self path + strict + baseline)
 
@@ -278,14 +278,14 @@ docs/archive/logs/v2/changelog-v2.6.0.md    | (本 sub-section)
    - 不需单独 ../../../../README.md (避免 gitignored dir 下的 force-add 复杂度)
 
 4. **docs update**:
-   - ../../../workarounds.md line 4934: ❌ 推到 v2.6.7 → ✅ DONE v2.6.7
+   - ../../../internal/workarounds.md line 4934: ❌ 推到 v2.6.7 → ✅ DONE v2.6.7
    - 本 sub-section
 
 **Diff stat:**
 ```
 .gitignore                                |  3 +++
 compiler/tests/bootstrap/byte_equal_amd64.sh                          |  73 ++++++++++++++++++--
-docs/workarounds.md             |  2 +-
+docs/internal/workarounds.md             |  2 +-
 docs/archive/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 ```
 
@@ -309,14 +309,14 @@ docs/archive/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 
 **baseline 不入仓** per Q1 决策: per-input parity state 是 transient, 跟 binary canonical sha (`jhyy.exe.sha256`, tracked) 性质不同。每个 codegen 改动 = baseline 必改 = PR 必带 5 文件 diff 会污染 review, 故 gitignore。
 
-**净 ship 计数:** 1 driver script (byte_equal_amd64.sh +60 LOC) + 1 .gitignore (+3 LOC) + 1 README (new, gitignored dir) + 2 docs (../../../workarounds.md + changelog)
+**净 ship 计数:** 1 driver script (byte_equal_amd64.sh +60 LOC) + 1 .gitignore (+3 LOC) + 1 README (new, gitignored dir) + 2 docs (../../../internal/workarounds.md + changelog)
 
 ## v2.6.8 (2026-09-06, docs hygiene — D43 closure sha refresh)
 
-**核心:** ../../../workarounds.md 修 3 处 stale `d708793c...` 引用 → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.6 实际 baseline)。docs-only,无 codegen / ABI / runtime 改动。
+**核心:** ../../../internal/workarounds.md 修 3 处 stale `d708793c...` 引用 → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.6 实际 baseline)。docs-only,无 codegen / ABI / runtime 改动。
 
 **改动:**
-- `docs/workarounds.md` line 69 (W-069 table summary) + line 4926 + line 4945 (W-069 entry closure invariant): stale `d708793c...` → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a`
+- `docs/internal/workarounds.md` line 69 (W-069 table summary) + line 4926 + line 4945 (W-069 entry closure invariant): stale `d708793c...` → `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a`
 - `docs/archive/logs/v2/changelog-v2.6.0.md` (本 sub-section)
 
 **Diff stat:** 2 files changed, 14 insertions(+), 6 deletions(-)
@@ -326,7 +326,7 @@ docs/archive/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 - ✅ byte_equal_amd64.sh 默认 mode: 10 PASS / 0 SKIP / 0 FAIL (QBE-vs-self, v2.6.7 baseline hold)
 - ✅ byte_equal_amd64.sh `--baseline`: 20 PASS / 0 SKIP / 0 FAIL (10 byte-equal + 10 baseline match)
 - ✅ D43 closure v1→v2 hold: il sha `92e8255473db3395c98bb12c58b473071384b42b897b114cea5fa903d715d25a` (v2.6.7 unchanged)
-- ✅ ../../../workarounds.md W-069 entry closure sha 引用 `92e82554...` (跟 changelog 一致)
+- ✅ ../../../internal/workarounds.md W-069 entry closure sha 引用 `92e82554...` (跟 changelog 一致)
 
 **净 ship 计数:** 0 source files 改,2 docs 改
 
@@ -339,7 +339,7 @@ docs/archive/logs/v2/changelog-v2.6.0.md         | (本 sub-section)
 - v2.6.5 commit: `07c6a89` (W-068 real wire-up)
 - v2.6.6 commit: `224a944` (W-069 真修)
 - v2.6.7 commit: TBD (byte_equal_amd64.sh Commit 5 + baseline)
-- W-068 entry: [`docs/workarounds.md`](../../../workarounds.md) (✅ RESOLVED)
-- W-069 entry: [`docs/workarounds.md`](../../../workarounds.md) (✅ RESOLVED v2.6.6)
+- W-068 entry: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) (✅ RESOLVED)
+- W-069 entry: [`docs/internal/workarounds.md`](../../../internal/workarounds.md) (✅ RESOLVED v2.6.6)
 - Plan doc: `twinkly-hatching-canyon.md` (Phase 1-4)
 - D43 baseline: `51376ce5...` (v2.4.0 末) → `92e82554...` (v2.6.6 新 baseline, per D43 v2.x sub-sprint 阶段性 self-equal rule)

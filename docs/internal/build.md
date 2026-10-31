@@ -2,7 +2,7 @@
 
 > 编译 JHYY、跑 `.jhyy` 程序、跑门、验证自举闭环。
 >
-> **会变的数字（回归数 / 门数 / 产物尺寸）见 [`docs/FACTS.md`](../FACTS.md)。**
+> **会变的数字（回归数 / 门数 / 产物尺寸）见 [`docs/internal/FACTS.md`](FACTS.md)。**
 
 ---
 
@@ -23,7 +23,7 @@
 ⇒ **别把「宿主能不能是 Linux」当 bug 挖** —— 范围外，不是待办。
 
 **目标（target）侧不受此限**：`--target=amd64_sysv` 产 Linux ELF —— `.s` 在 Windows 上
-emit，在 Linux 上 link + run。四个 target 见 [`docs/FACTS.md`](../FACTS.md) § 5。
+emit，在 Linux 上 link + run。四个 target 见 [`docs/internal/FACTS.md`](FACTS.md) § 5。
 
 ---
 
@@ -239,7 +239,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-too
 
 ## 相关
 
-- 事实（版本 / 回归数 / 排期）⇒ [`docs/FACTS.md`](../FACTS.md)
+- 事实（版本 / 回归数 / 排期）⇒ [`docs/internal/FACTS.md`](FACTS.md)
 - 架构 ⇒ [`docs/internal/architecture.md`](architecture.md)
 - 安装器 ⇒ [`installer/README.md`](../../installer/README.md)
 - 工具链设计 ⇒ [`installer/toolchain/README.md`](../../installer/toolchain/README.md)

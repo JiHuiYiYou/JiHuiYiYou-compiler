@@ -100,7 +100,7 @@
 
 1. **覆盖率 50/53** — 47 真实测试 + 3 skipped, 规模小. 工业级通常 ≥1000+ + 第三方 benchmark.
 2. **C vs jhyy emit 不 byte-equal** — C-side `jhyy_v1.il` sha `bccc452e...`, jhyy-side `2445e97d...`. v1↔v2↔v3 byte-equal (固定点稳定), 但**收敛到 C 端不达成**.
-3. **仍有 ACTIVE workaround**: W-003/W-004/W-006/W-007 还在 ../../../workarounds.md 活跃列表 (跟 W-005/W-011 无关, 是 codegen 翻译层缺功能的 workaround).
+3. **仍有 ACTIVE workaround**: W-003/W-004/W-006/W-007 还在 ../../../internal/workarounds.md 活跃列表 (跟 W-005/W-011 无关, 是 codegen 翻译层缺功能的 workaround).
 4. **闭环保守性未测**: 改 src0/ 任何一行, N 代 .il 是否还能 byte-equal? 没 mutation testing 验证.
 5. **单平台**: 只 Windows + MSVC + QBE `-t amd64_win`. 无 Linux/macOS/ARM.
 6. **无 CI gate**: 不能"git push → 自动验证闭环", 任何 sprint 改动都可能悄悄打破 N=3.
@@ -156,7 +156,7 @@
 
 ## 引用
 
-- W-005 #2 + W-012 (新): `docs/workarounds.md`
+- W-005 #2 + W-012 (新): `docs/internal/workarounds.md`
 - 计划: `C:\Users\liuzhen\.claude\plans\jaunty-orbiting-naur.md`
 - v1.0-post-50-53 plan: [`docs/archive/plans/v1/v1.0-post-50-53-plan.md`](../../plans/v1/v1.0-post-50-53-plan.md)
 - v1.0 自举路线图: [`docs/archive/plans/roadmap/v1.0-self-hosting.md`](../../plans/roadmap/v1.0-self-hosting.md)

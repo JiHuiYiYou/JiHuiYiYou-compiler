@@ -605,7 +605,7 @@ V3-C sub-sprint 5/N — **闭包字面量 MVP**(`|params| { body }` 语法 + 合
 ### 新增文档
 
 - `docs/abis/jhyy-lang-spec-stdlib-supplement-v3.2.2.md`(本 sprint std lib spec,locked at v3.2.2)
-- `docs/workarounds.md` W-073 to W-078(6 new ACTIVE entries)
+- `docs/internal/workarounds.md` W-073 to W-078(6 new ACTIVE entries)
 
 ### 不改 (0 行)
 
@@ -822,7 +822,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 
 **workaround**:v3.2.4 ship 接受 regress 144/145 (1 big_test FAIL EXIT=139) as W-092 surface effect。W-085 signature reorder workaround 不应用在 big_test (test file,改它 = mask bug)。**真修 deferred v3.x mid 跟 W-085 大参数 register alloc 重写一起做** (emit_call 大参数 / 小参数区分处理 + small-frame fallback 强制 `%r9d` save slot)。
 
-### 2.5 ../../../workarounds.md (本 ship 同步新增 3 条)
+### 2.5 ../../../internal/workarounds.md (本 ship 同步新增 3 条)
 
 - **W-090** (NEW ✅ RESOLVED 2026-09-26):temp_holds_address bitmap 256 → 1024 真修
 - **W-091** (NEW ✅ RESOLVED 2026-09-26):emit_call catch-all `std_` prefix 真修 (W-089 5th site 扩展)
@@ -844,7 +844,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 | 3 | std_vec_get 返回 *T (caller deref)? | 是 (caller `let p1 = std_vec_get(...); *(p1 as *i64)`) | 避免 v2.16.0 W-089 同 pattern 的 call_ret address-holder tracking gap — caller 显式 deref 让 emit_load 直接 emit `mov (%r8)` 路径 |
 | 4 | bitmap bound bump 256 → 1024? | 是 (W-090 真修) | 1024 = 4x safety over std_vec_basic max (513 derived-address temp);后续 std::map / std::string 等跨过 256 也是预期内的 |
 | 5 | emit_call catch-all `std_` prefix? | 是 (W-091 真修) | V3 stdlib 命名约定 `std_<module>_*`,catch-all 安全 (over-flag 后果只是 emit_load 走 indirect dispatch 而非 slot read,对 *T deref 正确);避免每个新 stdlib 模块手动加 sub-prefix |
-| 6 | big_test 1 FAIL 怎么处理? | ship 接受 as W-092 surface effect | W-085 真修 deferred v3.x mid,big_test 不改 (test file,改 = mask bug);regress 144/145 baseline 接受,../../../workarounds.md 新增 W-092 ACTIVE entry |
+| 6 | big_test 1 FAIL 怎么处理? | ship 接受 as W-092 surface effect | W-085 真修 deferred v3.x mid,big_test 不改 (test file,改 = mask bug);regress 144/145 baseline 接受,../../../internal/workarounds.md 新增 W-092 ACTIVE entry |
 | 7 | v3.2.4 tag 策略? | **不 tag** (per user 2026-09-26 v3-pre-v4-infra-port 决定) | v3-pre-v4-infra-port: "不 tag, commit + push + 后续 v4.0.0 merge 时 fold 进";v3.x 全线 ship 走完后再统一 tag v4.0.0 (V2+V3 converge) |
 | 8 | D43 closure chain hold? | **未触**(N15 baseline 不变,本 ship 0 src0 closure 相关改动) | W-090/W-091/W-092 全在 self-backend path,跟 D43 closure chain (QBE 默认 backend) 无关 |
 
@@ -918,7 +918,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 - 明确 point_scale signature `(Point, i32)` 不是 W-085 ACTIVE trigger pattern (`fn(*T,i32,i32)`)
 - 明确 t_swap_via_ptr 签名 `(*i32, *i32)` 也不是 W-085 pattern
 
-### 2.3 ../../../workarounds.md (本 ship 同步更新)
+### 2.3 ../../../internal/workarounds.md (本 ship 同步更新)
 
 - **W-092 → ✅ RESOLVED 2026-09-26** (W-093 真修,bitmap 1024 → 4096)
 - **W-093 (NEW) → ✅ RESOLVED 2026-09-26** (v3.2.4.1 ship 真修;5 line 修改覆盖 state.jhyy 3 处 + jhyy_helpers.c 2 处;bitmap bound 4096 = 2x big_test max)
@@ -940,7 +940,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 |---|------|------|------|
 | 1 | bitmap bump 多少? | **1024 → 4096** (4x bump) | 4096 = 2x safety over big_test max (1932);后续 std::map / std::string 大 temp_id 测试预留 headroom。bump 太小 (e.g. 2048 = 1.05x) 没 headroom;bump 太大 (e.g. 8192 = 4x) 浪费 arena。 |
 | 2 | ship name? | **v3.2.4.1 patch** (vs v3.2.5 minor) | W-093 是 W-092 真修 patch,同 minor v3.2.4;semver patch bump per user 2026-09-26 "v3.2.4.1 patch, 不新开 v3.2.5 minor" 决定。 |
-| 3 | ../../../workarounds.md entry shape? | W-092 → RESOLVED + W-093 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除;新增 W-093 独立 entry 跟 W-090/W-091/W-092 平行 (per `feedback_audit_single_commit_diff`)。 |
+| 3 | ../../../internal/workarounds.md entry shape? | W-092 → RESOLVED + W-093 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除;新增 W-093 独立 entry 跟 W-090/W-091/W-092 平行 (per `feedback_audit_single_commit_diff`)。 |
 | 4 | tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per v3.2.4 ship 决定 + 2026-09-26 user "v3-pre-v4-infra-port 不 tag, v4.0.0 merge 时 fold 进";本 ship 走 commit + push,后续 v3.2.5 + v4.0.0 merge 时统一 tag。 |
 | 5 | bisect debug 文件? | 全删 (41 files) | per `feedback_no_artifacts_in_project`:bisect scratch 不进仓;`git status` 不该留 untracked debug 文件。 |
 
@@ -968,7 +968,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 ## 6. Cross-ref
 
 - L1 设计:`docs/archive/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.3`
-- L2 设计:`docs/archive/plans/v3/v3.2.4-plan.md` (W-093 真修 entry 在 ../../../workarounds.md)
+- L2 设计:`docs/archive/plans/v3/v3.2.4-plan.md` (W-093 真修 entry 在 ../../../internal/workarounds.md)
 - 上游:`changelog-v3.2.md` v3.2.4 段 (W-090/W-091 真修 + W-092 接受) + v3.2.3 段 (3l.2 io/os) + v3.2.2 段 (3l.1 mem/fmt/string/arena)
 - 下游:`../../plans/v3/v3.2.5-plan.md` (3l.4 math FFI libm) — W-093 不影响 std::math path
 - D43 chain:`docs/archive/logs/v3/d43-baseline-archive.md` (N15 hold,本 ship 0 closure 改动)
@@ -1036,7 +1036,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
   - 引用 big_test `t_rect_area` (`Box` struct 4-field pass-by-value copy) 触发 trace
   - 指出后续 emit_copy / emit_loadsub 同样 pattern fix deferred W-096
 
-### 2.4 ../../../workarounds.md (本 ship 同步更新)
+### 2.4 ../../../internal/workarounds.md (本 ship 同步更新)
 
 - **W-092 → ✅ RESOLVED 2026-09-26** (W-093 + W-094 + W-095 真修 chain)
 - **W-093 superseder 更新**:从 "无 superseder" → "✅ W-094 + W-095 联合 ship 闭环 big_test 真修"
@@ -1059,7 +1059,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 | 2 | emit_load 真修 pattern? | **cg_alloc_slot + cg_record_temp_slot** (per emit_binop W-074.13 sub-bug 1) | 跟 emit_binop L1959-1960 同 pattern (per v2.11.23 Phase 2 / W-074.13 sub-bug 4 design);不引入新机制, 只 sync emit_load 跟 emit_binop 的 dst slot 分配 pattern。 |
 | 3 | emit_copy / emit_loadsub 同步修? | ❌ deferred W-096 v3.x mid | regress 全集 145/145 在 W-094 + W-095 (只修 emit_load) 已闭环; emit_copy / emit_loadsub 同 pattern 暂未触发 regress fail (大 temp_id 场景不命中它们的 dst 路径)。preemptive fix 风险 > benefit; deferred W-096 跟 v3.x mid 一起做。 |
 | 4 | ship name? | **v3.2.4.2 patch** (vs v3.2.5 minor) | W-094 + W-095 是 W-093 partial 接力真修 patch, 同 minor v3.2.4.1; semver patch bump per user 2026-09-26 "v3.2.4.1 patch, 不新开 v3.2.5 minor" 决定延续。 |
-| 5 | ../../../workarounds.md entry shape? | W-092 → RESOLVED + W-094/W-095 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除; 新增 W-094/W-095 独立 entry 跟 W-090/W-091/W-092/W-093 平行 (per `feedback_audit_single_commit_diff` 4-iter RCA 分开 ship)。 |
+| 5 | ../../../internal/workarounds.md entry shape? | W-092 → RESOLVED + W-094/W-095 NEW | per `feedback_document_workarounds_in_docs`:superseded 标 RESOLVED 不删除; 新增 W-094/W-095 独立 entry 跟 W-090/W-091/W-092/W-093 平行 (per `feedback_audit_single_commit_diff` 4-iter RCA 分开 ship)。 |
 | 6 | tag strategy? | **🟡 NO TAG** (v3-pre-v4-infra-port) | per v3.2.4 ship 决定 + 2026-09-26 user "v3-pre-v4-infra-port 不 tag, v4.0.0 merge 时 fold 进"; 本 ship 走 commit + push, 后续 v3.2.5 + v4.0.0 merge 时统一 tag。 |
 
 ## 4. Verification
@@ -1095,7 +1095,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 ## 6. Cross-ref
 
 - L1 设计:`docs/archive/plans/roadmap/v3.x-language-expansion.md § Sprint 3l.3`
-- L2 设计:`docs/archive/plans/v3/v3.2.4-plan.md` (W-094 + W-095 真修 entry 在 ../../../workarounds.md)
+- L2 设计:`docs/archive/plans/v3/v3.2.4-plan.md` (W-094 + W-095 真修 entry 在 ../../../internal/workarounds.md)
 - 上游:`changelog-v3.2.md` v3.2.4.1 段 (W-093 partial 接力) + v3.2.4 段 (W-090/W-091 真修 + W-092 接受) + v3.2.3 段 (3l.2 io/os) + v3.2.2 段 (3l.1 mem/fmt/string/arena)
 - 下游:`../../plans/v3/v3.2.5-plan.md` (3l.4 math FFI libm) — W-094 + W-095 不影响 std::math path
 - D43 chain:`docs/archive/logs/v3/d43-baseline-archive.md` (N15 hold, 本 ship 0 closure 改动)
@@ -1133,7 +1133,7 @@ V3-C sub-sprint 8/N — **std lib vec/map M0 generics** (`std::vec<T>` 动态数
 - `compiler/tests/examples/exit_zero_extend_{0,1,127,128,255,256}.jhyy` 6 NEW files,each 6 LOC
 - (no `jhyy_helpers.c` change — 用现成 bridge)
 
-### 2.2 ../../../workarounds.md (本 ship 同步更新)
+### 2.2 ../../../internal/workarounds.md (本 ship 同步更新)
 
 - **W-079 → ✅ RESOLVED 2026-09-28** (QBE git rm moot + W-080 superseder)
 - **W-080 NEW → ✅ RESOLVED 2026-09-28** (v3.2.3.1 ship)
