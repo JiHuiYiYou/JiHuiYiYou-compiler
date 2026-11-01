@@ -20,7 +20,7 @@
 |---|---|---|
 | `ACTIVE` | 真 bug 在生产代码，fix 未 ship | `→` RESOLVED（fix ship）/ SUPERSEDED（新 workaround 取代）/ DEFERRED（推后续 sprint） |
 | `RESOLVED` | Fix ship + regress verified + closure hold | terminal（entry 保留历史） |
-| `SUPERSEDED` | 被新 workaround 取代 OR 不是 workaround（设计如此 / 编译期明确拒绝 / canonical pattern） | terminal，body cross-ref 取代者 |
+| `SUPERSEDED` | 被新 workaround 取代 OR 不是 workaround（设计如此 / 编译期明确拒绝 / canonical pattern / 外部依赖不可控） | terminal；body 必须有 `**superseder:**`（被谁取代）**或** `**not-a-bug:**`（为什么不是待修的 bug）**二选一** |
 | `DEFERRED` | 决定不在当前 sprint 修，但 bug 真实，caption 必填版本目标。**⚠️ 只放「将来会修」的东西** —— DEFERRED 与 ACTIVE 同属**高优待办桶** | `→` ACTIVE（sprint 拾起）/ RESOLVED（fix ship）/ SUPERSEDED（判定为「不是待修的 bug」） |
 | `INVALID` | 归档时误判，后确认是 test artifact | terminal，entry 保留审计 trail |
 
@@ -106,7 +106,8 @@
 **workaround:** <代码片段或绕过方案说明>
 **影响范围:** <哪些用户 / 哪些场景触发>
 **失效条件:** <workaround 不再需要的前置条件>
-**superseder:** <新编号 / plan 文件引用>   // SUPERSEDED entry 必填
+**superseder:** <新编号 / plan 文件引用>   // SUPERSEDED entry 必填（被谁取代）
+**not-a-bug:** <为什么不是待修的 bug>   // SUPERSEDED 的另一种成因：与 superseder **二选一**
 **引用:** <源码注释> / <commit sha> / <plan 文件>
 ```
 
@@ -152,7 +153,7 @@
 | [W-018](#w-018) | RESOLVED | v1.4.2 DWARF emit 引入 Stage 1 .il 字节差异 (非功能) |
 | [W-019](#w-019) | RESOLVED | codegen 嵌套 struct `(o).inner.a` emit `loadsw` 类型错 |
 | [W-020](#w-020) | RESOLVED | jhyy-side `parser.jhyy` parse_pattern... |
-| [W-021](#w-021) | RESOLVED | WiX 7 CLI `-ext` name 查找失败 — `-ext... |
+| [W-021](#w-021) | SUPERSEDED | WiX 7 CLI `-ext` name 查找失败 — `-ext... |
 | [W-022](#w-022) | SUPERSEDED | Windows PowerShell 5.1 `Out-File -Encoding utf8`... |
 | [W-023](#w-023) | SUPERSEDED | MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH... |
 | [W-024](#w-024) | SUPERSEDED | PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8... |
@@ -175,7 +176,7 @@
 | [W-044](#w-044) | RESOLVED | MSI 漏装 runtime.h → install 后 `fatal error:... |
 | [W-045](#w-045) | RESOLVED | link_with_gcc 失败时 gcc 实际 stderr 不可见 — 用户只见 "gcc... |
 | [W-048](#w-048) | RESOLVED | link_with_gcc 在 PowerShell + 中文文件名 silent fail —... |
-| [W-051](#w-051) | RESOLVED | MSI deferred ExeCommand CustomAction type 34 在本机... |
+| [W-051](#w-051) | SUPERSEDED | MSI deferred ExeCommand CustomAction type 34 在本机... |
 | [W-052](#w-052) | RESOLVED | match 字面量范围模式 `1..10` 两侧 parser + codegen 都漏... |
 | [W-053](#w-053) | RESOLVED | 字符字面量转义不全 (`\n \t \r \0` 之外 escape) 以及 `\xHH` 漏解码 |
 | [W-054](#w-054) | RESOLVED | sizeof IL 未定义 `%t0` — 真因是 `qbe_type_of` 撞 data... |
@@ -1781,7 +1782,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 ## W-015: `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
 
 **状态:** RESOLVED closed 2026-08-13 (v1.3.3) — `NODE_SIZEOF` 节点 arena 分配 8 字节 → sema const-fold 写 16 字节溢出到下一块
-**提交/说明:** RESOLVED (commit TBD
+**提交/说明:** RESOLVED (commit `bb15f98` — v1.3.3: sizeof(TypeName) compile-time constant)
 
 **触发面:** v1.3.3 sizeof end-to-end implement。`ast_new_sizeof` 跟 `ast_new_alignof` 分配 `NODE_SIZE() + sizeof(NodeSizeof)` (= 8 bytes for `*Node target`),sema const-fold 透过 `node_int_data(n)` 写 `int64_t value` (8) + `TypePrimitive prim` (4) 共 16 bytes 溢出 8 bytes 到 next arena chunk → 随机 data corruption,典型症状: `sizeof(i32)` emit `208` (读 garbage),jhyy_v1 编 src0/main.jhyy 崩溃 `[4a] ir_init done`。
 
@@ -1826,7 +1827,7 @@ input (canonical) 跟 output (scratch `_sh_vN`) 物理分开 → pre-stage clean
 ## W-016: 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
 
 **状态:** RESOLVED closed 2026-08-13 (v1.3.7) — 8 字节 enum 参数 ABI mismatch — caller 用 `l` (slot) 传,callee 用 `w` (value) 收
-**提交/说明:** RESOLVED ( fix commit TBD
+**提交/说明:** RESOLVED ( fix commit `bbdebc2` — v1.3.7: enum param ABI mismatch)
 
 **触发面 (v1.3.7 pattern binding 引入)**:enum 携带 payload(> 4 字节,如 `Option::Some(i32)` = 8 字节),caller 通过 `l` (slot pointer) 传给 callee,但 codegen 早期默认所有 enum 都按 `w` (4-byte value) emit → callee 拿到的是 slot 指针的低 32 位(garbage),tag compare 永远 false,`Some(v) => v` 实际 fallback 到 always-match 但 `v` 没绑 → 测试 exit=0(应是 v 的值)。
 
@@ -2141,8 +2142,9 @@ match tag { 0 => ..., 1 => ..., 2 => ... }
 
 <a id="w-021"></a>
 ## W-021: WiX 7 CLI `-ext` name 查找失败 — `-ext WixToolset.Bal.wixext` 找不到
+**not-a-bug:** 根因在 WiX 上游的 DLL 命名(external dep,项目不可控)⇒ 永久 workaround,不是待修的 bug
 
-**状态:** RESOLVED closed 2026-08-28 (v1.7.1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue 依赖 WiX 上游 DLL 命名 (external dep, 项目不可控),…
+**状态:** SUPERSEDED closed 2026-08-28 (v1.7.1) — 永久 workaround 化:根因在 WiX 上游的 DLL 命名(external dep,项目不可控)⇒ 不是待修的 bug
 **提交/说明:** 2026-08-28 (v1.7.1 patch B1
 
 **触发场景:** Sprint v1.5.3 Burn bundle build, `wix build installer/Bundle.wxs -ext WixToolset.Bal.wixext ...` 时报 WIX0144 (`The extension 'WixToolset.Bal.wixext' could not be found. Checked paths: WixToolset.Bal.wixext`)。
@@ -2184,8 +2186,9 @@ if (-not (Test-Path $balDll)) {
 
 <a id="w-022"></a>
 ## W-022: Windows PowerShell 5.1 `Out-File -Encoding utf8` 加 UTF-8 BOM 污染 `$GITHUB_ENV`
+**not-a-bug:** PowerShell 5.1 在 windows-latest runner 上是默认 shell,`Out-File -Encoding utf8` 加 BOM 是它的既定行为 ⇒ 环境限制,不是待修的 bug
 
-**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🌍 ENV-ONLY, 非 ACTIVE bug。PowerShell 5.1 是 GitHub Actions `windows-latest` runner default (`PSDefaultParameterValues` 不能…
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 环境限制,非待修 bug:PowerShell 5.1 是 windows-latest runner 的默认 shell,加 BOM 是它的既定行为…
 **提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 
 **触发场景:**
@@ -2228,8 +2231,9 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 <a id="w-023"></a>
 ## W-023: MSYS2 bash step 里 `${VAR}` 不展开 `${{ env.X }}` GH 表达式
+**not-a-bug:** `${VAR}` 不展开 `${{ env.X }}` 是 GH Actions msys2 bash step 的设计如此 ⇒ 不是待修的 bug
 
-**状态:** SUPERSEDED closed 2026-09-28 (v2.13.3) — 🌍 ENV-ONLY, 非 ACTIVE bug。`${VAR}` 不展开 `${{ env.X }}` GH 表达式 是 GH Actions msys2 bash step 设计如此:yaml 表达式只 expanded 在 yaml…
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.3) — 环境限制,非待修 bug:`${VAR}` 不展开 `${{ env.X }}` 是 GH Actions msys2 bash step 的设计如此…
 **提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.3 close
 
 **触发场景:**
@@ -2275,8 +2279,9 @@ PowerShell 7+ 的 `Out-File -Encoding utf8` 是 UTF-8 no BOM (没有这个 bug),
 
 <a id="w-024"></a>
 ## W-024: PowerShell 5.1 `Set-Content` / `Out-File` 写 UTF-8 文本默认加 BOM + CRLF
+**not-a-bug:** 同 W-022 —— PowerShell 5.1 在 windows-latest runner 上是默认 shell ⇒ 环境限制,不是待修的 bug
 
-**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🌍 ENV-ONLY, 非 ACTIVE bug。跟 W-022 同根因 (PS5.1 default 在 windows-latest runner):`Set-Content -Encoding utf8` / `Out-File -…
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 环境限制,非待修 bug:跟 W-022 同根因(PS5.1 在 windows-latest runner 上是默认 shell)
 **提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 
 **触发场景:**
@@ -2483,7 +2488,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 ## W-027: GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys64\ucrt64\bin` 找不到 gcc
 
 **状态:** RESOLVED closed 2026-08-15 (v1.5.6) — GH Actions `setup-msys2@v2` 把 MSYS2 装在 `$RUNNER_TEMP\msys64` (CI = `D:\a\_temp\msys64`), 不在 `C:\msys64` — 硬编码 `C:\msys6…
-**提交/说明:** → SUPERSEDED by W-029 (v1.5.6 superseder commit TBD
+**提交/说明:** → SUPERSEDED by W-029 (v1.5.6 superseder commit `a2dd4c1`)
 **日期:** 2026-08-15
 **触发面:** `.github/workflows/release.yml` Run regress step (53/53 FAIL → 47/53 FAIL → 53/53 PASS over 4 fix attempts)
 
@@ -2517,8 +2522,9 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 
 <a id="w-029"></a>
 ## W-029: jhyy.exe toolchain 探测收敛 — `jh_gcc_path()` 4-tier 优先级 + `jh_gcc_invoke()` 包装替代 v1.0.0 跨 3 文件 MSYS2 探测逻辑
+**superseder:** `jh_gcc_path()` 4-tier 探测（v1.5.6 commit `a2dd4c1`）取代了原先跨 3 文件的 MSYS2 探测逻辑
 
-**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 🟢 STABLE-PRODUCTION, 非 ACTIVE unfixed bug。真修 ship 在 v1.5.6 commit `a2dd4c1` "feat(v1.5.6): jhyy_helpers.c 加 jh_gcc_path…
+**状态:** SUPERSEDED closed 2026-09-28 (v2.13.4) — 已被取代,非待修 bug:真修 ship 在 v1.5.6 commit `a2dd4c1`(`jh_gcc_path()` 4-tier 探测取代原跨 3 文件的探测)rs.c 加 jh_gcc_path…
 **提交/说明:** 2026-09-28 (audit reclassify per 2026-09-28 v3.x ACTIVE/DEFERRED audit, 同步 main v2.13.4 close
 **日期:** 2026-08-15
 **触发面:** `compiler/src0/jhyy_helpers.c` (jh_gcc_path + jh_gcc_invoke) +
@@ -2581,7 +2587,7 @@ GH Actions dry-run #31861809057, #31861809057, #31863594640 — Run regress step
 ## W-028: Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
 
 **状态:** RESOLVED closed 2026-08-15 (v1.5.5) — Windows process exit code 是 8-bit (mod 256), EXPECT 注释里的值 > 255 在 CI regress FAIL (got=106 不是 got=1000042)
-**提交/说明:** 2026-08-15 (commit `6d2ab8f` + commit TBD — `sys.platform` cygwin/msys 兼容
+**提交/说明:** 2026-08-15 (commit `6d2ab8f` + commit `03f58c6` — `sys.platform` cygwin/msys 兼容)
 **日期:** 2026-08-15
 **触发面:** `mcp-jhyy/jhyy_regress.py` run_test EXPECT comparison (47/53 PASS post-W-027)
 
@@ -2596,7 +2602,7 @@ W-027 v8 fix 后, CI dry-run 47/53 PASS。剩 6 个 FAIL:
 
 **根因 (两层):**
 1. **架构层**: Windows kernel32 `ExitProcess` 只接受 8-bit exit code (0-255); 任何 >= 256 的 return value 自动 mod 256。Python `subprocess.run` 返回的 `returncode` 在 Windows 上走 WaitForSingleObject + GetExitCodeProcess, 也是 8-bit。
-2. **平台检测层** (v2 commit TBD): GH Actions `shell: msys2 {0}` 启动 Python, **MSYS2-launched Python 的 `sys.platform` 是 `"cygwin"` 不是 `"win32"`**。第一版 fix `if sys.platform == "win32"` 在 CI 上**永远 False**, mod-256 逻辑不触发。
+2. **平台检测层** (v2 commit `03f58c6`): GH Actions `shell: msys2 {0}` 启动 Python, **MSYS2-launched Python 的 `sys.platform` 是 `"cygwin"` 不是 `"win32"`**。第一版 fix `if sys.platform == "win32"` 在 CI 上**永远 False**, mod-256 逻辑不触发。
 
    ```
    [W-028 trace from dispatch #31867221428]:
@@ -2604,7 +2610,7 @@ W-027 v8 fix 后, CI dry-run 47/53 PASS。剩 6 个 FAIL:
    ```
 
 **workaround (最终):**
-在 `run_test()` 末尾比较前加 (commit TBD):
+在 `run_test()` 末尾比较前加 (commit `03f58c6`):
 ```python
 # W-028: detect any Windows-subsystem Python (win32 / cygwin / msys)
 _IS_WINDOWS_PY = sys.platform in ("win32", "cygwin", "msys")
@@ -2654,7 +2660,7 @@ dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.eve
 ## W-030: WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层 (不能 nested in `<Window>`); `<Window>` 用 Caption + FontId (不用 Title + 内嵌 Font + Weight)
 
 **状态:** RESOLVED closed 2026-08-15 (v1.5.6) — WiX 4 Theme.xml schema — Font 必须在 `<Theme>` 顶层 (不能 nested in `<Window>`); `<Window>` 用 Caption + FontId (不用 Title + 内嵌…
-**提交/说明:** 2026-08-15 (commit TBD
+**提交/说明:** 2026-08-15 (commit `b146bf3` — hotfix(v1.5.6): W-030 Theme.xml WiX 4 schema + W-031 MSI 4-source GCC probe)
 **日期:** 2026-08-15
 **触发面:** `installer/Theme.xml` + `installer/Bundle.wxs` Burn bundle (`jhyy-installer-*.exe`)
 
@@ -2699,7 +2705,7 @@ dry_run=true 仍 publish release — `if: inputs.dry_run != 'true' || github.eve
 ## W-031: MSI LaunchCondition + INSTALLDIR resolution — 原探测 HKLM Uninstall\ucrt64 GCC 误报 + WiX 4 `<SetDirectory>` 不生效
 
 **状态:** RESOLVED closed 2026-08-15 (v1.5.2) — MSI LaunchCondition + INSTALLDIR resolution — 原探测 HKLM Uninstall\ucrt64 GCC 误报 + WiX 4 `<SetDirectory>` 不生效
-**提交/说明:** 2026-08-15 (commit TBD
+**提交/说明:** 2026-08-15 (commit `b146bf3` — hotfix(v1.5.6): W-030 Theme.xml WiX 4 schema + W-031 MSI 4-source GCC probe)
 **日期:** 2026-08-15
 **触发面:** `installer/compiler/jhyy-compiler.wxs` LaunchCondition + INSTALLDIR
 
@@ -2776,7 +2782,7 @@ Property(S): INSTALLDIR = C:\JHYY\
 ## W-033: Theme.xml XML 1.0 well-formedness + WiX 4 thmutil schema + wixstdba 默认控件名/string ID 完整对齐
 
 **状态:** RESOLVED closed 2026-08-16 (v1.5.6) — Theme.xml XML 1.0 well-formedness + WiX 4 thmutil schema + wixstdba 默认控件名/string ID 完整对齐
-**提交/说明:** 2026-08-16 (commit TBD
+**提交/说明:** 2026-08-16 (commit `c998fd9` — hotfix(v1.5.6): W-033 Theme.xml rewrite)
 **日期:** 2026-08-16
 **触发面:** `installer/Theme.xml` + `installer/Bundle.zh-CN.wxl` — Burn bundle (`jhyy-installer-*.exe`)
 
@@ -3611,8 +3617,9 @@ src0/main.jhyy 改 4 extern decl + ~50 行 (link_with_gcc 改造 + rename), jhyy
 
 <a id="w-051"></a>
 ## W-051: MSI deferred ExeCommand CustomAction type 34 在本机 systematic 报 1721 — 改用 HKLM RunOnce 解决
+**not-a-bug:** MSI deferred CA type 34 在 SYSTEM context 的 1721 是外部限制,项目不可控 ⇒ 永久 workaround,不是待修的 bug
 
-**状态:** RESOLVED closed 2026-08-28 (v1.7.1) — 永久 workaround 化, 标 RESOLVED 是因为 v1.7.1 patch ship 时 review 确认 underlying issue (MSI deferred CA type 34 SYSTEM context…
+**状态:** SUPERSEDED closed 2026-08-28 (v1.7.1) — 永久 workaround 化:MSI deferred CA type 34 在 SYSTEM context 的 1721 是外部限制,项目不可控 ⇒ 不是待修的 bug
 **提交/说明:** 2026-08-28 (v1.7.1 patch B2, workaround 已 ship v1.5.7-rc1
 
 **日期:** 2026-08-26 (workaround ship v1.5.7-rc1) → 2026-08-28 (标 RESOLVED via v1.7.1 patch B2 review)
@@ -3776,7 +3783,7 @@ il_sha256: 54f8e2a1e320f1584535176191dfb0e999f4425b4ae50d095c9178c1e78ca494 (sta
 - **parser 已支持 + codegen 没支持** 是隐 trap。这次发现 IDENT range codegen pre-existing 多年 broken (无测试触发, jhyy-side `cmp=1` silent accept-all, C-side `cslew %t0` QBE reject) — 跟 W-020 类似情形。两层 (parser + codegen) 都得看, 不能只修一半。
 - **"jhyy-side 把 parse_pattern 上移 + 加 parse_pattern_primary 替代 parse_expr 解 mutual recursion"** (W-020) 之后, literal extension 必须挂同一个 primary 上 — 否则两套不并行。这是 W-052 跟 W-020 唯一一处微妙耦合, 后续若加 deref range 或 complex pattern 仍要在这套 primary 内扩展。
 
-**superseder:** commit TBD (W-052 ship, 2026-08-27 — parser.c/codegen.c/parser.jhyy/codegen.jhyy/match_range.jhyy 全部)
+**superseder:** commit `bbd69d8` (fix(v1.5.11): literal range pattern in match arm; W-052 ship, 2026-08-27 — parser.c/codegen.c/parser.jhyy/codegen.jhyy/match_range.jhyy 全部)
 
 **引用:**
 - W-020 (parse_pattern reorder + parse_pattern_primary, W-052 的 foundation — 同一个 helper 必须在这里扩展)
@@ -3889,7 +3896,7 @@ il_sha256: 兼容 W-052 baseline (54f8e2a1... family), W-053 没改 codegen 路�
 - **multi-byte UTF-8 路径不是 v1.6 范围**:即使 Plan agent 探测过,fix 单 byte `'\xHH'` 已足够覆盖 spec §4.4 "ASCII 字符字面量"用例,多字节 codepoint 留给 v1.7 单独 sprint(避免 v1.6 commit 过重 + 跟 UTF-8 decoder 整套 lex 改造捆绑)。
 - **W-052 + W-053 共教训**: spec-vs-impl gap 不能用 "no test exercises it" 当 defer 理由。README `tour of the syntax` 必须有至少一个 end-to-end test 锁住。
 
-**superseder:** commit TBD (v1.6.0 ship 2026-08-27 — src/lexer.c + src/parser.c + src0/lexer.jhyy + src0/parser.jhyy + 2 test rename 全部)
+**superseder:** commit `c02ea9f` (fix(v1.6): W-053 char family + W-054 sizeof IL; v1.6.0 ship 2026-08-27 — src/lexer.c + src/parser.c + src0/lexer.jhyy + src0/parser.jhyy + 2 test rename 全部)
 
 **引用:**
 - W-052 (match 字面量范围模式 1..10 — 同型 parity src+src0 fix + test)
@@ -3987,7 +3994,7 @@ il_sha256: 兼容 W-053 baseline (W-054 不改 IL,W-053 fix 已 ship 稳定)
 - **"data section 字节 packing" 不是"低效"而是 QBE ABI 要求** — QBE `data $X = { b N, b M, ... }` 是 1-byte packing;`data $X = { w N, w M, ... }` 是 4-byte packing。byte-addressable array 必须用 `'b'`/`'h'` 才能正确 `(byte*)&X[i]` 寻址。
 - **Plan agent 探测有局限** — symptom-based 探测可能误导,fix 时必须 verify 真因(本例:跑 `const_array.jhyy` 看 byte 25 错值才发现不是 sizeof)。
 
-**superseder:** W-053 fix chain 副作用 (commit TBD, v1.6.0 ship 2026-08-27)
+**superseder:** W-053 fix chain 副作用 (commit `c02ea9f`, v1.6.0 ship 2026-08-27)
 
 **引用:**
 - W-053 (qbe_type_of widening 是 W-053 fix 路径上的真因 — W-054 是 W-053 chain 的 debug 副产品)
@@ -5231,7 +5238,7 @@ if av != bv { match_ok = 0 as i32; }
 
 **失效条件:** 不适用 — license.rtf 物理路径已锁在 `installer/assets/`, `!(bindpath.assets)` 跟 build.ps1 `-b assets=installer/assets` 永远 align。除非再有人动 refactor 重命名, 否则不再触发。
 
-**superseder:** v1.8.3.3 patch follow-up #2 (commit TBD — `fix(installer): jhyy-compiler.wxs license.rtf bindpath post-425970d refactor (v1.8.3.3 release 解锁)`)
+**superseder:** v1.8.3.3 patch follow-up #2 (commit `931a4f3` — `fix(installer): jhyy-compiler.wxs license.rtf bindpath post-425970d refactor (v1.8.3.3 release 解锁)`)
 
 **引用:**
 - `installer/wix/compiler/jhyy-compiler.wxs:622` (fix point)
@@ -5271,7 +5278,7 @@ if av != bv { match_ok = 0 as i32; }
 **workaround 路径 (3 commit):**
 1. **commit `931a4f3`** (W-066) 修了 license.rtf bindpath, 解了 WIX0103 第 2 错 — 让 release.yml 跑到 Build installer 成功那一步
 2. **commit `e86c2d0`** (W-067 attempt 1) 在 release.yml 加 "Compute JHY_VERSION_DISPLAY" step, **镜像 build.ps1 strip 逻辑** — 解了 run #48 (33584690813) SUCCESS。但这只是把 drift 从一处变两处: build.ps1:75-83 跟 release.yml:96-110 各自有一份 strip 代码, 未来改一边忘改另一边又错
-3. **commit TBD** (W-067 真修): 把 strip 逻辑挪到 build.ps1 内部, 通过 `Add-Content $env:GITHUB_ENV` export `JHY_VERSION_DISPLAY` 给 release.yml — **single source of truth**。release.yml 删除 mirror step, 后续 step 直接 read `env.JHY_VERSION_DISPLAY`。本地测试: stub target + fake GITHUB_ENV → `[build.ps1] exported JHY_VERSION_DISPLAY=1.8.3 to GITHUB_ENV` + GITHUB_ENV 文件含 `JHY_VERSION_DISPLAY=1.8.3` ✓
+3. **commit `c1a8f1b`** (W-067 真修): 把 strip 逻辑挪到 build.ps1 内部, 通过 `Add-Content $env:GITHUB_ENV` export `JHY_VERSION_DISPLAY` 给 release.yml — **single source of truth**。release.yml 删除 mirror step, 后续 step 直接 read `env.JHY_VERSION_DISPLAY`。本地测试: stub target + fake GITHUB_ENV → `[build.ps1] exported JHY_VERSION_DISPLAY=1.8.3 to GITHUB_ENV` + GITHUB_ENV 文件含 `JHY_VERSION_DISPLAY=1.8.3` ✓
 
 **scope:**
 - ✅ 改 `installer/build.ps1` (新增 ~17 行 GITHUB_ENV export block in psHost detection 段)
@@ -5332,7 +5339,7 @@ if av != bv { match_ok = 0 as i32; }
 4. 我们 Theme.xml line 45 改成 plain `logo.png` → rebuild bundle → silent install exit 0 ✓
 5. 跑 `jhyy` (无参) → 输出跟 baseline byte-equal ✓
 
-**修复 (commit TBD):** `installer/wix/Theme.xml:45` 的 `ImageFile="../assets/icons/jhyy-icon-128.png"` → `ImageFile="logo.png"`。Win window 装饰图改用 wix stdba 内置 logo (Windows 默认蓝绿圆 logo, 不丑)。Window title 文字 + 整体 mint 配色 + MSYS2 prereq + post-install hint 全部保留 (line 46 Label `#(loc.Title)` + line 63-64 Hyperlink + line 136 Label 都不动)。
+**修复 (commit `b87fd01`):** `installer/wix/Theme.xml:45` 的 `ImageFile="../assets/icons/jhyy-icon-128.png"` → `ImageFile="logo.png"`。Win window 装饰图改用 wix stdba 内置 logo (Windows 默认蓝绿圆 logo, 不丑)。Window title 文字 + 整体 mint 配色 + MSYS2 prereq + post-install hint 全部保留 (line 46 Label `#(loc.Title)` + line 63-64 Hyperlink + line 136 Label 都不动)。
 
 **trade-off (已知接受):**
 - ❌ (无) Win window 左上角 logo 现在是 brand `jhyy-logo-128.png`(深色圆角 + J,跟 `vscode-ext/icon.svg` 同源)— 跟 v1.8.0 之前的 install UI 一致(那时用 `jhyy-icon-128.png` file-type icon 是另一回事,**新 fix 升级到 brand logo**)
@@ -5478,7 +5485,7 @@ workaround (`c251658` inert) 的失效条件 = 任何 commit 真打开 self path
 
 **ID:** W-069
 **状态:** RESOLVED closed 2026-09-06 (v2.6.6) — jhyy.exe 编译产物 corrupt / ld exit 5 — stage0 build pollution (v2.6.5 enable 真 import 后 surface)
-**提交/说明:** v2.6.6 (commit TBD — see v2.6.6 changelog
+**提交/说明:** v2.6.6 (commit `224a944` — fix(v2.6.6): W-069 真修 NODE_CALL is_extern mangling fallback; see v2.6.6 changelog
 **日期:** 2026-09-06 (introduced — v2.6.5 commit `07c6a89` enable 真 `import codegen_amd64;` 后 surface)
 **superseder:** N/A — root cause fully diagnosed + fixed in v2.6.6
 
@@ -5505,7 +5512,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
    - **v1.x regress test**: 走同样路径, 但 v1.x test 文件不 `import codegen_amd64`,所以 fn_defs 表只有几个非 extern fn, lookup miss → pass-through `callq ptr_add_u8` → libc linker 找不到 → ld 5 → 同症状
 4. **OSError [WinError 1392] 是个二次症状** (per Plan agent RCA): corrupt jhyy.exe 是 process exit 中途 kill 的副作用, 不是根因; 但因 `make` 在某些机器 ld 5 退出时 cleanup 没跑完 → jhyy.exe truncated → regress.py subprocess 读 → WinError 1392。
 
-**真修 (v2.6.6 commit TBD):**
+**真修 (v2.6.6 commit `224a944`):**
 
 - **C-side (`compiler/src/codegen.c`):** 加 `CGFnDef` static globals (`g_fn_defs / g_n_fn_defs / g_cap_fn_defs`) + helpers (`cg_fn_defs_register / cg_fn_defs_lookup / cg_fn_defs_clear`)。cg_module Pass A.5 (after inline_imports merge) build fn name → mangled name table from all non-extern NODE_FUNC_DECL。`NODE_CALL` is_extern branch 改成 `cg_fn_defs_lookup(fn_sym->name)` → found: emit mangled name; not found: pass through (true C ABI extern)。
 - **jhyy-side (`compiler/src0/codegen.jhyy`):** 镜像实现。CGContext 加 2 字段 (`fn_defs: *u8`, `n_fn_defs: i64`), bump `CGCONTEXT_SIZE` 128 → 144 (jhyy-side only, C-side 用 static globals 不动 CGContext)。`CGFnDef` struct 16 bytes (name ptr + qbe_name ptr)。新增 fn: `cg_fn_defs_clear / cg_fn_defs_register / cg_fn_defs_lookup`。`cg_module` Pass A.5 加 register loop (iterate ndeccls, register all is_extern=0 NODE_FUNC_DECL with "<mod>__<name>" via StringBuilder in arena)。`NODE_CALL` is_extern branch 加 cg_fn_defs_lookup fallback。
@@ -5522,7 +5529,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 - ✅ `compiler/src/codegen.c`: CGFnDef struct + 3 helpers + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
 - ✅ `compiler/src0/codegen.jhyy`: CGFnDef struct + 3 helpers + CGContext +2 fields + CGCONTEXT_SIZE 144 + cg_module Pass A.5 loop + NODE_CALL is_extern fallback (~80 LOC)
 - ✅ docs update (本 entry + archive/logs/v2/changelog-v2.6.0.md v2.6.6 sub-section)
-- ❌ ~~byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — user 决策推到 v2.6.7~~ → ✅ **DONE v2.6.7** (commit TBD) — SELF_DEFERRED 删 + strict default-on + `--save-baseline` / `--baseline` flag wired (gitignored baseline dir `compiler/tests/bootstrap/baseline/byte_equal_amd64/`); ship gate 5/5: 10 PASS QBE-vs-self + 10 PASS baseline match
+- ❌ ~~byte_equal_amd64.sh Commit 5 (`SELF_DEFERRED=0` + `JHY_SELF_BACKEND=1` + 删 deferred notice + strict + `--save-baseline`) — user 决策推到 v2.6.7(commit `c965773`)~~ → ✅ **DONE v2.6.7** (commit `c965773`) — SELF_DEFERRED 删 + strict default-on + `--save-baseline` / `--baseline` flag wired (gitignored baseline dir `compiler/tests/bootstrap/baseline/byte_equal_amd64/`); ship gate 5/5: 10 PASS QBE-vs-self + 10 PASS baseline match
 
 **失效条件 (post-fix):** 不再有失效条件 — 真修,不是 workaround。如果未来新增 codegen_amd64_*.jhyy 用了新的 `extern fn`,会自动通过 cg_fn_defs_register in cg_module Pass A.5 覆盖。
 
@@ -5530,7 +5537,7 @@ W-069 不是 stage0 build pollution, 而是 **codegen NODE_CALL is_extern branch
 
 - v2.6.5 commit `07c6a89` (W-068 真改; W-069 surface 起点)
 - v2.6.4 commit `c251658` (inert state baseline, regress 全过)
-- v2.6.6 commit TBD (W-069 真修: codegen.c + codegen.jhyy + docs)
+- v2.6.6 commit `224a944` (W-069 真修: codegen.c + codegen.jhyy + docs)
 - `compiler/src/codegen.c:36-71` (CGFnDef struct + helpers) + `compiler/src/codegen.c:884-898` (NODE_CALL is_extern fallback) + `compiler/src/codegen.c:2572-2593` (cg_module Pass A.5)
 - `compiler/src0/codegen.jhyy:216-345` (CGFnDef struct + helpers) + `compiler/src0/codegen.jhyy:189-191` (CGContext +2 fields) + `compiler/src0/codegen.jhyy:212` (CGCONTEXT_SIZE=144) + `compiler/src0/codegen.jhyy:2410-2421` (NODE_CALL is_extern fallback) + `compiler/src0/codegen.jhyy:4083-4120` (cg_module Pass A.5)
 - D43 baseline timeline: `51376ce5...` (v2.4.0 末) → `92e82554...` (v2.6.6 新 baseline, re-baseline per D43) → `cc894329...` (v2.7.0 Commit 2+3 新 baseline;emit_call refactor + ABI imports 微调 codegen .il emit;Win ABI path 仍 byte-equal);v2.6.7 driver-only 改动不动 codegen → baseline HOLD 不变
@@ -5610,7 +5617,7 @@ cmd_compile (main.jhyy)
 
 ✅ **v2.8.2 真修 (commit `8b4d43d`)**: codegen.jhyy cg_module 真 emit SysV QBE IL。10 dispatch sites in cg_func/cg_expr (header emit + 3 return emit + 4 cg_expr return + 2 call_prelude + 2 struct_arg_slot) 调 `abi_sysv_emit_*` based on target_tag。CGContext 加 target_tag 字段 (144→152 bytes) + cg_func signature 加 target_tag 参数 + cg_module fallthrough restructure (删 SYSV/SYSVFS stub-fatal)。
 
-✅ **v2.8.3 docker gcc chain infra 补完 (commit TBD, post-Phase 1 verified)**:
+✅ **v2.8.3 docker gcc chain infra 补完 (commit `621015a`, post-Phase 1 verified)**:
 - `compiler/src0/main.jhyy` 加 `--no-link` flag (cmd_compile argv scan + skip link_with_gcc + --help text) — 让 codegen 只产 .s 不链,供 cross-env chain 用
 - `compiler/build/bin/regress.py` docker branch 改 2-stage subprocess: Stage 1 (Windows-side jhyy --no-link → .s) + Stage 2 (docker gcc:12 chain → ELF → 跑)
 - driver logic fix: `r.returncode != 0` 不用,改 EXIT:N-only PASS check (ELF exit != 0 是 expected, e.g. struct_ret=18)
@@ -10669,6 +10676,7 @@ stage0 自 v4.0.8 起是 **informational**,不参与 regress exit code,
 
 <a id="w-133.1"></a>
 ## W-133.1: 聚合 `==` / `!=` 不接受**函数调用结果**作为操作数
+**superseder:** 迁到语言规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B（canonical pattern 不进本文件）
 
 **状态:** SUPERSEDED closed 2026-10-25 (v4.0.20) — 不是待修的 bug:编译期**明确拒绝**不安全形态,设计如此,不入高优桶
 **Filed-by:** audit-v4-spec-2026-10-24
@@ -10705,6 +10713,7 @@ bug ⇒ 归 SUPERSEDED(台账 schema:「不是 workaround ⇒ 不进高优桶」
 
 <a id="w-133.2"></a>
 ## W-133.2: 聚合类型的**大小比较**(`<` `>` `<=` `>=`)未实装 —— 编译期报错
+**superseder:** 迁到语言规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B（canonical pattern 不进本文件）
 
 **状态:** SUPERSEDED closed 2026-10-25 (v4.0.20) — 不是待修的 bug:聚合无语言级全序,编译期**明确拒绝**,设计如此,不入高优桶
 **Filed-by:** audit-v4-spec-2026-10-24
@@ -10740,6 +10749,7 @@ bug ⇒ 归 SUPERSEDED(台账 schema:「不是 workaround ⇒ 不进高优桶」
 
 <a id="w-133.3"></a>
 ## W-133.3: struct 字面量的字段值类型必须**精确匹配**字段类型
+**superseder:** 迁到语言规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` 附录 B（canonical pattern 不进本文件）
 
 **状态:** SUPERSEDED closed 2026-10-25 (v4.0.20) — 不是待修的 bug:字段类型**精确匹配**是设计选择,不入高优桶
 **Filed-by:** audit-v4-spec-2026-10-24
@@ -10974,6 +10984,7 @@ GCC 会报 `-Wcomment`(「块注释未闭合」)的开关 —— 它一丢,下�
 
 <a id="w-135"></a>
 ## W-135: emit 侧两张固定上限表(pending phi / block-name uniquify)—— 一个不可达,一个可达但溢出无害
+**not-a-bug:** pending-phi 上限不可达,block-name 上限可达但溢出无害 ⇒ 不是待修的 bug
 
 **状态:** SUPERSEDED closed 2026-10-25 (v4.0.21) — 不是待修的 bug:pending-phi 上限不可达,block-name 上限可达但溢出无害(名字全局唯一 ⇒ 回落字节相同)
 **Filed-by:** audit-v4-spec-2026-10-24

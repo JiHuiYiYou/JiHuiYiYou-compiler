@@ -54,7 +54,7 @@
 | 条目总数 | **165** |
 | ACTIVE | **1** —— [`W-170`](workarounds.md#w-170)：`jhyy build` 不处理 `#[link_section]` |
 | DEFERRED | 0 |
-| RESOLVED / SUPERSEDED / INVALID | 153 / 9 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 151 / 11 / 2 |
 
 ---
 
