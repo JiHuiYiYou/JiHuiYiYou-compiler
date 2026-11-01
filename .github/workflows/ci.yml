@@ -567,7 +567,10 @@ jobs:
       # 根因是**事实没有单一真相源** + 门只扫 6 个位置。
       # 现在:数字只写在 docs/internal/FACTS.md,其它文档引用它;本门对拍 FACTS.md 与现实
       # (VERSION / 台账索引 / 门数 / 回归基线),并检查全仓链接与锚点。
-      - name: Docs facts gate (FACTS.md == reality, no broken links)
+      - name: Docs facts gate (FACTS.md == reality, no broken links, no dangling bare paths)
+        # 2026-10-31 扩了两项:① 台账**正文**解析(5 态枚举 / per-status 计数 /
+        #   索引↔正文状态一致)② **反引号里的裸路径**(此前整类无人扫过 ——
+        #   inline 链接 0 断链容易让人以为「文档引用健康」,实际只覆盖了一半)。
         if: always()
         shell: msys2 {0}
         run: |

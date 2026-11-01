@@ -16,6 +16,8 @@
 | D | **非 archive 文档里「回归基线」语境下的 PASS 数必须等于 FACTS.md 的数** | 零 |
 | E | 全仓 markdown 链接 + 锚点无断链(含显式 `<a id>` 与同页锚点) | 秒级 |
 | F | FACTS.md 引用的文件都存在 | 零 |
+| G | 台账**正文**解析:5 态枚举 / per-status 计数 / 索引↔正文状态一致 | 零 |
+| H | **反引号里的裸路径**指向真实存在的文件(另一类引用面 —— 见 `check_backtick_paths`) | 秒级 |
 
 **退出码**:0 = 全绿;1 = 有漂移(逐条列出)。
 """
@@ -371,6 +373,115 @@ def check_links() -> None:
 
 
 # --------------------------------------------------------------------------
+# E2. 反引号里的裸路径 —— 另一类引用面
+# --------------------------------------------------------------------------
+# 为什么要这道门：`check_links()` 只匹配 `[text](path)` 形式的 inline 链接。
+# **反引号包裹的裸路径**（`` `docs/abis/xxx.md` ``、`` `compiler/src0/foo.jhyy` ``）
+# 整类从未被任何门扫过 —— 2026-10-31 审计实测：docs/** 里 1205 处反引号路径
+# 指向不存在的目标（live 207 / archive 998）。⇒「inline 链接 0 断链」被读成
+# 「文档引用健康」是错的 —— 它只覆盖了引用面的一半。
+#
+# 口径（宁可漏报也不要误报：误报会让门永远红，等于没有门）：
+# - **只看 live 文档** —— `docs/archive/` 按约定「归档的内容不改」，那些是历史快照。
+# - **台账 `docs/internal/workarounds.md` 豁免** —— 它的条目按约定「不删不改」，
+#   正文里提到已删除的文件（v4.0.21 删掉的 `compiler/src/*.c` 等）是**审计轨迹**。
+#   门会把这类引用的条数打出来（信息，不判红）。
+# - 目标按**两种基准**解析：相对**当前文档所在目录**、相对**仓库根**（两种写法本仓都在用）。
+# - 跳过：占位符（`vX.Y.Z` / `<...>` / `...` / `*`）、绝对路径（`/usr/...`、`C:\...`）、
+#   不含 `/` 的裸文件名（`jhyy.exe` 这种无从判断基准）、顶层目录不在仓里的路径、
+#   以及 **.gitignore 里的路径**（构建产物：自举 .s、installer/SHA256.txt 等 ——
+#   文档引用它们是在描述「产物在哪」，不是引用错路径）。
+BACKTICK = re.compile(r"`([^`\n]{2,160})`")
+PATHY = re.compile(
+    r"\.(?:md|jhyy|c|h|py|sh|ps1|json|txt|rtf|wxs|yml|yaml|sha256|exe|msi|vsix|asm|s|il|o|ld|flag|buf|sym)$")
+PLACEHOLDER = re.compile(r"[<>{}\*…]|\.\.\.|X\.Y|xxx|\$[A-Za-z_]|\bNNN\b")
+REPO_TOP = {"compiler", "docs", "installer", "mcp-jhyy", "runtime", "scripts",
+            "tools", "vscode-ext", ".github"}
+LEDGER_REL = "docs/internal/workarounds.md"
+
+
+def _gitignored(paths: list[str]) -> set[str]:
+    """哪些路径被 .gitignore 忽略（= 构建产物，不是引用错）。批量问 git，一次进程。"""
+    if not paths:
+        return set()
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "--stdin", "-z"],
+                           input="\0".join(paths) + "\0",
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except Exception:
+        return set()
+    return {p for p in r.stdout.split("\0") if p}
+
+
+def _ever_existed() -> set[str]:
+    """本仓历史上**曾经存在过**的所有路径（`git log --all --diff-filter=A --name-only`）。
+
+    用来分辨两种「不存在的路径」：
+    - **曾经存在、后来被删/改名** ⇒ **历史引用**（文档在讲「当初有这个文件」）⇒ 不是错
+    - **从未存在过** ⇒ **打错的路径** ⇒ 判红
+    例：`docs/plans/v4/backlog.md` 存在过（2026-10 被删）⇒ 跳过；
+        `scripts/dev/artifact_checks.sh` 从未存在过 ⇒ 真错。
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(ROOT), "log", "--all", "--diff-filter=A",
+             "--name-only", "--pretty=format:"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except Exception:
+        return set()
+    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+
+
+def check_backtick_paths() -> None:
+    """反引号里的裸路径是否指向真实存在的文件（口径见上面的注释）。"""
+    hist = 0
+    cands: list[tuple[Path, str, str]] = []   # (文件, 相对仓根的候选路径, token)
+    for p in all_md():
+        rel = p.relative_to(ROOT).as_posix()
+        if rel.startswith("docs/archive/"):
+            continue
+        body = re.sub(r"```.*?```", "", read(p), flags=re.S)   # 代码块里的是示例
+        for m in BACKTICK.finditer(body):
+            tok = m.group(1).strip()
+            if " " in tok or "/" not in tok:
+                continue
+            if PLACEHOLDER.search(tok) or ":" in tok or tok.startswith("/"):
+                continue
+            if not PATHY.search(tok):
+                continue
+            top = tok.split("/")[0]
+            if top not in REPO_TOP and not (ROOT / tok).exists():
+                continue
+            if (p.parent / tok).exists() or (ROOT / tok).exists():
+                continue
+            # 相对当前文档目录解析出的候选（仓根相对）
+            try:
+                cand = (p.parent / tok).resolve().relative_to(ROOT.resolve()).as_posix()
+            except (ValueError, OSError):
+                cand = tok
+            cands.append((p, cand, tok))
+
+    ignored = _gitignored([c for _, c, _ in cands])
+    existed = _ever_existed()
+    for p, cand, tok in cands:
+        rel = p.relative_to(ROOT).as_posix()
+        if cand in ignored or tok in ignored:
+            continue                       # 构建产物
+        if cand in existed or tok in existed:
+            hist += 1
+            continue                       # 历史引用（曾经存在过）
+        if rel == LEDGER_REL:
+            hist += 1
+            continue
+        fail(f"{rel}: 反引号里的裸路径不存在 → {tok}")
+    if hist:
+        print(f"  （另有 {hist} 处反引号路径指向**已删除/已改名**的文件 —— 按「归档与历史条目"
+              f"不改」的约定属历史引用，不判红）")
+
+
+# --------------------------------------------------------------------------
 # F. FACTS.md 引用的文件存在
 # --------------------------------------------------------------------------
 def check_facts_links() -> None:
@@ -396,6 +507,7 @@ def main() -> int:
     check_gates(d)
     check_pass_consistency(d)
     check_links()
+    check_backtick_paths()
     check_facts_links()
 
     if problems:
