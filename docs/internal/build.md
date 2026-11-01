@@ -123,7 +123,13 @@ jhyy build   hello.jhyy -o hello.s      # 只编译出汇编
 jhyy run     hello.jhyy                 # 编译 + 链接 + 执行
 ```
 
-多文件：把每个 `.jhyy` 都列上（`jhyy compile main.jhyy lib.jhyy -o app`）。
+多文件：用 **`import` 组合** —— 在 `a.jhyy` 里写 `import b;`，编译器沿 import 图
+把 `b.jhyy` 一起编进来。
+
+⚠️ **命令行只接受一个输入文件**，多余的 `.jhyy` 参数被**静默忽略**（不报错、不警告）⇒
+`jhyy compile a.jhyy b.jhyy` **实际只编 `a.jhyy`**（语言规范 § 1.2 / 附录 B）。
+⇒ **别把两个文件都列到命令行上** —— 那样第二个文件会被悄悄丢掉，而且**看不出任何异常**。
+（v4.6 / OS-1 会把「多余输入文件」改成报错；那之后这条限制才解除。）
 
 **CLI 全集**（含 `--target=` / `--no-link` / `--help`）⇒ `jhyy --help`。
 ⚠️ **没有 `jhyy --version`** —— 版本横幅在 `--help` 首行。
