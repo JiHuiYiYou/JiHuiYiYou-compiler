@@ -600,6 +600,17 @@ jobs:
         run: |
           python scripts/dev/check_binary_format_layout.py
 
+      - name: Architecture claims gate (architecture.md's structural claims vs source)
+        # 2026-11-01 新增:`docs/internal/architecture.md` 满是可以**当场证伪**的断言
+        # (模块清单、NodeKind 个数、「regalloc_init 被注释掉」、「rcache 默认关」、
+        # 「peephole 4096 字节上限」…),但**没有任何门盯着它** ⇒ 源码一改文档就悄悄过期。
+        # 实测抓到 13 条过期行数 ⇒ 行数已从文档里去掉(会变的数字不进设计文档),
+        # 本门改盯不会每改一次源码就漂的结构性事实。
+        if: always()
+        shell: msys2 {0}
+        run: |
+          python scripts/dev/check_arch_claims.py
+
   # ══════════════════════════════════════════════════════════════════════
   # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
   # ══════════════════════════════════════════════════════════════════════

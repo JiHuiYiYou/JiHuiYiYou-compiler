@@ -1,7 +1,12 @@
 # 编译器架构
 
-> 编译器**只有一份实现**：`compiler/src0/*.jhyy`（30 个模块，约 36.5K 行）。
+> 编译器**只有一份实现**：`compiler/src0/*.jhyy`（**30 个顶层模块 + 8 个 std 模块**，
+> 约 38K 行）。
 > `compiler/src/*.c`（C 端）已于 v4.0.21 删除 —— 仓里不存在「双实现 parity」这回事。
+>
+> ⚠️ **本文件不记逐文件行数** —— 那是会变的数字（每改一次源码就过期），
+> 而本仓的规矩是「会变的数字不进设计文档」⇒ 结构性事实（模块名清单、NodeKind 个数、
+> 「被注释掉」/「默认关」这类状态断言）由门 `scripts/dev/check_arch_claims.py` 盯着。
 >
 > 语言语义 ⇒ [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md)；
 > 类型布局与调用约定 ⇒ [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md)。
@@ -34,55 +39,55 @@
 
 ### 前端
 
-| 文件 | 行数 | 职责 |
-|---|---:|---|
-| `lexer.jhyy` | 954 | 字节流 → Token 流 |
-| `parser.jhyy` | 4117 | Token → AST；**single-pass，不支持 forward reference** |
-| `ast.jhyy` | 1685 | 节点定义 + arena 分配 |
-| `sema.jhyy` | 3528 | 类型检查、符号解析、常量折叠 |
-| `types.jhyy` | 550 | 类型表示 + `type_size` / `type_align` |
-| `symtab.jhyy` | 427 | 符号表（开放寻址 + 线性探测，64-bit FNV-1a） |
-| `mono.jhyy` | 1451 | 泛型单态化 |
-| `ir.jhyy` | 960 | IR 构造 + QBE 宽度字母映射 |
-| `ffi.jhyy` | 71 | extern 声明处理 |
-| `arena.jhyy` | 161 | arena 分配器 |
-| `util.jhyy` | 374 | 通用工具 |
-| `target_dispatch.jhyy` | 186 | `--target=` 分发（4 个三元组） |
+| 文件 | 职责 |
+|---|---|
+| `lexer.jhyy` | 字节流 → Token 流 |
+| `parser.jhyy` | Token → AST；**single-pass，不支持 forward reference** |
+| `ast.jhyy` | 节点定义 + arena 分配 |
+| `sema.jhyy` | 类型检查、符号解析、常量折叠 |
+| `types.jhyy` | 类型表示 + `type_size` / `type_align` |
+| `symtab.jhyy` | 符号表（开放寻址 + 线性探测，64-bit FNV-1a） |
+| `mono.jhyy` | 泛型单态化 |
+| `ir.jhyy` | IR 构造 + QBE 宽度字母映射 |
+| `ffi.jhyy` | extern 声明处理 |
+| `arena.jhyy` | arena 分配器 |
+| `util.jhyy` | 通用工具 |
+| `target_dispatch.jhyy` | `--target=` 分发（4 个三元组） |
 
 ### 后端（自研 amd64）
 
-| 文件 | 行数 | 职责 |
-|---|---:|---|
-| `codegen.jhyy` | 5918 | AST → IL 文本（前端到中间表示的主干） |
-| `codegen_amd64.jhyy` | 515 | 后端编排（in-mem / file-path 两条入口） |
-| `codegen_amd64_inmem.jhyy` | 183 | 内存内 7 步编排：`lex_il` → `regalloc_clear_global` → `parse_and_emit` → `peephole_fold_with_len` → 写 `.s` |
-| `codegen_amd64_lexer.jhyy` | 2266 | IL 文本 → `ILToken[]` |
-| `codegen_amd64_emit_call.jhyy` | 2768 | 调用 / 实参 / 返回值 / volatile |
-| `codegen_amd64_emit_ctrl.jhyy` | 841 | 序言 / 尾声 / 跳转 / 帧尺寸 |
-| `codegen_amd64_emit_mem.jhyy` | 822 | 访存 / load / store / alloc |
-| `codegen_amd64_emit_sse.jhyy` | 400 | 浮点发射 |
-| `codegen_amd64_state.jhyy` | 2549 | 发射状态机（temp 表 / 槽位 / 帧） |
-| `codegen_amd64_peephole.jhyy` | 797 | peephole 折叠（**4096 字节上限**是已知限制） |
-| `codegen_amd64_regalloc.jhyy` | 972 | XMM 寄存器分配（**已实现但未接** —— `regalloc_init` / `regalloc_run` 被注释掉） |
-| `codegen_amd64_rcache.jhyy` | 670 | **v4.4.0 阶段一**：通用寄存器缓存（位置映射 + 前瞻窗口）—— **已接进调度，但默认关** ⇒ 产物逐字节不变 |
-| `codegen_amd64_xmm_argalloc.jhyy` | 267 | XMM 实参分配 |
+| 文件 | 职责 |
+|---|---|
+| `codegen.jhyy` | AST → IL 文本（前端到中间表示的主干） |
+| `codegen_amd64.jhyy` | 后端编排（in-mem / file-path 两条入口） |
+| `codegen_amd64_inmem.jhyy` | 内存内 7 步编排：`lex_il` → `regalloc_clear_global` → `parse_and_emit` → `peephole_fold_with_len` → 写 `.s` |
+| `codegen_amd64_lexer.jhyy` | IL 文本 → `ILToken[]` |
+| `codegen_amd64_emit_call.jhyy` | 调用 / 实参 / 返回值 / volatile |
+| `codegen_amd64_emit_ctrl.jhyy` | 序言 / 尾声 / 跳转 / 帧尺寸 |
+| `codegen_amd64_emit_mem.jhyy` | 访存 / load / store / alloc |
+| `codegen_amd64_emit_sse.jhyy` | 浮点发射 |
+| `codegen_amd64_state.jhyy` | 发射状态机（temp 表 / 槽位 / 帧） |
+| `codegen_amd64_peephole.jhyy` | peephole 折叠（**4096 字节上限**是已知限制） |
+| `codegen_amd64_regalloc.jhyy` | XMM 寄存器分配（**已实现但未接** —— `regalloc_init` / `regalloc_run` 被注释掉） |
+| `codegen_amd64_rcache.jhyy` | **v4.4.0 阶段一**：通用寄存器缓存（位置映射 + 前瞻窗口）—— **已接进调度，但默认关** ⇒ 产物逐字节不变 |
+| `codegen_amd64_xmm_argalloc.jhyy` | XMM 实参分配 |
 
 ### ABI
 
-| 文件 | 行数 | 职责 |
-|---|---:|---|
-| `abi_amd64_win.jhyy` | 313 | Windows x64 调用约定 |
-| `abi_amd64_win_freestanding.jhyy` | 93 | UEFI / 裸机 |
-| `abi_amd64_sysv.jhyy` | 584 | SysV ABI（8-class §A.4 分类 + sret helper） |
-| `abi_amd64_sysv_freestanding.jhyy` | 88 | SysV freestanding |
+| 文件 | 职责 |
+|---|---|
+| `abi_amd64_win.jhyy` | Windows x64 调用约定 |
+| `abi_amd64_win_freestanding.jhyy` | UEFI / 裸机 |
+| `abi_amd64_sysv.jhyy` | SysV ABI（8-class §A.4 分类 + sret helper） |
+| `abi_amd64_sysv_freestanding.jhyy` | SysV freestanding |
 
 ### 其它
 
-| 文件 | 行数 | 职责 |
-|---|---:|---|
-| `main.jhyy` | 2054 | CLI 入口（`compile` / `build` / `run` / `dump`） |
-| `codegen_amd64_peephole.jhyy` | 797 | （见上） |
-| `std/*.jhyy` | 8 个模块 | `mem` `fmt` `io` `math` `string` `vec` `os` `arena` |
+| 文件 | 职责 |
+|---|---|
+| `main.jhyy` | CLI 入口（`compile` / `build` / `run` / `dump`） |
+| `codegen_amd64_peephole.jhyy` | （见上） |
+| `std/*.jhyy` | **8 个模块**：`mem` `fmt` `io` `math` `string` `vec` `os` `arena` |
 
 ---
 
@@ -111,6 +116,7 @@ KIND_REF         &T / &mut T
 KIND_FUNC        (T1, T2) -> R
 KIND_ALIAS       type X = ...
 KIND_VOID        ()
+KIND_UNRESOLVED  （sema 未解析出来的类型；不是用户可写的类型）
 ```
 
 IR 宽度字母（`data_qt_of`）：`b`(i8/u8/bool) · `h`(i16/u16) · `w`(i32/u32) ·

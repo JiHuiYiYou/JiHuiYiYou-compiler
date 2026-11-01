@@ -209,7 +209,10 @@ temp 编号 ⇒ 自举产物行为漂移**。字符串字面量改动是安全�
 | `compiler/tests/bootstrap/fixed_point.sh` | 跨代 byte-equal |
 | `compiler/tests/bootstrap/closure_check.sh` | v2.s == v3.s |
 | `python scripts/dev/bump_version.py check` | 版本零漂移（覆盖 8 处，含两份 README 徽章） |
-| `python scripts/dev/docs_facts_check.py` | 文档里的事实与现实对拍 |
+| `python scripts/dev/docs_facts_check.py` | 文档里的事实与现实对拍（链接 / 反引号裸路径 / `§ N.M` 章节引用 / 台账正文 / `feedback_*` 代号索引） |
+| `python scripts/dev/check_spec_consistency.py` | 三份规范的 `Cap<T>` wire 布局一致（含 lang-spec 自带构造示例的独立佐证） |
+| `python scripts/dev/check_binary_format_layout.py` | `.jhyynb` 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding |
+| `python scripts/dev/check_arch_claims.py` | `architecture.md` 的结构性断言（模块清单 / NodeKind 个数 / 「被注释掉」/「默认关」/ 4096 上限）与源码一致 |
 
 工具链侧的门：
 
