@@ -36,13 +36,19 @@
 | 门 | 值 |
 |---|---|
 | `python regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP**（281 total） |
-| 断言强度审计 | 扫描 281 · 可跑 261 · 真断言 201 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 281 · 可跑 261 · 真断言 201 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
 | `compiler/tests/bootstrap/artifact_checks.sh` | **17 道**（`check_*` 函数数）· 0 FAIL |
 | `compiler/tests/bootstrap/fixed_point.sh` | N=10 跨代 byte-equal 全绿（`.il` 与 `.s`；门数由脚本内部计数，不在此声明） |
 | `compiler/tests/bootstrap/closure_check.sh` | PASS（v2.s == v3.s，逐字节相同） |
 | 自举闭环 | `make` **迭代到不动点** —— 生成的 `.s` 跨代逐字节相同 |
 | 版本零漂移 | `python scripts/dev/bump_version.py check` —— 覆盖 8 处（含两份 README 的徽章） |
-| 文档事实对拍 | `python scripts/dev/docs_facts_check.py` |
+| 文档事实对拍 | `python scripts/dev/docs_facts_check.py` —— 事实/链接/反引号裸路径/`§ N.M` 章节引用/台账正文/`feedback_*` 代号索引 |
+| 三规范一致性 | `python scripts/dev/check_spec_consistency.py` —— 三份规范的 `Cap<T>` wire 布局一致 |
+| `.jhyynb` 布局算术 | `python scripts/dev/check_binary_format_layout.py` —— 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding |
+| 架构断言 | `python scripts/dev/check_arch_claims.py` —— `architecture.md` 的结构性断言与源码一致 |
+
+> **本表是「门」的完整清单** —— `CONTRIBUTING.md` 让读者来这里找。
+> **接进 CI 的门必须在这里登记**（门 `docs_facts_check.py` 的第 J 项查这条）。
 
 ---
 

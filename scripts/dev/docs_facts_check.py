@@ -19,6 +19,7 @@
 | G | 台账**正文**解析:5 态枚举 / per-status 计数 / 索引↔正文状态一致 | 零 |
 | H | **反引号里的裸路径**指向真实存在的文件(另一类引用面 —— 见 `check_backtick_paths`) | 秒级 |
 | I | **`§ N.M` 章节引用**指向真实存在的章节(第三类引用面 —— 见 `check_section_refs`) | 秒级 |
+| J | **CI 里跑的门都在 FACTS.md § 2 的门清单里登记**(清单自维护) | 零 |
 
 **退出码**:0 = 全绿;1 = 有漂移(逐条列出)。
 """
@@ -676,6 +677,32 @@ def check_facts_links() -> None:
 
 
 # --------------------------------------------------------------------------
+# J. CI 里跑的门，必须在 FACTS.md § 2 登记
+# --------------------------------------------------------------------------
+# **为什么**:FACTS.md § 2 是「门」的**完整清单**（`CONTRIBUTING.md` 明说让读者
+# 去那里找）⇒ 少登记一道门,读者就少跑一道。
+# 2026-11-01 实测:CI 跑 6 个 `scripts/dev/*.py` 门,FACTS.md 只点名了 2 个
+# (`bump_version` / `docs_facts_check`) ⇒ **另外 4 个是「有门但清单里没有」**。
+#
+# 口径:**以 CI 为准** —— CI 调用的 `scripts/dev/*.py` 就是门;
+# 非门脚本(`regalloc_reference.py` 对拍工具、一次性重建脚本、bench/build/install/test 目录)
+# 不在 CI 里 ⇒ 不要求登记。
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def check_gate_registry() -> None:
+    if not CI.is_file() or not FACTS.is_file():
+        return
+    ci = read(CI)
+    facts = read(FACTS)
+    gates = set(re.findall(r"scripts/dev/([a-z_0-9]+\.py)", ci))
+    for g in sorted(gates):
+        if g not in facts:
+            fail(f"CI 跑了 `scripts/dev/{g}`，但 FACTS.md § 2 的门清单里没有它 "
+                 f"—— CONTRIBUTING.md 让读者去 FACTS.md 找门的完整清单")
+
+
+# --------------------------------------------------------------------------
 def main() -> int:
     print("[docs_facts_check] 检查文档事实与现实是否一致……\n")
     check_version()
@@ -689,6 +716,7 @@ def main() -> int:
     check_backtick_paths()
     check_code_index()
     check_section_refs()
+    check_gate_registry()
     check_facts_links()
 
     if problems:
