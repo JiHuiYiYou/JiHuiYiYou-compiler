@@ -104,9 +104,30 @@ offset  size  field        type
 它不只是「一个整数」—— **slot 语义只有在 CNode 与 depth 共同解释时才有意义**；
 这是典型 seL4 CSpace 思路，而不是单纯句柄表。
 
+#### `cnode_idx` 的编号域 —— 已定：**全局逻辑编号**
+
+⚠️ 本仓曾有**两种读法**，且互相矛盾（用户 2026-11-01 指出）：
+§2.1 的表读起来像**全局**（内核把 2^32 空间划分给各 CNode），
+§3.1 的 `depth` 语义读起来像**每 CNode 内编号**。**两种读法对 IPC 的实现完全不同** ⇒ 必须先定。
+
+⇒ **定为全局**。理由（不是偏好，是被 wire 布局逼出来的）：
+
+1. **cap 里没有「哪个 CNode」的字段** —— 8 字节已占满
+   （`cnode_idx@0 · depth@4 · gen@5 · rights@6`）。
+   若 `cnode_idx` 是每 CNode 内编号，cap 就**无法指明自己属于哪个 CNode**
+   ⇒ `gen`（「**只在同一个 CNode 槽内有意义**」§3.5）与
+   `depth`（「**当前** CNode 根到 slot 的层级数」§3.1）**都失去所指**。
+2. 全局读法下，内核的 **CNode 目录**负责 `全局编号 → (CNode, 局部索引)`；
+   `depth` 相对**拥有该 slot 的那个 CNode** 的根计算；
+   `gen` 是**该 CNode 内**该 slot 的复用代数。
+3. 与 §3.2 的关系表**一致**：「cap slot → CNode：当前 slot 的**容器与索引**」
+   = 目录项（容器 + 局部索引），**不是**「cap 自带 CNode 身份」。
+
+⇒ **跨 CSpace 交付时 `cnode_idx` / `depth` / `gen` 三个字段全要改写** —— 见 §2.2 的改写表。
+
 | 已锁定事实 | 二进制含义 | 对内核设计的影响 |
 |---|---|---|
-| `cnode_idx:u32` | 至多 2^32 个逻辑 slot 编号 | slot 空间不必连续；内核可划分 CNode、保留特殊索引 |
+| `cnode_idx:u32` | 至多 2^32 个**全局**逻辑 slot 编号（**编号域已定：全局** —— 见下） | slot 空间不必连续；内核用 **CNode 目录**把 2^32 空间划给各 CNode、保留特殊索引 |
 | `depth:u8` | 从当前 CNode 根起至多 256 层 | 撤销链长度有静态界，**但不能单靠它识别对象身份或兄弟关系** |
 | `rights:u16`，低 3 位 R/W/G | 每 cap 携带授权标志 | 权限检查在**内核对象访问点统一执行**，而不是由服务策略散落决定 |
 | **`gen:u8`** | **slot 复用代数**（slot generation 方案已定） | 承载「这个 cap 还活着吗」⇒ slot 复用 = UAF 且**静默越权** |
@@ -157,7 +178,24 @@ msg_tag:u32 · handler_fn_off:u32 · cap_off_count:u16 · cap_off_table_off:u32
 ```
 
 它引用 cap-offset 表的 wire 格式 `{n_caps:u16, _pad0:u16, cap_offsets:[]u16}`（**binary-format § 8 `CapOffsetTable`**）；
-**内核收到 IPC 后按 `cap_offsets` 原地改写 `cnode_idx` 以避免 deep-copy**。
+**内核收到 IPC 后按 `cap_offsets` 原地改写 cap 的 slot 字段以避免 deep-copy**。
+
+#### ⚠️ 跨 CSpace 交付要改写**三个**字段，不只是 `cnode_idx`
+
+原文只写了「原地改写 `cnode_idx`」—— 但跨 CSpace 交付同时是**一次派生 + 一次换根**，
+另外两个字段的语义也跟着变了（用户 2026-11-01 指出）：
+
+| 字段 | 发送方的值 | 接收方必须改成 | 为什么 |
+|---|---|---|---|
+| `cnode_idx` | sender CNode 的全局 slot | **receiver CNode 新分配的全局 slot** | slot 空间是每个 CNode 自己的（§2.1 编号域已定） |
+| **`depth`** | sender CNode 根起算的层级数 | **receiver CNode 根起算的层级数** | depth 是「**当前** CNode 根到 slot 的层级数」（§3.1）—— 「当前根」是相对的，换了 CSpace 原值就失效 |
+| **`gen`** | sender 槽的复用代数 | **目标 CNode 所有者分配的代数**（**不继承**） | generation **只在同一个 CNode 槽内有意义**（§3.5）⇒ 跨 CNode 时由目标所有者决定；写错会让「跨 CNode 混淆」的防护**看起来存在实则无效** |
+| `rights` | 发送方的权限位 | **不变**（移动语义，见 §8.4） | cap 是**移动**不是复制 ⇒ 权限随 cap 走；类型不变 ⇒ 类型允许集也不变（§3.3） |
+
+⇒ **只改 `cnode_idx` 会让接收方拿到「发送方槽的代数 / 发送方根的深度 + 新槽的索引」**
+⇒ 正好落在 §2.1 那句「slot 复用 = UAF 且**静默越权**」上。
+⇒ **内核的重写是三个字段一起改**；编译器侧的契约检查（§8.3 层 1–2）只管
+「message struct 里的 `Cap<T>` 槽位合法」，**改写本身是内核的运行时动作**。
 
 > 原地改写是有价值的性能决定，但它也意味着 **message struct 与 cap_offsets 的布局错配
 > 会变成静默内存破坏**。
@@ -248,6 +286,19 @@ JHYY 至少应引入四种对象关系：
 
 ⇒ 这是**运行时不变量**，必须由 `cap_derive` 系统调用强制。
 **语言层的编译期检查是加速带，不是替代品。**
+
+⚠️ **root 那一半需要「type_tag → rights 允许集」这张裁判表**（P4a / OS-13 的交付物）：
+`derive` 的单调收缩只约束**后代** ⇒ **root 的 rights 得有别的约束**。
+而 §2.2 写明 cap_init 的 `rights` 由**二进制自报**、内核「分配 cap 时直接 copy」
+⇒ 今天一个二进制可以声明 `rights = 0xFFFF`（R|W|G + 13 个未定义位），内核照抄
+⇒ **§3.3 的不变量对 root 就是纸面的**。
+
+⇒ **定案**：P4a 产出的是**每个 type_tag 的 rights 允许集**（裁判表），
+**不是**「每个 cap 的初始 rights 值」（那等于继续让用户自报）。
+⇒ 内核按 `type_tag` 查表，**二进制自报的 rights 超出允许集 ⇒ 拒绝加载**（不是静默截断）。
+⇒ **13 个未定义位是保留位，必须为 0**。
+（区分：「初始 rights」是**单个 cap** 的属性（cap_init 表项自报，且必须 ⊆ 允许集）；
+**允许集**才是这张表要产出的东西。两者都要，不能互相替代。）
 
 **G 不应被允许由 R/W 派生得到**，除非内核显式执行「升级需要授权对象」的协议 ——
 grant 是权限的放大器，允许 `RW → RWG` 则单调收缩形同虚设。
@@ -804,7 +855,7 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 | **v4.12.3** | OS-10 | const generic | —— | 3+ const generic 用例 PASS | [`docs/plans/v4/v4.12.3-plan.md`](../plans/v4/v4.12.3-plan.md) |
 | **v4.12.5** | OS-11 | 一阶 HKT | —— | 3+ HKT 用例 PASS | [`docs/plans/v4/v4.12.5-plan.md`](../plans/v4/v4.12.5-plan.md) |
 | **v4.13** | OS-12 | 完整效果格 + `holds(L)` 锁序图 + `ptr<user>`/`ptr<kernel>` | **per-CPU 备份栈**（从栈策略划出，归效果系统） | 无反向锁边；误用给出确定错误码 | [`docs/plans/v4/v4.13-plan.md`](../plans/v4/v4.13-plan.md) |
-| **v4.13.5** | OS-13 | **capability objects manifest**（本仓交付） | **哪些对象类型存在** + 每类的 rights 初集 / owner / init phase / **revoke 同步性** | 每个 type_tag 逐个有 owner 与 rights 初集；revoke 语义写明；slot version 方案定 | [`docs/plans/v4/v4.13.5-plan.md`](../plans/v4/v4.13.5-plan.md) |
+| **v4.13.5** | OS-13 | **capability objects manifest**（本仓交付） | **哪些对象类型存在** + 每类的 **rights 允许集（裁判表）** / owner / init phase / **revoke 同步性** | 每个 type_tag 逐个有 owner 与 **rights 允许集**；二进制自报 rights 超出允许集 ⇒ 拒绝加载；revoke 语义写明；slot version 方案定 | [`docs/plans/v4/v4.13.5-plan.md`](../plans/v4/v4.13.5-plan.md) |
 | **v4.14** | OS-14 | `Cap<T>` 真 T + rights 参数化 + `ptr<phys>` 派生 + `#[ipc_handler]` + contract section + `.jhyynb` 实装 | **`.jhyynb` loader 实现**（验证 contract，验证失败拒绝加载） | `Cap<i32>` ≠ `Cap<i64>`；整数不能 `as ptr<phys>`；IPC tag/layout/slot 全检查；contract 被 loader 校验 | [`docs/plans/v4/v4.14-plan.md`](../plans/v4/v4.14-plan.md) |
 | **v4.14.5** | OS-15 | `Rcu<T>` / `PerCpu<T>` / 侵入式容器 | **grace period 语义 + `gs:` 段布局** | 一个内核链表 + RCU 读侧能用 JHYY 自然表达，无需 unsafe | [`docs/plans/v4/v4.14.5-plan.md`](../plans/v4/v4.14.5-plan.md) |
 | **v4.15** | OS-16 | KASAN / KMSAN / KCFI / shadow stack / WCET class / panic 分类 | **shadow region 布局 + fault 分类表** | 插桩前后语义一致；≥20 个注入 bug 被捕获 | [`docs/plans/v4/v4.15-plan.md`](../plans/v4/v4.15-plan.md) |

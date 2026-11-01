@@ -167,7 +167,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | **P2.75 效果最小集** | 先拦最高危上下文错误 | `with { irq_ctx }` / `with { may_sleep }` 语法 + **调用点直接禁止**（不做全推导、不做多态效果） | P2.5 | `irq_ctx` 内调用 `sleep()` / `alloc()` 编译失败 **（含经 `fn` 指针的间接调用 —— `fn` 类型的效果默认格顶 ⇒ 洗不掉）** | 持锁睡眠、PF 路径分配继续靠 review |
 | **P3 语言自洽** | 让内核 API 能用普通语言写 | 块表达式；`fn(...)` 类型位置（**带效果行，默认 = 格顶：全部效果**）；闭包捕获；`()` 类型位置；`defer` 覆盖末表达式；**结构化内联汇编**（类型化操作数、显式 clobber、效果签名 —— **默认同样取格顶**） | P2.5 | ① BootState 迁移可写在块内 ② 函数指针可跨模块传递 ③ hot helper 可写成 1–5 行闭包并被 `#[inline]` 展开 ④ `asm!` 块未声明 clobber 即报错 ⑤ **`fn` 指针调用点未申报栈预算 ⇒ 链接期拒绝**（P2 的调用图断言不被间接调用绕过）⑥ **`fn` 指针的效果默认格顶 ⇒ 洗不掉 P2.75 的 `irq_ctx` 禁令** | BootState、热路径内联、回调契约都无法自然表达 |
 | **P3.5 效果骨架** | 完整效果格 | 效果传播；irq/preempt/sleep/alloc 禁止规则；lock class 与有序 acquire/release；`ptr<user>`/`ptr<kernel>` 与地址空间感知别名分析 | P3 + P2.75 | ① `irq_ctx` 内调用 `may_sleep`/`may_alloc` 被拒 ② 锁序图无环 ③ 误用给出确定错误码 ④ `ptr<user>` 直接解引用编译失败 | 持锁睡眠、PF 路径分配继续靠 review |
-| **P4a 对象模型冻结** | 纸面冻结 capability 语义 | capability objects manifest：type_tag 白名单、初始 rights、生命周期 owner、cap init phase、version/provenance；**逐类决定 revoke 同步性** | P2.5 | ① 每个 type_tag 逐个有 owner 与 rights 初集 ② revoke 语义（是否同步、是否传播、是否需 quiesce）写明 ③ slot version 方案确定 | `Cap<T>` 改完还要再改一次（第二次 ABI break） |
+| **P4a 对象模型冻结** | 纸面冻结 capability 语义 | capability objects manifest：type_tag 白名单、**每个 type_tag 的 rights 允许集（裁判表）**、生命周期 owner、cap init phase、version/provenance；**逐类决定 revoke 同步性** | P2.5 | ① 每个 type_tag 逐个有 owner 与 **rights 允许集**（**不是**「每个 cap 的初始 rights 值」—— 后者等于继续让二进制自报）② revoke 语义（是否同步、是否传播、是否需 quiesce）写明 ③ slot version 方案确定 | `Cap<T>` 改完还要再改一次（第二次 ABI break） |
 | **P4b 能力类型化** | 授权链从 wire 提升为类型 | `Cap<T>` 真 T；8 个内置 rights 类型；`derive::<DstR>()` 子集检查；`ptr<phys>`/`ptr<io>`；derive API；`#[ipc_handler]` 全契约；cap_offsets 位图；contract section；`.jhyynb` 实装 | P4a、P3.5 | ① `Cap<i32>` ≠ `Cap<i64>` ② **整数不能 `as` 成 `ptr<phys>`** ③ IPC tag/layout/slot 全检查 ④ 最小 cap init + frame map + IPC demo 闭环 ⑤ contract 被 loader 校验 | 语言无法阻止 frame/endpoint/file 混用与物理地址越权 |
 | **P4c 内核数据结构原语** | 内核能用这门语言表达出来 | `Rcu<T>`（grace period 类型）；`PerCpu<T>`（`gs:` 段寻址）；侵入式容器（list_head 等价） | P3（与 P4b **正交**，可并行） | 一个内核链表 + RCU 读侧能用 JHYY 自然表达，无需 unsafe | 内核只能靠反复 unsafe 包装 `list_head` / RCU 惯用法 |
 | **P4.5 可信工具链** | 输出可审计事实 | 插桩 pass 族（KASAN / KMSAN / KCFI / shadow stack 对应物）；WCET class；panic 分类；layout 差分测试；per-function section / 冷热分离 / frame pointer 或 ORC unwind | P4b | ① 注入 ≥20 个 bug 被插桩捕获 ② KCFI 对类型不匹配的间接调用报错 ③ 所有契约有 schema + producer version | 无栈展开下故障与越界更难恢复 |
@@ -467,7 +467,7 @@ contract section 必须有 **version、producer ID、source hash、compatibility
 | 4 | `ptr<user>`/`kernel`/`phys`/`io` | `AddressSpaceChecker` | OS-12 / OS-14 | `v4.13-plan.md` / `v4.14-plan.md` | 任务 3 / 任务 4 |
 | 5 | `ptr<phys>` 从 `Cap<Frame>` 派生 | `AddressSpaceChecker` + `CapTypeResolver` | OS-14 | `v4.14-plan.md` | 任务 4 |
 | 6 | `#[ipc_handler]` 全契约 | `IpcContractChecker` | OS-14 | `v4.14-plan.md` | 任务 6 |
-| 7 | capability 生命周期 / 销毁安全 | —（OS 侧对象模型；编译器只出 facts） | OS-13 | `v4.13.5-plan.md` | 任务 3 / 任务 4 |
+| 7 | capability 生命周期 / 销毁安全 | —（OS 侧对象模型；编译器只出 facts） | OS-13 | `v4.13.5-plan.md` | 任务 2（rights 允许集裁判表）/ 任务 3 / 任务 4 |
 | 8 | 栈深度编译期断言 | `StackBoundsAnalysis` + `FactLinkVerifier` | OS-2 / OS-4 | `v4.7-plan.md` / `v4.8.5-plan.md` | 任务 1–3 / 任务 3 |
 | 9 | `may_sleep`/`irq_ctx`/`preempt_disabled` | `EffectPropagation` | OS-7 / OS-12 | `v4.10.5-plan.md` / `v4.13-plan.md` | 任务 2 / 任务 1 |
 | 10 | `holds(L)` / `may_alloc` | `EffectPropagation` + `LockOrderBuilder` | OS-12 | `v4.13-plan.md` | 任务 1 / 任务 2 |
