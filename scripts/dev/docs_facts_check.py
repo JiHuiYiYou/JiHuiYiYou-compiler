@@ -417,11 +417,10 @@ def _gitignored(paths: list[str]) -> set[str]:
 def _ever_existed() -> set[str]:
     """本仓历史上**曾经存在过**的所有路径（`git log --all --diff-filter=A --name-only`）。
 
-    用来分辨两种「不存在的路径」：
-    - **曾经存在、后来被删/改名** ⇒ **历史引用**（文档在讲「当初有这个文件」）⇒ 不是错
-    - **从未存在过** ⇒ **打错的路径** ⇒ 判红
-    例：`docs/plans/v4/backlog.md` 存在过（2026-10 被删）⇒ 跳过；
-        `scripts/dev/artifact_checks.sh` 从未存在过 ⇒ 真错。
+    ⚠️ **不要用这个做判红依据** —— 它依赖克隆深度：CI 的 `actions/checkout@v4`
+    默认是 **depth 1 的浅克隆** ⇒ `git log --all` 只能看到 tip 那一个 commit ⇒
+    「曾存在过」的路径全都不在集合里 ⇒ 同一份代码本地绿、CI 红。
+    ⇒ 门的行为**不能**随克隆深度变化。本函数只用于**报告**（信息），不参与判红。
     """
     import subprocess
     try:
@@ -437,7 +436,7 @@ def _ever_existed() -> set[str]:
 def check_backtick_paths() -> None:
     """反引号里的裸路径是否指向真实存在的文件（口径见上面的注释）。"""
     hist = 0
-    cands: list[tuple[Path, str, str]] = []   # (文件, 相对仓根的候选路径, token)
+    cands: list[tuple[Path, list[str], str]] = []   # (文件, 候选路径(仓根相对), token)
     for p in all_md():
         rel = p.relative_to(ROOT).as_posix()
         if rel.startswith("docs/archive/"):
@@ -456,29 +455,30 @@ def check_backtick_paths() -> None:
                 continue
             if (p.parent / tok).exists() or (ROOT / tok).exists():
                 continue
-            # 相对当前文档目录解析出的候选（仓根相对）
+            # 两种基准都要试：**仓根相对**（本仓文档最常见的写法）与
+            # **相对当前文档目录**。只算一种会把另一种判成「不存在」。
+            cands_list = [tok]
             try:
-                cand = (p.parent / tok).resolve().relative_to(ROOT.resolve()).as_posix()
+                rel_doc = (p.parent / tok).resolve().relative_to(ROOT.resolve()).as_posix()
+                if rel_doc != tok:
+                    cands_list.append(rel_doc)
             except (ValueError, OSError):
-                cand = tok
-            cands.append((p, cand, tok))
+                pass
+            cands.append((p, cands_list, tok))
 
-    ignored = _gitignored([c for _, c, _ in cands])
-    existed = _ever_existed()
-    for p, cand, tok in cands:
+    flat = [c for _, cs, _ in cands for c in cs]
+    ignored = _gitignored(flat)
+    for p, cands_list, tok in cands:
         rel = p.relative_to(ROOT).as_posix()
-        if cand in ignored or tok in ignored:
-            continue                       # 构建产物
-        if cand in existed or tok in existed:
-            hist += 1
-            continue                       # 历史引用（曾经存在过）
+        if any(c in ignored for c in cands_list):
+            continue                       # 构建产物（gitignore 的）
         if rel == LEDGER_REL:
             hist += 1
-            continue
+            continue                       # 台账 = 审计轨迹（条目不删不改）
         fail(f"{rel}: 反引号里的裸路径不存在 → {tok}")
     if hist:
-        print(f"  （另有 {hist} 处反引号路径指向**已删除/已改名**的文件 —— 按「归档与历史条目"
-              f"不改」的约定属历史引用，不判红）")
+        print(f"  （台账 workarounds.md 另有 {hist} 处引用指向已删除文件 —— 按「条目不删不改」"
+              f"的审计轨迹约定豁免，不判红）")
 
 
 # --------------------------------------------------------------------------
