@@ -49,7 +49,11 @@ jhyy_OS kernel 走 `kernel.efi`(PE/COFF,被 UEFI 协议锁,per **D1** 2026-08-04
   > [docs/coordination/JHYY_OS侧设计终版.md](../coordination/JHYY_OS侧设计终版.md) § 3.5。
   > **本字段与 lang-spec § 2.6 同源;改动须三处同步** —— 门:
   > `scripts/dev/check_spec_consistency.py`。
-- **D16**:`#[ipc_handler]` cap-offset 表 = `{msg_tag:u32, n_caps:u16, cap_offsets:[u16;n]}`(16B header 之后,payload 之前)
+- **D16**:`#[ipc_handler]` cap-offset 表 —— **权威定义见本文 § 8**（`IpcDispatchEntry`
+  `{msg_tag:u32, handler_fn_off:u32, cap_off_count:u16, cap_off_table_off:u32}` +
+  `CapOffsetTable` `{n_caps:u16, _pad0:u16, cap_offsets:[]u16}`，在 `.rodata.cap_offsets` 段内）。
+  ⚠️ 本行早前写作 `{msg_tag:u32, n_caps:u16, cap_offsets:[u16;n]}` —— **与 § 8 不一致**：
+  § 8 把 `msg_tag` 放进 dispatch 表项、`cap_offsets` 放进独立子结构并加了 `_pad0` 对齐 ⇒ 以 § 8 为准
 - **D40**:wire-format 表达规则 — 链表 = `*T`(8B),数组 = `[*]T`(16B ptr+len)
 - **D41**:jhyy 无 `packed` / `repr(...)`,所有 wire-format struct 必须自然对齐 + 显式 `_pad` 字段
 - **D-GUI-12**(2026-09-01):M3 syscall ABI = **MS x64 函数指针 + `#[naked]` interrupt**,**不**走 Linux `syscall` 指令;`.jhyynb` 不需要 syscall 指令编码元数据
@@ -510,7 +514,7 @@ struct RelocEntry {                         // 8-aligned
 ## 18. 验证(实施前后)
 
 **设计层面**(实装前):
-1. **ABI 一致性**:§ 16 对位表逐项检查,每个 D-lock 都有对应字段
+1. **ABI 一致性**:本文 § 16 对位表逐项检查,每个 D-lock 都有对应字段
 2. **size 算术**:每个 struct 按**自然对齐逐字段**算(中间的隐式 padding 必须写成显式 `_pad*` 字段);Header 总 **120B**
    ⇒ 由门 `scripts/dev/check_binary_format_layout.py` 守着(它按自然对齐重算并校验声明尺寸 / alignof / 无隐式 padding)
 3. **cap_init wire format 跟 OS cnode byte-equal**:模拟 .jhyynb § 7 + OS cnode 内存,逐字节 diff

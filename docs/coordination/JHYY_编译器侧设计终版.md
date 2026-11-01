@@ -9,6 +9,7 @@
 > **事实基线纪律**：唯一实现事实来源是三份规范（lang-spec v4.0.0 / abi v4.0.0 /
 > binary-format v1.0.0）+ 源码 + 门脚本。凡三者均未记载者标「**待确认**」，不做推测性填充。
 > 本文中所有 `file:line` 引用均可回查。
+> ⚠️ **binary-format v1.0.0 是设计稿，未实装**（abi §12.10）⇒ 凡只由它记载的结论都注明来源。
 >
 > **本文取代**（原 6 份，内容保留在 git 历史）：
 > `JHYY_决策总纲.md` · `JHYY_编译器全阶段方向与路线图.md` · `JHYY_Cap类型语义草案.md` ·
@@ -288,10 +289,10 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | `addr_space` | user/kernel/phys/io | codegen、codegen 验证 |
 | `effects` | may_sleep/irq/preempt/alloc | effect pass、contract |
 | `locks` | ordered lock classes | lock order pass |
-| `state` | boot state | state pass |
+| `state` | boot state | `BootStateChecker` |
 | `layout_hash` | 字段顺序/size/align 的稳定 hash | IPC/ABI facts |
 | `stack` | 本地帧上界 / 调用边 | stack analysis |
-| `naked` | 手写栈预算、clobber、preserve | asm verifier |
+| `naked` | 手写栈预算、clobber、preserve | `AsmContractChecker` |
 
 ### 4.3 IL / 中端
 
@@ -310,8 +311,10 @@ SSA 已有的前提下，允许 `Cap<T>`、效果与栈槽**不进入 SSA 值集
 **中端应增加的正确性 pass**（优化 pass 默认关闭，正确性 pass 默认开启；
 每个优化必须声明它保留哪些 metadata）：
 
-`ComputeStackBounds` · `EffectPropagation` · `LockOrderConstruction` · `CapDerivationCheck` ·
-`LayoutFingerprinting` · `AsmContractCheck` · `PanicReachability` · `ContractEmission`
+`StackBoundsAnalysis` · `EffectPropagation` · `LockOrderBuilder` · `CapTypeResolver` ·
+`LayoutFingerprinter` · `AsmContractChecker` · `PanicReachability` · `ContractEmitter`
+
+**pass 名以 §4.4 的表为准**（同一套名字，§4.3 只是从中挑出「中端应增加的正确性 pass」）。
 
 **cap derivation 应由 source cap 的「origin node」表达**：每次 derive / map / borrow 创建节点；
 rights 是节点上的常量属性。代码生成把 8 字节 wire 写入位置或调用参数，但编译期分析只证明类型与子集关系。
@@ -348,6 +351,8 @@ rights 是节点上的常量属性。代码生成把 8 字节 wire 写入位置�
 | `CapOffsetsBitmap` | IL/asm emission | slot bitmap、type/rights allowlist | cap 字段、handler | IPC | 中 | 函数级 | **OS-14** |
 | `LinearScanRegAlloc` | SSA/CFG | 分配、spill、callee-save | 栈上界、ABI class | 栈/访存 | 高 | 函数级 | **v4.4.0 阶段一已落地**（受限线性扫描：同基本块 + 无 call + 整数类型；5 个 callee-saved GPR；池满退化成栈槽）；**阶段二 = emit 层消费寄存器** |
 | `AsmClosureInliner` | IL | inline 决策、带上下文 clone | `fn` 类型、块/捕获 | 热路径 | 中 | 是 | **OS-6** |
+| `AsmContractChecker` | typed IL | 校验 `asm!`/fence 的 clobber、volatile、栈影响与 `#[naked]` 声明一致 | `asm!` 块的 clobber 列表、`naked` 契约 | ABI 破坏 | 中 | 是 | **OS-6 / OS-14** |
+| `BootStateChecker` | HIR | boot state 迁移合法性（typestate 线性序） | 块表达式、`state` 属性 | 启动顺序 | 中 | 是 | **OS-6 / OS-14** |
 | `KasanShadow` | IL | load/store 插桩与红区 | address space、unsafe 边界 | 安全测试 | 高 | 函数级 | **OS-16** |
 | `KmsanUninit` | SSA IL | 未初始化来源传播 | def/use | 安全测试 | 高 | 函数级 | **OS-16** |
 | `KcfiTypeid` | IL/asm | 函数指针 type id 校验 | 函数类型 | 间接调用 | 高 | 是 | **OS-16** |
@@ -391,6 +396,12 @@ target tuple `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv
 
 **`.jhyynb` 的 contract section（kind=9）**：
 
+> ⚠️ **kind=9 不在 binary-format 里** —— binary-format § 4 的 section kind 只分配到 0–7
+> （`debug_group` = 6），**binary-format § 17「Open」第 5 条明说「Section kind 9-255 分配策略」是未决问题**。
+> ⇒ 下面的 kind=9 与 8 个子节是**本文的提案**（OS 侧 §2.2 同样把它标成「**建议新增**」），
+> **不是 binary-format 已记载的结论**；binary-format 侧记的是 § 12 `debug_group` 里的
+> `jhyy_ipc` / `jhyy_region` / `jhyy_cap`。
+
 | Contract 子节 | 内容 | 消费者 |
 |---|---|---|
 | `stack_table` | per-function frame、call path、recursive flag | loader、线程创建 |
@@ -405,7 +416,7 @@ target tuple `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv
 `debug_group` 适合放可选 source map，**不能承担 loader 语义**。
 若坚持扩展 `debug_group`，至少分 `debug` / `contract` 两级 flag，加载器只验证后者。
 
-> **与 binary-format § 12 的 `jhyy_ipc` / `jhyy_region` / `jhyy_cap` 的分工（已定）**：
+> **与 binary-format § 12 的 `jhyy_ipc` / `jhyy_region` / `jhyy_cap` 的分工（本文定案，未进 binary-format）**：
 > 那三项描述的是 **IPC 注册元数据 / region 图 / provenance seed** —— 属**可丢弃的调试信息**
 > ⇒ 留在 `debug_group`；**loader 必须验证的**那些事实（栈表 / 效果表 / 锁序 / cap_map /
 > layout / naked / termination / wcet）⇒ 走 **contract section (kind=9)**。
@@ -525,7 +536,7 @@ struct CapContract {
 | **Mangling** | `<Base>$<T1>$<T2>` 直接扩展 | 低 |
 | **IL** | `Cap<T,R>` 是 8 字节标量（与 `l` 同承载）⇒ **不新增 IR 概念**，只在类型侧保留标记供后续 pass 消费 | 低 |
 | **后端** | 无特殊处理（8 字节标量走 `l`）；**`ptr<io>` 需要禁止重排/合并/投机的 codegen 标记** ⚠️ **与 v4.4 阶段二有硬接口** | 中 |
-| **链接 / `.jhyynb`** | cap_init 由 `#[cap_constructor]` 或顶层声明生成；`provenance_seed_off` 填充；contract section 输出 capability facts（含 `unsafe_ctor_count`） | 中 |
+| **链接 / `.jhyynb`** | cap_init 由 `#[cap_constructor]` 或顶层声明生成；`provenance_seed_off` 填充；contract section 输出 capability facts（含 `unsafe_ctor_count`）。⚠️ `.jhyynb` 的一切按 **binary-format § 7 / § 8 / § 12（设计稿未实装）** | 中 |
 
 ### 5.2 `ptr<phys>` / `ptr<io>`
 
@@ -607,6 +618,10 @@ fn init_heap(s: BootState<PagingOn>) -> BootState<HeapReady> { ... }
 tag 唯一（或 `service_version+tag` 复合 key 不冲突）；handler 签名与 message/reply struct **双向一致**；
 每个 `Cap<T>` 字段落在合法对齐槽；`cap_offsets` 不重叠、不越界；
 handler 所需的 rights 不超过调用 ABI 可携带范围；调用前后栈与效果合法。
+
+> ⚠️ **当前只有属性名，没有检查**（OS 侧 §10 需求 6「规范当前状态」栏：*仅有属性名*）——
+> 上面 5 项检查**全部未实装**。`cap_offsets` 的 wire 形状按 **binary-format § 8**
+> （`IpcDispatchEntry` + `CapOffsetTable`，**设计稿未实装**）。
 
 ```jhyy
 #[ipc_handler(tag = 0x1001, version = 1, cap_slots = 1)]

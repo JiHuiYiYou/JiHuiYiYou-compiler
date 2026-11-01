@@ -98,7 +98,7 @@ offset  size  field        type
 
 小端序。来源：lang-spec §2.6 与 abi §2.5（**字段表逐字一致**；正文里两处「布局契约」的章节链接指向各自文档，故非全字节相同）。
 ⚠️ binary-format §2 曾记载 `_pad:u8@5` + `rights:u16@6` ⇒ **冲突，已裁决为自然对齐布局**
-`cnode_idx@0 · depth@4 · gen@5 · rights@6`（binary-format 已于 2026-10-31 订正；详见 §3.6）。
+`cnode_idx@0 · depth@4 · gen@5 · rights@6`（binary-format 已于 2026-10-31 订正；详见**本文 §3.6**）。
 
 **三个独立维度**：slot 索引、从 CNode 根出发的层级、权限。
 它不只是「一个整数」—— **slot 语义只有在 CNode 与 depth 共同解释时才有意义**；
@@ -156,7 +156,7 @@ kernel 分配 cap 时直接 copy」）⇒ 详见 binary-format § 7「Cap Init T
 msg_tag:u32 · handler_fn_off:u32 · cap_off_count:u16 · cap_off_table_off:u32
 ```
 
-它引用 cap-offset 表的 wire 格式 `{n_caps:u16, _pad:u16, cap_offsets:[]u16}`；
+它引用 cap-offset 表的 wire 格式 `{n_caps:u16, _pad0:u16, cap_offsets:[]u16}`（**binary-format § 8 `CapOffsetTable`**）；
 **内核收到 IPC 后按 `cap_offsets` 原地改写 `cnode_idx` 以避免 deep-copy**。
 
 > 原地改写是有价值的性能决定，但它也意味着 **message struct 与 cap_offsets 的布局错配
@@ -623,6 +623,9 @@ fn map_into<'f, R>(
 且 SysV 分类器有隐患 ⇒ **message struct 的 ABI 规则必须成为 IPC contract 的一部分**。
 
 ### 8.3 `cap_offsets` 校验至少分四层
+
+> ⚠️ 四层检查**全部未实装** —— `cap_offsets` 的 wire 形状目前只有 **binary-format § 8**
+> （`IpcDispatchEntry` + `CapOffsetTable`）记载，**该 spec 是设计稿**（abi § 12.10）。
 
 1. **编译器**确认每个 `cap_offsets[i]` 位于 message struct 中一个完整 `Cap<T>` 槽
 2. **编译器**生成 cap slot 位图，证明无重叠、无越界
