@@ -445,6 +445,10 @@ kernel_shared 不应允许普通 user process 任意 unmap；cap_namespace 不�
 
 ### 5.2 contract section（kind=9）
 
+> ⚠️ **kind=9 是「建议新增」，不是 binary-format 已记载的结论** ——
+> binary-format § 4 的 section kind 只分配到 0–7，**§ 17「Open」第 5 条明说
+> 「Section kind 9-255 分配策略」是未决问题**（同 § 2.2 的表；编译器侧 § 4.5 有同样的标注）。
+
 **为什么不能用 "debug" 命名承载安全契约**：否则语义等级会被下游误解 ——
 **旧 loader 会把能力栈预算当可选调试信息忽略**。
 
@@ -766,6 +770,9 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 | 20 | WCET/时间预算元数据 | GUI、驱动与中断有响应要求 | 无上界可验证实时路径 | 无 | 编译期元数据 | OS-16 |
 | 21 | provenance/version 语义 | amd64 无 CHERI，软件 slot 可伪造 | slot reuse 与跨进程误解释 | 仅有 padding/seed 线索 | 运行期 + 编译期 | OS-13 / OS-14 |
 | 22 | `asm!` 的寄存器/栈/clobber 契约 | ABI 全 spill 且栈槽仅 8 字节对齐 | 汇编破坏 ABI 假设却无法静态发现 | 有 `asm!`，语义不足 | 编译期 | OS-6 / OS-14 |
+
+**编译器侧落点 ↔ pass ↔ plan 任务的逐条对照**：[`docs/coordination/JHYY_编译器侧设计终版.md`](JHYY_编译器侧设计终版.md) § 4.6
+（五列：需求号 · 编译器侧 pass · OS-N · plan 文件 · 任务号）。
 
 **前四项优先级高到足以阻塞任何 GUI 或用户服务原型**：
 若 `T` 与 rights 不进类型，cap_init 的对象无法映射到类型系统；

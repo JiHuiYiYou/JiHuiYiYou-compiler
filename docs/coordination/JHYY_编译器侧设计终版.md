@@ -347,7 +347,7 @@ rights 是节点上的常量属性。代码生成把 8 字节 wire 写入位置�
 | `LockOrderBuilder` | CFG | 有序类、边、强依赖图 | `LockClass`、acquire/release | 死锁 | 高 | 调用图级 | **OS-12** |
 | `IpcContractChecker` | HIR/IL | tag/handler/layout/cap_offsets | handler、message struct | IPC | 高 | 函数级 | **OS-14** |
 | `NakedInterruptChecker` | IL/asm | 栈预算、clobber、preserve | `#[naked]` 契约 | 中断 | 高 | 是 | **OS-14** |
-| `LayoutFingerprinter` | typed IL | size/align/hash/diff report | 字段与属性 | 布局 | 低 | 是 | **OS-5** |
+| `LayoutFingerprinter` | typed IL | size/align/hash/diff report | 字段与属性 | 布局 | 低 | 是 | **OS-16**（v4.15 任务 8「layout 差分测试」）；「wire struct 布局稳定」本身属 OS-5 |
 | `CapOffsetsBitmap` | IL/asm emission | slot bitmap、type/rights allowlist | cap 字段、handler | IPC | 中 | 函数级 | **OS-14** |
 | `LinearScanRegAlloc` | SSA/CFG | 分配、spill、callee-save | 栈上界、ABI class | 栈/访存 | 高 | 函数级 | **v4.4.0 阶段一已落地**（受限线性扫描：同基本块 + 无 call + 整数类型；5 个 callee-saved GPR；池满退化成栈槽）；**阶段二 = emit 层消费寄存器** |
 | `AsmClosureInliner` | IL | inline 决策、带上下文 clone | `fn` 类型、块/捕获 | 热路径 | 中 | 是 | **OS-6** |
@@ -426,6 +426,55 @@ contract section 必须有 **version、producer ID、source hash、compatibility
 
 **编译事实应双轨输出**（同 schema 生成，避免双份漂移）：
 主 JSON/protobuf 面向工具链（IDE / CI / 静态分析）；`.jhyynb` contract 面向 loader。
+
+### 4.6 OS 侧 22 条需求 ↔ 本节 pass ↔ plan 任务 对照表
+
+**这张表回答一个问题**：OS 侧 § 10 的每一条需求，**编译器侧由哪个 pass 接、落在哪一格、哪条任务**。
+需求编号与文字以 [OS 侧 § 10](JHYY_OS侧设计终版.md) 为准（下表只写简称）。
+
+| OS § 10 | 需求（简称） | 编译器侧 pass（§ 4.4） | OS-N | plan 文件 | 任务号 |
+|---:|---|---|---|---|---|
+| 1 | `Cap<T>` 真 T | `CapTypeResolver` | OS-14 | `v4.14-plan.md` | 任务 1 |
+| 2 | `Cap<T, Rights>` 参数化 rights | `CapTypeResolver` | OS-14 | `v4.14-plan.md` | 任务 2 |
+| 3 | rights 派生单调收缩 | `CapTypeResolver` | OS-14 | `v4.14-plan.md` | 任务 3 |
+| 4 | `ptr<user>`/`kernel`/`phys`/`io` | `AddressSpaceChecker` | OS-12 / OS-14 | `v4.13-plan.md` / `v4.14-plan.md` | 任务 3 / 任务 4 |
+| 5 | `ptr<phys>` 从 `Cap<Frame>` 派生 | `AddressSpaceChecker` + `CapTypeResolver` | OS-14 | `v4.14-plan.md` | 任务 4 |
+| 6 | `#[ipc_handler]` 全契约 | `IpcContractChecker` | OS-14 | `v4.14-plan.md` | 任务 6 |
+| 7 | capability 生命周期 / 销毁安全 | —（OS 侧对象模型；编译器只出 facts） | OS-13 | `v4.13.5-plan.md` | 任务 3 / 任务 4 |
+| 8 | 栈深度编译期断言 | `StackBoundsAnalysis` + `FactLinkVerifier` | OS-2 / OS-4 | `v4.7-plan.md` / `v4.8.5-plan.md` | 任务 1–3 / 任务 3 |
+| 9 | `may_sleep`/`irq_ctx`/`preempt_disabled` | `EffectPropagation` | OS-7 / OS-12 | `v4.10.5-plan.md` / `v4.13-plan.md` | 任务 2 / 任务 1 |
+| 10 | `holds(L)` / `may_alloc` | `EffectPropagation` + `LockOrderBuilder` | OS-12 | `v4.13-plan.md` | 任务 1 / 任务 2 |
+| 11 | RCU / PerCpu 语言原语 | —（语言原语 + 运行时；编译器保语义） | OS-15 | `v4.14.5-plan.md` | 任务 2 / 任务 3 |
+| 12 | 侵入式容器与 pin 保证 | —（同上） | OS-15 | `v4.14.5-plan.md` | 任务 1 |
+| 13 | BootState 线性 typestate | `BootStateChecker` | OS-6 / OS-14 | `v4.10-plan.md` | 任务 1（块表达式是硬前置） |
+| 14 | `#[naked]` 与 interrupt 栈契约 | `NakedInterruptChecker` + `AsmContractChecker` | OS-14 | `v4.14-plan.md` | 任务 10 |
+| 15 | wire 结构稳定 repr 与布局测试 | `LayoutFingerprinter` | OS-5 / OS-16 | `v4.9-plan.md` / `v4.15-plan.md` | 任务 1–4 / 任务 8 |
+| 16 | `cap_offsets` bitmap / handler 签名元数据 | `CapOffsetsBitmap` | OS-14 | `v4.14-plan.md` | 任务 7 |
+| 17 | region 边界与生命周期 metadata | `ContractEmitter`（region 图属 binary-format § 12 `jhyy_region`） | OS-13 | `v4.13.5-plan.md` | 任务 5 |
+| 18 | panic / oops / 可达性分析 | `PanicReachability` | OS-16 | `v4.15-plan.md` | 任务 7 |
+| 19 | lock-order / IRQ-safe 全程序分析 | `LockOrderBuilder` + `FactLinkVerifier` | OS-12 | `v4.13-plan.md` | 任务 2 |
+| 20 | WCET / 时间预算元数据 | `WcetBoundEstimator` | OS-16 | `v4.15-plan.md` | 任务 6 |
+| 21 | provenance / version 语义 | `ContractEmitter` + `CapTypeResolver`（slot 复用代数） | OS-13 / OS-14 | `v4.13.5-plan.md` / `v4.14-plan.md` | 任务 4 / 任务 9 |
+| 22 | `asm!` 寄存器 / 栈 / clobber 契约 | `AsmContractChecker` + `AsmClosureInliner` | OS-6 / OS-14 | `v4.10-plan.md` / `v4.14-plan.md` | 任务 5 / 任务 10 |
+
+**反过来看：哪些 pass 不由 OS 侧需求驱动**（前端的「静默错误」三条 + 驱动层 + 寄存器分配）：
+
+| pass | 排期 | 落点 |
+|---|---|---|
+| `ParamTypeChecker` | OS-1 | `v4.6-plan.md` 任务 2 |
+| `BoolNormalization` | OS-1 | `v4.6-plan.md` 任务 5 |
+| `IntContextCoerce` | OS-1 | `v4.6-plan.md` 任务 6 |
+| `TlsStageAllocator` | ✅ 已做 | W-136（v4.0.21） |
+| `LinearScanRegAlloc` | v4.4.0 阶段一已落地 | `v4.4.0-plan.md` 任务 1–3；阶段二 = emit 层消费 |
+
+**读表须知**：
+- 「需求 7 / 11 / 12」没有编译器 pass —— 主体是 **OS 侧对象模型与运行时**，
+  编译器侧只保证「事实被正确产出」（`ContractEmitter`）。
+- 「需求 14」的**栈预算那一半**早在 **OS-2（`v4.7-plan.md` 任务 3）** 就落了
+  （`handler_stack_budget` 申报 + 链接期断言）；
+  **clobber / preserve 契约那一半**才落 OS-14（`v4.14-plan.md` 任务 10）。
+- 表里每个「任务号」都是**该 plan 文件里的 `### 任务 N` 小节**；plan 文件在
+  [`docs/plans/v4/`](../plans/v4/)。
 
 ---
 
