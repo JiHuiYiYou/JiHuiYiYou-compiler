@@ -8696,9 +8696,12 @@ f32 的全部四个序比较。
 **引用:**
 - 源码 `compiler/src0/codegen_amd64_lexer.jhyy:1628-1653`
 - 测试 `compiler/tests/examples/float_cmp.jhyy:4, 36-49`
-- 规范 [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md)
-  §P2(该行的归因「用 QBE 默认指令」也已过时 —— QBE 早在 v3.1.0 移出生产路径)
-- ABI [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) § 11.1 A5 / § 11.2 B2
+- 规范 **历史档案**(`jhyy-lang-spec-v1.0.0.md`,已归档至 git 历史)§P2 行
+  (该行的归因「用 QBE 默认指令」也已过时 —— QBE 早在 v3.1.0 移出生产路径)
+- ABI **历史档案**(`jhyy-abi-v1.0.0.md`,已归档至 git 历史)§ 11.1 行 A5 / § 11.2 行 B2
+  ⚠️ 这两处编号**不属于当前的 v4.0.0 规范** —— 写本条时它们指的是 v1.0.0 版的
+  「已知局限」表;当前 v4.0.0 的对应内容在 lang-spec § 4.2(浮点比较的指令选择与
+  IEEE 754 ordered 语义)与附录 B(受限项)。
 
 
 

@@ -18,6 +18,7 @@
 | F | FACTS.md 引用的文件都存在 | 零 |
 | G | 台账**正文**解析:5 态枚举 / per-status 计数 / 索引↔正文状态一致 | 零 |
 | H | **反引号里的裸路径**指向真实存在的文件(另一类引用面 —— 见 `check_backtick_paths`) | 秒级 |
+| I | **`§ N.M` 章节引用**指向真实存在的章节(第三类引用面 —— 见 `check_section_refs`) | 秒级 |
 
 **退出码**:0 = 全绿;1 = 有漂移(逐条列出)。
 """
@@ -528,6 +529,138 @@ def check_code_index() -> None:
 
 
 # --------------------------------------------------------------------------
+# I. `§ N.M` 跨文档章节引用 —— 指向真实存在的章节
+# --------------------------------------------------------------------------
+# **为什么单开一道**(2026-11-01 审计实测):`check_links` 只认 markdown 链接,
+# **`§ N.M` 这种「章节地址」完全没人查** ⇒ 章节号写错、指向不存在的章节,门不会红。
+# 实测跨文档悬空只有 4 条 —— 但真因不是章节写错,而是**把行号写成了章节号**
+# (`lang-spec §117` 实指 lang-spec 的第 117 行)。
+#
+# **章节号有三种形态,漏一种就会把真存在的章节判成悬空**:
+#   1. 标题          `### 4.2.1 聚合类型的相等比较`
+#   2. 表格行首编号  `| 12.8 | ...`  ← abi § 12 的子项是这种,**不是标题**
+#   3. 锚点          `<a id="abi-12-8"></a>` ← 同上
+# 另:**合并标题** `## 10-11. 通用 Section Data` 要抽出**两个**号(10 和 11)。
+#
+# **只查「目标文档明确」的那种引用** —— 裸 `§ N.M` 的目标文档有歧义,查了必假阳;
+# 目标由两种方式给出:(a) 文档名 token 紧邻(`abi §12.10`);(b) 同行的 markdown 链接
+# (`[...](…/jhyy-abi-v4.0.0.md) § 2.5`)。取**最近的、在其之前**的那个目标。
+
+_DOC_FILES = {
+    "lang": "docs/abis/jhyy-lang-spec-v4.0.0.md",
+    "abi": "docs/abis/jhyy-abi-v4.0.0.md",
+    "binary": "docs/abis/jhyy-binary-format-v1.0.0.md",
+    "编译器侧": "docs/coordination/JHYY_编译器侧设计终版.md",
+    "OS侧": "docs/coordination/JHYY_OS侧设计终版.md",
+}
+_DOC_BY_BASENAME = {Path(v).name: k for k, v in _DOC_FILES.items()}
+# 文档名 token(小写、空格归一) → 目标文档 key。`本文` = 当前文档自身。
+_TOKEN_TO_KEY = {
+    "lang-spec": "lang", "语言规范": "lang",
+    "abi": "abi",
+    "binary-format": "binary", "二进制格式": "binary",
+    "编译器侧": "编译器侧",
+    "os侧": "OS侧",
+    "本文": "SELF",
+}
+
+# 文档名 token → 目标文档。`本文` = 当前文档自身。
+# ⚠️ **ASCII token 两侧要挡字母** —— 否则 `psABI § 3.2.2`(System V psABI,不是本仓的 abi)
+#    会被当成本仓 abi 的引用 ⇒ 假阳性。用 `(?<![A-Za-z])` 而不是 `\b`:
+#    **中文字符在 Python 里也是 \w** ⇒ `\b` 会把「见abi §12.10」这种中文紧邻的写法挡掉。
+_SEC_TOKEN_RE = re.compile(
+    r"(?P<tok>"
+    r"(?<![A-Za-z])lang-spec(?![A-Za-z])"
+    r"|(?<![A-Za-z])binary-format(?![A-Za-z])"
+    r"|(?<![A-Za-z])abi(?![A-Za-z])"
+    r"|语言规范|二进制格式|编译器侧|OS\s*侧|本文"
+    r")"
+    r"\s*(?:\*\*)?\s*[:：]?\s*(?:\*\*)?\s*§\s*(?P<sec>\d+(?:\.\d+)*)",
+    re.I)
+_SEC_RE = re.compile(r"§\s*(\d+(?:\.\d+)*)")
+_MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+
+def _sections_of(text: str) -> set[str]:
+    """抽出文本里存在的全部章节号(标题 / 带锚点的表格行 / 锚点 / 合并标题)。"""
+    secs: set[str] = set()
+    # 1. 标题。⚠️ **不要加 `(?![\d.])` 之类的 lookahead** —— 章节号后面本来就跟 `.`
+    #    (`## 8. IPC Dispatch Table`)⇒ 加了就把整份文档的章节抽空,门全线假阳。
+    for m in re.finditer(r"^#{1,6}\s*(?:§\s*)?(\d+(?:\.\d+)*)", text, re.M):
+        secs.add(m.group(1))
+    # 1b. **合并标题** `## 10-11. 通用 Section Data` ⇒ 10 和 11 **两个**号都存在。
+    #     要求尾部有 `.`(日期式标题 `## 2026-10-31` 不匹配 ⇒ 不污染)。
+    for m in re.finditer(r"^#{1,6}\s*(\d+(?:\.\d+)*)\s*[-–]\s*(\d+(?:\.\d+)*)\s*[.、]", text, re.M):
+        secs.add(m.group(1))
+        secs.add(m.group(2))
+    # 2./3. 带 `<a id="...">` 的表格行 —— abi § 12 的 14 个子项是这种。
+    #    ⚠️ **只认带锚点的行**:否则任何「| 1 | ...」的表都会把 `1` 变成一个章节号。
+    for m in re.finditer(r'^\|\s*<a id="[^"]*"></a>\s*(\d+(?:\.\d+)*)\s*\|', text, re.M):
+        secs.add(m.group(1))
+    for m in re.finditer(r'<a id="[a-z]+-(\d+(?:-\d+)*)"></a>', text):
+        secs.add(m.group(1).replace("-", "."))
+    return secs
+
+
+def _section_exists(secs: set[str], sec: str) -> bool:
+    if sec in secs:
+        return True
+    # 父章节也算存在:文档里有 § 4.2.1 ⇒ § 4.2 也在(层级蕴含)
+    prefix = sec + "."
+    return any(s.startswith(prefix) for s in secs)
+
+
+def check_section_refs() -> None:
+    """`§ N.M` 必须指向真实存在的章节。"""
+    cache: dict[str, set[str]] = {}
+
+    def secs_of(rel: str) -> set[str]:
+        if rel not in cache:
+            cache[rel] = _sections_of(read(ROOT / rel))
+        return cache[rel]
+
+    for p in all_md():
+        rel = p.relative_to(ROOT).as_posix()
+        if rel.startswith("docs/archive/"):
+            continue  # 归档不改,可能引用旧编号
+        for i, line in enumerate(read(p).splitlines(), 1):
+            # 目标锚点:(位置, 目标文档 key 或 "SELF")
+            anchors: list[tuple[int, str]] = []
+            for m in _SEC_TOKEN_RE.finditer(line):
+                tok = re.sub(r"\s+", "", m.group("tok")).lower()
+                key = _TOKEN_TO_KEY.get(tok)
+                if key:
+                    anchors.append((m.start(), key))
+            for m in _MD_LINK_RE.finditer(line):
+                t = m.group(1).split("#")[0].strip()
+                if not t:
+                    continue
+                key = _DOC_BY_BASENAME.get(Path(urllib.parse.unquote(t)).name)
+                if key:
+                    anchors.append((m.end(), key))
+            if not anchors:
+                continue
+            anchors.sort()
+            for m in _SEC_RE.finditer(line):
+                # 最近的、在它之前的锚点
+                target = None
+                for pos, key in anchors:
+                    if pos <= m.start():
+                        target = key
+                    else:
+                        break
+                if target is None:
+                    continue
+                trel = rel if target == "SELF" else _DOC_FILES[target]
+                secs = secs_of(trel)
+                if not secs:
+                    continue
+                sec = m.group(1)
+                if not _section_exists(secs, sec):
+                    fail(f"{rel}:{i}: 「§ {sec}」→ {trel} 无此章节 —— {line.strip()[:90]}")
+
+
+# --------------------------------------------------------------------------
 # F. FACTS.md 引用的文件存在
 # --------------------------------------------------------------------------
 def check_facts_links() -> None:
@@ -555,6 +688,7 @@ def main() -> int:
     check_links()
     check_backtick_paths()
     check_code_index()
+    check_section_refs()
     check_facts_links()
 
     if problems:
