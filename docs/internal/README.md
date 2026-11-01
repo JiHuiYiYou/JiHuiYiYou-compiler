@@ -24,6 +24,15 @@
 | [`docs/internal/architecture.md`](architecture.md) | 编译器架构速览（流水线 / 模块图 / 自举机制） | 要改 codegen 或搞懂 emit 路径时 |
 | [`docs/archive/`](../archive/) | 历史归档（changelog / 旧计划 / 旧性能 / 审计报告） | 想追溯「当初为什么这么定」时 |
 
+仓库根之外、但**仍在仓内**的各子系统（各自带 README，不在本表的 `docs/` 树下）：
+
+| 目录 | 职责 | 什么时候读 |
+|---|---|---|
+| [`installer/`](../../installer/README.md) | Windows 装机（WiX MSI/EXE + 内置工具链）—— **装机用户唯一入口文档**；`installer/release-notes/` 存每版 release note 正文，`installer/toolchain/` 讲内置工具链 | 装机 / 装机后找不到工具链时 |
+| [`mcp-jhyy/`](../../mcp-jhyy/README.md) | Claude Code 的 MCP 服务（编译 / 运行 / 看 IL / 查台账 / 跑回归） | 让 agent 直接操作 JHYY 时 |
+| [`runtime/linux_elf/`](../../runtime/linux_elf/README.md) | `amd64_sysv_freestanding` 目标的静态无 libc Linux ELF64 运行时（`crt0.S` + `link.ld`） | 做 Linux 侧目标时 |
+| [`vscode-ext/`](../../vscode-ext/README.md) | VS Code 扩展 `jhyy-lang`（语法高亮 + 原生 run / compile 命令） | 想改扩展行为时 |
+
 仓外：
 
 | 文档 | 职责 |
