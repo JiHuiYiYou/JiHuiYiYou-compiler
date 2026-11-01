@@ -44,7 +44,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | 不变量 | 最佳检查阶段 |
 |---|---|
 | `Cap<T>` 的 T 与 type_tag 相容 | 编译期 |
-| `Cap<T, R\|W>` 传入需要 W 的接口 | 编译期 |
+| `Cap<T, RW>` 传入需要 W 的接口 | 编译期 |
 | rights 单调收缩 | 编译期生成证明 + **运行期内核强制** |
 | IPC `msg_tag` 唯一、handler 签名一致 | 编译期 |
 | `cap_offsets` 合法性与位图 | 编译期布局验证 + **内核必须重查**（消息可能来自不可信进程） |
@@ -162,7 +162,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | **P0 止血** | 消除静默错误与不可重复编译 | 实参类型+个数检查；`extern fn` 参数形状限制；CLI 多余输入文件改报错；bool 值归一化；顶层非整数初始化；**整数上下文转换**；错误可定位（span） | 无 | ① 多余 `.jhyy` 输入报错（不静默忽略）② 并发 8 进程编译无旁路文件竞争 ③ `false && side()` 中 `side` 不执行 ④ 传 `i32` 给 struct 形参编译失败 ⑤ `takes_one(1,2)` 编译失败 | 后续自举无法区分真错误与旧 bug；Windows 上无法并行构建 |
 | **P0.5 观测** | 编译器知道自己的最坏行为 | 输出 per-function `frame_local_max`；构建调用图算 `call_path_max`；递归/动态调用显式标记；链接器支持栈断言 | P0 | ① 所有函数两个上界可打印 ② CI 保存基线 CSV ③ 链接期可断言线程栈保留量 ≥ 最坏链 + redzone ④ **间接/动态调用点能显式申报栈预算**（无申报 ⇒ 断言拒绝）—— **P3 的 `fn` 类型调用点复用这条机制** | 栈问题只能靠运行时溢出发现，内核栈大小无从配置 |
 | **P1 反馈环** | 最小镜像真跑在裸金属 | UEFI entry 钩子实装；**按 `--target` 分支链接**（而非按源文件的 `#[no_std]`）；移除无条件 Windows 系统库；`SetConsoleOutputCP(65001)` | P0 | ① 最小 `kernel.efi` 在 QEMU/OVMF 输出 UTF-8 后停机 ② 编译期可选 8 KiB / 16 KiB 栈并触发断言 ③ `#[no_std]` 不再自动加 `-lkernel32 -luser32 -lshell32 -ladvapi32 -lm` | 编译器长期寄生 Windows；能力/IPC 是否可执行永远未知 |
-| **P2 栈与分配** | 先证明栈，再压栈 | 栈深度全程序分析 + 链接断言；栈槽 16B 对齐；linear scan 寄存器分配；**禁 XMM 溢出 + 禁 red zone（上下文属性，同期）** | P0.5 | ① **最大单帧 ≤ 16 KiB**（基线 **341 KiB**）② `call_path_max` 受链接期断言 **（含间接调用边 —— 间接调用点必须申报栈预算，否则拒绝）** ③ SysV SIMD 参数不产生 8B 对齐 fault ④ 内核上下文 XMM 溢出点 = 0 ⑤ red zone 使用点 = 0 | 中断/IPC 破坏相邻栈；线程栈被迫无谓增大 |
+| **P2 栈与分配** | 先证明栈，再压栈 | 栈深度全程序分析 + 链接断言；栈槽 16B 对齐；linear scan 寄存器分配；**禁 XMM 溢出 + 禁 red zone（上下文属性，同期）** | P0.5 | ① **硬门：自举编译器自身（1045 个真实函数）的 `call_path_max × frame ≤ 64 KiB`**（**真源 = OS 侧 § 9.3 决定 2**）；**长期目标** `max_frame ≤ 16 KiB`（**可达性未证** —— 按 341 KiB 基线，单靠寄存器分配到不了）② `call_path_max` 受链接期断言 **（含间接调用边 —— 间接调用点必须申报栈预算，否则拒绝）** ③ SysV SIMD 参数不产生 8B 对齐 fault ④ 内核上下文 XMM 溢出点 = 0 ⑤ red zone 使用点 = 0 | 中断/IPC 破坏相邻栈；线程栈被迫无谓增大 |
 | **P2.5 ABI 收敛** | 关闭已知偏离，形成兼容基线 | 修 sret 阈值/整数预算（§12.1/§12.4）、SysV eightbyte（§12.11）、16B 对齐（§12.6/§12.12）、`alignof(enum)`（§12.2）；PE/ELF 由 target 决定（§12.9）；`asm!`/fence 进 IL 节点；**订正 §12.13 陈旧条目** | P2 | ① 14 条已知偏离降至 **≤ 3 条**且均为显式兼容性例外 ② abi-hash CI 不回归 ③ hosted + freestanding 两套 smoke 全绿 | 新能力代码会在现有调用约定下悄悄错传 cap |
 | **P2.75 效果最小集** | 先拦最高危上下文错误 | `with { irq_ctx }` / `with { may_sleep }` 语法 + **调用点直接禁止**（不做全推导、不做多态效果） | P2.5 | `irq_ctx` 内调用 `sleep()` / `alloc()` 编译失败 **（含经 `fn` 指针的间接调用 —— `fn` 类型的效果默认格顶 ⇒ 洗不掉）** | 持锁睡眠、PF 路径分配继续靠 review |
 | **P3 语言自洽** | 让内核 API 能用普通语言写 | 块表达式；`fn(...)` 类型位置（**带效果行，默认 = 格顶：全部效果**）；闭包捕获；`()` 类型位置；`defer` 覆盖末表达式；**结构化内联汇编**（类型化操作数、显式 clobber、效果签名 —— **默认同样取格顶**） | P2.5 | ① BootState 迁移可写在块内 ② 函数指针可跨模块传递 ③ hot helper 可写成 1–5 行闭包并被 `#[inline]` 展开 ④ `asm!` 块未声明 clobber 即报错 ⑤ **`fn` 指针调用点未申报栈预算 ⇒ 链接期拒绝**（P2 的调用图断言不被间接调用绕过）⑥ **`fn` 指针的效果默认格顶 ⇒ 洗不掉 P2.75 的 `irq_ctx` 禁令** | BootState、热路径内联、回调契约都无法自然表达 |
@@ -395,7 +395,7 @@ rights 是节点上的常量属性。代码生成把 8 字节 wire 写入位置�
 
 链接器验证 `thread_stack_reservation ≥ call_path_max(entry) + redzone`，
 并对 `#[naked]`/interrupt 使用作者声明的 `handler_stack_budget`。
-递归函数默认不可分析，应显式标 `#[unsafe(recursive, max_depth=N)]`；
+递归函数默认不可分析，应显式标 `#[trusted(recursive, max_depth=N)]`；
 动态调用形成未知上界，链接期拒绝进入中断路径。
 
 **线性扫描的顺序是「先做保持栈槽、只分配普通值」**：
@@ -550,6 +550,11 @@ fn narrow<DstR>(c: &Cap<T, RWG>) -> Option<Cap<T, DstR>>
 > 「名字丑」是对的：它明显区别于编译期确定子集的 `derive`。
 > `narrow` 是**运行时唯一一次权限检查**（`TargetR ⊆ SrcR`，失败返回 `None`），
 > 且**内核侧还要再查一次** —— 用户态的检查只是加速带。
+>
+> **turbofish 只写 `DstR`** —— 方法形式 `ro.derive::<DstR>()` 的类型参数**只有一个**
+> （`DstR` = 目标 rights 类型）；`T` 与 `SrcR` 由接收者 `Cap<T, SrcR>` 推断。
+> ⚠️ **不要写成 `derive::<T>()`** —— 那个 `T` 是 `Cap` 的内层类型、不是 derive 的参数，
+> 照抄会实现成「按内层类型派生」的错误语义。
 
 **四条 rights 规则**：
 
@@ -607,7 +612,7 @@ struct CapContract {
 | 阶段 | 改动 | 复杂度 |
 |---|---|---|
 | **Lexer** | 新增 8 个保留字（`R`/`W`/`G`/`RW`/…）；**不新增 `unsafe` 关键字**（用属性） | 低 |
-| **Parser** | 解析 `Cap<T, R>` 双参数；`ptr<phys, R>`；`derive::<T>()` turbofish | 中 |
+| **Parser** | 解析 `Cap<T, R>` 双参数；`ptr<phys, R>`；`derive::<DstR>()` turbofish | 中 |
 | **Sema** | ① 8 项 rights 常量表 ② 类型等价加 rights 掩码比较 ③ derive 子集检查（位运算）④ `as` 转换表加禁止规则（整数→`ptr<phys>`）⑤ `#[trusted]` / `#[unsafe_cap_ctor]` 标注检查 | **中（核心工作量）** |
 | **Mangling** | `<Base>$<T1>$<T2>` 直接扩展 | 低 |
 | **IL** | `Cap<T,R>` 是 8 字节标量（与 `l` 同承载）⇒ **不新增 IR 概念**，只在类型侧保留标记供后续 pass 消费 | 低 |
@@ -691,7 +696,7 @@ fn init_heap(s: BootState<PagingOn>) -> BootState<HeapReady> { ... }
 
 **状态迁移必须消费旧 token**：`enable_paging(s)` 的 `s` 按值取得，旧状态不能复用。
 这样既不需要完整 trait，也不需要借用检查器理解硬件。
-接口仍可标 `#[unsafe]` 并写明「调用者证明当前 CPU/页表状态」，但状态类型让误调用**从文档升级为类型错误**。
+接口仍可标 `#[trusted]` 并写明「调用者证明当前 CPU/页表状态」，但状态类型让误调用**从文档升级为类型错误**。
 
 > **块表达式是 BootState 的硬前置** —— typestate 本质是带顺序的语句序列；
 > 若块不能产生值、函数末表达式不形成连续控制流，状态推进就只能停在函数边界，
@@ -714,7 +719,7 @@ fn handle_map_frame(msg: &MapFrameMsg) -> MapFrameReply { ... }
 
 #[repr(c, align = 8)]
 struct MapFrameMsg {
-    frame: Cap<Frame, Read|Write>,
+    frame: Cap<Frame, RW>,
     vaddr: u64,
     _pad: [u8; 4],
 }

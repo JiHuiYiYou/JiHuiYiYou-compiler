@@ -846,7 +846,7 @@ CpuLocalOff → CpuLocalReady · InterruptsOff → ThreadingReady
 | **v4.6** | OS-1 | 实参类型/个数检查 + 整数上下文转换 | —— | src0 自身零实参不符（**先统计后改码**） | [`docs/plans/v4/v4.6-plan.md`](../plans/v4/v4.6-plan.md) |
 | **v4.7** | OS-2 | per-function `frame_local_max` + `call_path_max` + 链接期栈断言 | **线程栈大小策略**（loader 侧选，编译器只提供事实） | 链接期拒绝超栈对象 | [`docs/plans/v4/v4.7-plan.md`](../plans/v4/v4.7-plan.md) |
 | **v4.8** | OS-3 | UEFI entry 钩子 + 按 `--target` 分支链接 + 最小 `kernel.efi` | **UEFI 契约**：entry 符号、console protocol、停机语义 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 | [`docs/plans/v4/v4.8-plan.md`](../plans/v4/v4.8-plan.md) |
-| **v4.8.5** | OS-4 | 栈槽 16B 对齐 + 全程序栈分析 + 禁 XMM/red zone | **中断栈 4 KiB** + `#[naked]` handler 自报预算 | max_frame ≤ 16 KiB（**按 341 KiB 基线重算**）；XMM 溢出点 = 0 | [`docs/plans/v4/v4.8.5-plan.md`](../plans/v4/v4.8.5-plan.md) |
+| **v4.8.5** | OS-4 | 栈槽 16B 对齐 + 全程序栈分析 + 禁 XMM/red zone | **中断栈 4 KiB** + `#[naked]` handler 自报预算 | **硬门**：自举编译器 `call_path_max × frame ≤ 64 KiB`；**长期目标** `max_frame ≤ 16 KiB`（**可达性未证**）—— **见 § 9.3 决定 2**；XMM 溢出点 = 0 | [`docs/plans/v4/v4.8.5-plan.md`](../plans/v4/v4.8.5-plan.md) |
 | **v4.9** | OS-5 | ABI §12 的 14 条偏离收敛 + 容器格式由 target 决定 | —— | 偏离 ≤ 3 且均为显式兼容性例外 | [`docs/plans/v4/v4.9-plan.md`](../plans/v4/v4.9-plan.md) |
 | **v4.10** | OS-6 | 块表达式 + `fn` 类型位置 + 闭包捕获 + 结构化内联汇编 | —— | boot state 迁移可在块内完成；函数指针可跨模块传递 | [`docs/plans/v4/v4.10-plan.md`](../plans/v4/v4.10-plan.md) |
 | **v4.10.5** | OS-7 | 效果最小集（`irq_ctx` + `may_sleep`） | —— | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 | [`docs/plans/v4/v4.10.5-plan.md`](../plans/v4/v4.10.5-plan.md) |
