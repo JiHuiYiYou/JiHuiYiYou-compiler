@@ -482,6 +482,52 @@ def check_backtick_paths() -> None:
 
 
 # --------------------------------------------------------------------------
+# E3. `feedback_*` 代号必须能在仓内的索引里查到
+# --------------------------------------------------------------------------
+# 2026-10-31 加：工作规约整体搬出仓内后，**代号 → 规约的映射表也没进仓** ⇒
+# 63 个 `feedback_*` 代号散落在 143 份文档（外加若干源码 / CI 文件）里，
+# 读者**检索得到线索、解析不出含义**。⇒ 把**索引**搬回仓内
+# （`docs/internal/feedback-codes.md`；规约正文仍留仓外，工作规约是对内的），
+# 并加这道门防它再退化。
+#
+# 这道门是**零误报**的：索引是仓内的一个已提交文件 ⇒ 判红只可能是「真有个代号
+# 没进索引」。**不依赖 git 历史** ⇒ 浅克隆 / 深克隆行为一致。
+CODE_TOKEN = re.compile(r"feedback_[a-z0-9_]+")
+CODE_TEXT_EXT = (".md", ".jhyy", ".py", ".yml", ".yaml", ".sh", ".ps1", ".ts", ".txt", ".c", ".h")
+
+
+def check_code_index() -> None:
+    """仓内用到的每个 `feedback_*` 代号都必须能在 `docs/internal/feedback-codes.md` 里查到。"""
+    idx = ROOT / "docs" / "internal" / "feedback-codes.md"
+    if not idx.is_file():
+        fail("docs/internal/feedback-codes.md 不存在 —— `feedback_*` 代号索引必须在仓内")
+        return
+    known = set(CODE_TOKEN.findall(read(idx)))
+
+    used: dict[str, list[str]] = {}
+    import subprocess
+    names = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
+                           capture_output=True, text=True, encoding="utf-8").stdout.split("\0")
+    for n in names:
+        if not n or not n.endswith(CODE_TEXT_EXT):
+            continue
+        try:
+            body = read(ROOT / n)
+        except OSError:
+            continue
+        for c in set(CODE_TOKEN.findall(body)):
+            if c != "feedback_xxx":       # 规范里的占位符
+                used.setdefault(c, []).append(n)
+
+    for c in sorted(used):
+        if c in known:
+            continue
+        where = used[c]
+        fail(f"feedback_* 代号 `{c}` 不在 docs/internal/feedback-codes.md 里"
+             f"（{len(where)} 处用到，例：{where[0]}）")
+
+
+# --------------------------------------------------------------------------
 # F. FACTS.md 引用的文件存在
 # --------------------------------------------------------------------------
 def check_facts_links() -> None:
@@ -508,6 +554,7 @@ def main() -> int:
     check_pass_consistency(d)
     check_links()
     check_backtick_paths()
+    check_code_index()
     check_facts_links()
 
     if problems:

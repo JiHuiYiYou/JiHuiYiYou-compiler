@@ -13,6 +13,7 @@
 |---|---|---|
 | [`docs/internal/FACTS.md`](FACTS.md) | **事实单一真相源** —— 版本 / 回归数 / ACTIVE 数 / 产物尺寸 / v4.x 排期 / OS-N 映射 / 目标三元组 | 任何时候要引用一个「会变的数字」 |
 | [`docs/internal/workarounds.md`](workarounds.md) | workaround 台账（**永不归档**）—— 每个 workaround 的触发条件 / 绕法 / 根因 / 状态 | 改编译器之前；怀疑某个「已知问题」时 |
+| [`docs/internal/feedback-codes.md`](feedback-codes.md) | **`feedback_*` 代号索引** —— 代号 → 工作规约的映射（**索引进仓，规约正文仍留仓外**） | 读到不认识的 `feedback_*` 代号时 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | **语言规范**（锁定）—— 语法 / 语义 / 附录 B 已知限制 | 写或读 `.jhyy` 代码时 |
 | [`docs/abis/jhyy-abi-v4.0.0.md`](../abis/jhyy-abi-v4.0.0.md) | **ABI 白皮书**（锁定）—— 类型布局 / 调用约定 | 碰 FFI / struct 传参 / 跨平台时 |
 | [`docs/abis/jhyy-binary-format-v1.0.0.md`](../abis/jhyy-binary-format-v1.0.0.md) | `.jhyynb` 二进制格式（**设计稿，未实装**） | 做 OS 线 / `.jhyynb` 时 |

@@ -70,6 +70,10 @@ memory 文件的代号**。那批 memory 于 2026-10-30 合并成一份「工作
 
 > 本目录的这些代号是**历史脚注**，保留原文不改。
 
+⇒ **代号 → 规约的映射表已搬回仓内**：[`docs/internal/feedback-codes.md`](../internal/feedback-codes.md)
+（**索引进仓，规约正文仍留仓外** —— 工作规约是对内的，不该出现在给外人看的
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md) 里）。
+
 ---
 
 ## 相关
