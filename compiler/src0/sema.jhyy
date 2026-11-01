@@ -2180,8 +2180,14 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         if (*d).else_body != (0 as *u8) {
             let else_type = infer_type(ctx, ta, (*d).else_body as *Node);
             if type_eq(then_type, else_type) == (0 as i32) {
+                // P2-1 (2026-11-01):报错补「怎么改」的指引 —— 光说「类型不同」
+                // 不够:用户看不出**分支块的类型是怎么定的**。
+                // 分支块的类型 = 该块里**最后一条语句**的类型:
+                //   · 赋值语句   → `()`
+                //   · 调用语句   → 调用的返回类型
+                // ⇒ 两个分支要么都以调用收尾,要么都以赋值收尾。
                 let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
-                                        "if/else branches must have same type" as *u8);
+                    "if/else branches must have same type: a branch block's type is the type of its LAST statement (assignment -> (), call -> the call's return type), so both branches must end with the same kind of statement" as *u8);
             }
             (*n).type_ptr = then_type as *u8;
             return then_type;

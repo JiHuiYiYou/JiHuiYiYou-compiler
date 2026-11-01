@@ -139,7 +139,7 @@ echo $?    # => 42
 
 ```bash
 python regress.py
-# => 261/261 passed (all with assertions), 0 failed, 20 skipped (of 281 total)
+# => 264/264 passed (all with assertions), 0 failed, 20 skipped (of 284 total)
 ```
 
 ### Verify the self-host closure
@@ -270,7 +270,7 @@ JiHuiYiYou-compiler/
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP** (281 total) |
+| `regress.py` | **264 PASS + 0 XFAIL + 0 failed + 20 SKIP** (284 total) |
 | Assertion audit | 281 scanned / 261 runnable / 201 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | PASS (N=10 — `.il` and `.s` byte-equal across generations) |

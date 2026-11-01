@@ -1010,6 +1010,51 @@ fn cg_copy_enum(cg_raw: *u8, et_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i
 }
 
 
+// cg_copy_slice — 拷贝 slice 的 16 字节值槽 { data: *T @0, len: i64 @8 }。
+//
+// W-172 (2026-11-01 真修)。为什么单独一个函数(而不是塞进 cg_copy_agg):
+//
+// ⚠️ slice 的「值」在 IR 里有**两种形态**,这是本条最关键的坑:
+//   · **槽地址**形态 —— slice 字面量 / 表达式求值结果。存进一个槽时,槽里
+//     放的是那个 slice 槽的**地址**(8 字节)。例:`&[&[1,2,3], &[10,20,30]]`
+//     的元素类型是 slice ⇒ 元素槽里放的是内层 slice 槽的地址。
+//   · **槽内容**形态 —— 局部变量的**存储**。槽里放的是 {data, len} 那 16 字节。
+//
+// cg_emit_store 被这两种场景共用 ⇒ 不能一刀切(实测:在 cg_emit_store 里
+// 无条件拷 16 字节 ⇒ `for_in_slice_nested` / `slice_iter_nested_basic`
+// 直接崩 —— EXIT=127,因为 slice 字面量的元素是「槽地址」,被当成「槽内容」
+// 拷了 16 字节 ⇒ 元素值变成 {地址, 垃圾} ⇒ 迭代时越界)。
+//
+// ⇒ 「拷 16 字节」只在**明确要值语义**的地方调用本函数(即 NODE_LET 的
+// `let mut s: [*]T = ...` 绑定),其余地方维持「存 8 字节槽地址」。
+fn cg_copy_slice(cg_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    if irval_is_undef(src_addr) != 0 {
+        return 0;
+    }
+    if irval_is_undef(dst_addr) != 0 {
+        return 0;
+    }
+    // data @0
+    let s_src_ptr = *ir_new_tmp(ir, QBE_L());
+    let s_dst_ptr = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, s_src_ptr, "add" as *u8, src_addr, ir_new_int(0));
+    ir_emit_binary(ir, s_dst_ptr, "add" as *u8, dst_addr, ir_new_int(0));
+    let s_ptr_val = *ir_new_tmp(ir, QBE_L());
+    let _sld1 = ir_emit_load(ir, s_ptr_val, QBE_L(), s_src_ptr);
+    let _sst1 = ir_emit_store(ir, QBE_L(), s_ptr_val, s_dst_ptr);
+    // len @8
+    let s_src_len = *ir_new_tmp(ir, QBE_L());
+    let s_dst_len = *ir_new_tmp(ir, QBE_L());
+    ir_emit_binary(ir, s_src_len, "add" as *u8, src_addr, ir_new_int(8));
+    ir_emit_binary(ir, s_dst_len, "add" as *u8, dst_addr, ir_new_int(8));
+    let s_len_val = *ir_new_tmp(ir, QBE_L());
+    let _sld2 = ir_emit_load(ir, s_len_val, QBE_L(), s_src_len);
+    let _sst2 = ir_emit_store(ir, QBE_L(), s_len_val, s_dst_len);
+    return 1;
+}
+
 fn cg_copy_agg(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i32 {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -1024,6 +1069,7 @@ fn cg_copy_agg(cg_raw: *u8, st_raw: *u8, dst_addr: IRVal, src_addr: IRVal) -> i3
     // (array-in-struct)⇒ 两个函数**互相递归**⇒ jhyy 无 forward decl ⇒ 编不过。
     // 与 cg_value_eq 同款处理(它也把 struct/enum/array/slice 全塞一个函数里 dispatch)。
     let agg_kind = (*st).kind;
+    // ⚠️ slice **不**走这里 —— 见 cg_copy_slice 的注释(两种「值」形态)。
     if agg_kind != KIND_STRUCT() && agg_kind != KIND_ARRAY() {
         return 0;
     }
@@ -1384,6 +1430,14 @@ fn cg_emit_store(cg_raw: *u8, t_raw: *u8, val: IRVal, addr: IRVal) -> i32 {
     // W-144: array 与 struct 同款 —— 聚合没有单条 store ⇒ 走逐元素/逐字段拷贝。
     // 缺这个分支时 array 落到 cg_emit_store_primitive ⇒ 按 qbe_type_of(array)='w'
     // 只写 4 字节(数组地址的低 32 位)⇒ 字段槽里是截断指针,读出来是垃圾。
+    //
+    // ⚠️ **slice 不在这里** —— slice 的「值」有两种形态,不能一刀切:
+    //   · **槽地址**形态:slice 字面量 / 表达式求值结果 ⇒ 存 8 字节指针就够
+    //     (例:`&[&[1,2,3], &[10,20,30]]` 的元素是 slice ⇒ 元素槽里放的是内层
+    //      slice 槽的**地址**)
+    //   · **槽内容**形态:局部变量的存储 ⇒ 需要那 16 字节 {data, len}
+    // cg_emit_store 被这两种场景共用 ⇒ 一律按「槽地址」处理(= 修前行为),
+    // 需要「拷 16 字节」的地方显式调 cg_copy_slice(codegen.jhyy NODE_LET 分支)。
     if (*t).kind == KIND_STRUCT() || (*t).kind == KIND_ARRAY() {
         return cg_copy_agg(cg_raw, t_raw, addr, val);
     }
@@ -2946,16 +3000,23 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let d = node_let_data(n);
         let mut is_array: i32 = 0;
         let mut is_struct: i32 = 0;
+        let mut is_slice: i32 = 0;
         if (*d).sym != (0 as *u8) {
             let sym_lt = (*d).sym as *Sym;
             if (*sym_lt).type_ptr != (0 as *u8) {
                 let st_lt = (*sym_lt).type_ptr as *Type;
                 if (*st_lt).kind == KIND_ARRAY() { is_array = 1; }
                 if (*st_lt).kind == KIND_STRUCT() { is_struct = 1; }
+                if (*st_lt).kind == KIND_SLICE() { is_slice = 1; }
             }
         }
 
         let init_node = ((*d).init) as *Node;
+        // ⚠️ 非 mut 的 slice 绑定**不**进 alloc 路径 —— 原本是 SSA(直接持有
+        // 源 slice 槽地址),语义正确且零拷贝;改成 alloc 会平白多一次拷贝
+        // 并改变 IR 形状(→ 自举产物漂移)。
+        // ⇒ 下面的 `is_slice` 分支只在 `is_mutable != 0` 时可达
+        //   (is_array / is_struct 与 is_slice 是互斥的 kind,不会同时为真)。
         if (*d).is_mutable != 0 || is_array != 0 || is_struct != 0 {
             // mutable / array / struct: alloc stack slot
             let init_v = *cg_expr(cg_raw, init_node);
@@ -2970,6 +3031,24 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                 let slot = *ir_new_tmp(ir, QBE_L());
                 ir_emit_alloc(ir, slot, sz2);
                 cg_copy_agg(cg_raw, sym_t, slot, init_v);
+                cg_add_local(cg_raw, (*d).sym, slot, 1);
+            } else if is_slice != 0 {
+                // W-172 (2026-11-01 真修): `let mut s: [*]T = <slice expr>;`
+                //
+                // 修前:走 cg_store_enum_image → cg_emit_store → primitive,
+                //      按 qbe_type_of(slice) 存 **8 字节** ⇒ 槽里放的是
+                //      **槽地址**而不是 {data, len} ⇒ 后续 `s[0]` 从
+                //      「地址+0」读 ⇒ 拿到的是 data 指针的低 32 位 ⇒ 垃圾值。
+                //
+                // 这里要的是**值语义**:把源 slice 槽的 16 字节拷进新槽。
+                // (cg_copy_slice 的注释解释了 slice「值」的两种形态 —— 见那里。)
+                let sym_t = ((*d).sym as *Sym).type_ptr;
+                let sz = type_size(sym_t as *Type) as i32;
+                let mut sz2 = sz;
+                if sz2 < 4 { sz2 = 4; }
+                let slot = *ir_new_tmp(ir, QBE_L());
+                ir_emit_alloc(ir, slot, sz2);
+                let _cp = cg_copy_slice(cg_raw, slot, init_v);
                 cg_add_local(cg_raw, (*d).sym, slot, 1);
             } else {
                 let sym_t = ((*d).sym as *Sym).type_ptr;
@@ -3045,7 +3124,52 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             let arr_type = (*idx_expr_node).type_ptr;
             if arr_type != (0 as *u8) {
                 let at = arr_type as *Type;
-                if (*at).kind == KIND_ARRAY() || (*at).kind == KIND_POINTER() {
+                // W-172 (2026-11-01 真修): **切片**元素赋值。
+                //
+                // 修前:这个分支只处理 KIND_ARRAY / KIND_POINTER ⇒ `slice[i] = v`
+                //      **整个写被丢弃**(IL 里只剩右值的 copy,没有任何 store)
+                //      ⇒ 编译通过、运行无错、数组纹丝不动 —— 最坏的静默形态。
+                //
+                // slice 的布局 = { data: *T @0, len: i64 @8 }(16 字节槽)。
+                // cg_expr 对 slice 表达式求值得到的是**槽地址**(不是 data 指针)
+                // —— 与 NODE_INDEX 读路径(codegen.jhyy:3545)完全一致:
+                // 那边先 `loadl` 取 data 指针,再 add 偏移。
+                // ⇒ 写路径必须对称:loadl 取 data → add 偏移 → store。
+                if (*at).kind == KIND_SLICE() {
+                    let selem_type = (*at).elem;
+                    let selem_sz = type_size(selem_type as *Type);
+                    let sbase = *cg_expr(cg_raw, idx_expr_node);
+                    // load data 指针(slice 槽 offset 0)
+                    let sdata = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_str(ir, "    %t" as *u8);
+                    ir_emit_int(ir, "%d" as *u8, sdata.id);
+                    ir_emit_str(ir, " =l loadl" as *u8);
+                    let _sb = ir_emit_arg(ir, sbase);
+                    ir_emit_str(ir, "\n" as *u8);
+                    // offset = index * elem_sz
+                    let sidx_val = *cg_expr(cg_raw, idx_index_node);
+                    let soffset = *ir_new_tmp(ir, QBE_L());
+                    let sidx_kind = (*idx_index_node).kind;
+                    if sidx_kind == NODE_INT() {
+                        let snd = node_int_data(idx_index_node);
+                        ir_emit_copy(ir, soffset, (*snd).value * (selem_sz as i64));
+                    } else {
+                        if sidx_val.qbe_type == QBE_L() {
+                            ir_emit_binary(ir, soffset, "mul" as *u8, sidx_val, ir_new_int(selem_sz));
+                        } else {
+                            let sidx64 = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_str(ir, "    %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, sidx64.id);
+                            ir_emit_str(ir, " =l extsw %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, sidx_val.id);
+                            ir_emit_str(ir, "\n" as *u8);
+                            ir_emit_binary(ir, soffset, "mul" as *u8, sidx64, ir_new_int(selem_sz));
+                        }
+                    }
+                    let saddr = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, saddr, "add" as *u8, sdata, soffset);
+                    let _sstore = cg_store_enum_image(cg_raw, selem_type, val, saddr);
+                } else if (*at).kind == KIND_ARRAY() || (*at).kind == KIND_POINTER() {
                     let is_array = ((*at).kind == KIND_ARRAY());
                     let elem_type = (*at).elem;
                     let elem_sz = type_size(elem_type as *Type);
@@ -5545,6 +5669,117 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
 }
 
 // ════════════════════════════════════════════════════
+// cg_const_fold — 顶层全局初始化器的编译期常量折叠
+// ════════════════════════════════════════════════════
+//
+// W-173 (2026-11-01 真修):顶层 `let mut g: T = expr;` 的初始化器之前**只对
+// NODE_INT 字面量**折叠,其余一律 emit 0 ⇒
+//
+//   let mut gx: i32 = (0 - 1);   // → 0  ❌(应当 -1)
+//   let mut gy: i32 = 2 * 3 + 4; // → 0  ❌(应当 10)
+//
+// 顶层全局落在 **.data 段**(编译期常量)⇒ 它的初始化器**必须**是编译期常量
+// —— 这不是「少支持一个表达式」,而是「顶层全局的语义就是编译期常量」。
+//
+// 本折叠器支持的形态(全部是**整数**常量表达式):
+//   · NODE_INT      —— 字面量
+//   · NODE_UNARY    —— `-x` / `~x` / `!x`
+//   · NODE_BINARY   —— `+ - * / % << >> & | ^`
+//   · NODE_CAST     —— 整型之间的 `as`(按目标宽度截断)
+//
+// ⚠️ 折叠**不做隐式类型提升**:无后缀整数字面量默认 i32(spec §2.4),
+//    所以 `1 + 2` 按 i32 算;要 i64 必须显式 `as i64`。
+//    除法/取模遇 0 → 折叠失败(返回 0 = 不 ok)⇒ 调用方维持 emit 0。
+//    f64 / struct / 指针类型的顶层变量**仍然不折叠**(保持修前行为)——
+//    它们的语义问题与本条不同(spec §3 已记载「指针 / struct 类型的顶层变量
+//    是未定义读」),不在本条的修复范围内。
+//
+// 折叠失败 ⇒ 调用方 emit 0(**保持修前行为**,不引入新语义)。
+fn cg_const_fold(n: *Node, out_val: *i64) -> i32 {
+    if n == (0 as *Node) { return 0 as i32; }
+    let k = (*n).kind;
+    if k == NODE_INT() {
+        let nd = node_int_data(n);
+        // 字面量自身的 prim 决定宽度(i32 默认 / 显式 as 后是目标类型)
+        let prim = (*nd).prim;
+        let mut v = (*nd).value;
+        if prim == PRIM_I8()  || prim == PRIM_U8()  { v = v & (255 as i64); }
+        else if prim == PRIM_I16() || prim == PRIM_U16() { v = v & (65535 as i64); }
+        else if prim == PRIM_I32() || prim == PRIM_U32() { v = v & (4294967295 as i64); }
+        *(out_val as *i64) = v;
+        return 1 as i32;
+    }
+    if k == NODE_UNARY() {
+        let ud = node_unary_data(n);
+        let uop = (*ud).op;
+        let mut uv: i64 = 0 as i64;
+        let uok = cg_const_fold(((*ud).expr) as *Node, &uv);
+        if uok == (0 as i32) { return 0 as i32; }
+        let mut r: i64 = 0 as i64;
+        // ⚠️ 分支块末句的类型必须一致(assign = () vs return = i32)⇒
+        //    这里**不能**在某个分支里 `return` 早退(那会让两分支异型)。
+        //    改用 flag 变量:算完再统一 return。
+        let mut u_hit: i32 = 0 as i32;
+        if uop == TOKEN_MINUS() { r = -uv; u_hit = 1; }
+        else if uop == TOKEN_TILDE() { r = ~uv; u_hit = 1; }
+        else if uop == TOKEN_BANG() { r = if uv == (0 as i64) { 1 as i64 } else { 0 as i64 }; u_hit = 1; }
+        if u_hit == (0 as i32) { return 0 as i32; }
+        *(out_val as *i64) = r;
+        return 1 as i32;
+    }
+    if k == NODE_BINARY() {
+        let bd = node_binary_data(n);
+        let bop = (*bd).op;
+        let mut lv: i64 = 0 as i64;
+        let mut rv: i64 = 0 as i64;
+        let lok = cg_const_fold(((*bd).left) as *Node, &lv);
+        if lok == (0 as i32) { return 0 as i32; }
+        let rok = cg_const_fold(((*bd).right) as *Node, &rv);
+        if rok == (0 as i32) { return 0 as i32; }
+        let mut r: i64 = 0 as i64;
+        // ⚠️ 同上:分支块末句类型必须一致 ⇒ 不用 `return` 早退,用 flag。
+        let mut b_hit: i32 = 0 as i32;
+        if bop == TOKEN_PLUS() { r = lv + rv; b_hit = 1; }
+        else if bop == TOKEN_MINUS() { r = lv - rv; b_hit = 1; }
+        else if bop == TOKEN_STAR() { r = lv * rv; b_hit = 1; }
+        else if bop == TOKEN_SLASH() {
+            if rv != (0 as i64) { r = lv / rv; b_hit = 1; }
+        }
+        else if bop == TOKEN_PERCENT() {
+            if rv != (0 as i64) { r = lv % rv; b_hit = 1; }
+        }
+        else if bop == TOKEN_LTLT() { r = lv << rv; b_hit = 1; }
+        else if bop == TOKEN_GTGT() { r = lv >> rv; b_hit = 1; }
+        else if bop == TOKEN_AMP() { r = lv & rv; b_hit = 1; }
+        else if bop == TOKEN_PIPE() { r = lv | rv; b_hit = 1; }
+        else if bop == TOKEN_CARET() { r = lv ^ rv; b_hit = 1; }
+        if b_hit == (0 as i32) { return 0 as i32; }
+        *(out_val as *i64) = r;
+        return 1 as i32;
+    }
+    if k == NODE_CAST() {
+        let cd = node_cast_data(n);
+        let mut cv: i64 = 0 as i64;
+        let cok = cg_const_fold(((*cd).expr) as *Node, &cv);
+        if cok == (0 as i32) { return 0 as i32; }
+        // 目标类型按 node 的 type_ptr 截断(sema 已解出最终类型)
+        let ct_raw = (*n).type_ptr;
+        if ct_raw != (0 as *u8) {
+            let ct = ct_raw as *Type;
+            if (*ct).kind == KIND_PRIMITIVE() {
+                let cprim = (*ct).prim;
+                if cprim == PRIM_I8()  || cprim == PRIM_U8()  { cv = cv & (255 as i64); }
+                else if cprim == PRIM_I16() || cprim == PRIM_U16() { cv = cv & (65535 as i64); }
+                else if cprim == PRIM_I32() || cprim == PRIM_U32() { cv = cv & (4294967295 as i64); }
+            }
+        }
+        *(out_val as *i64) = cv;
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
 // cg_module — Pass A const data + Pass B function emit
 // ════════════════════════════════════════════════════
 
@@ -5733,9 +5968,25 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
                             let d_l_init_raw = (*d_l).init;
                             if d_l_init_raw != (0 as *u8) {
                                 let d_l_init = d_l_init_raw as *Node;
-                                if (*d_l_init).kind == NODE_INT() {
-                                    let d_l_int_val = (*(node_int_data(d_l_init))).value;
-                                    ir_emit_data_lld(ir, "%lld" as *u8, d_l_int_val);
+                                // W-173 (2026-11-01 真修):用常量折叠器求初始化器的值。
+                                // 修前只认 NODE_INT 字面量,其余一律 emit 0 ⇒
+                                // `let mut g: i32 = 1 + 2;` 读到 0。
+                                //
+                                // 折叠出来的值按**目标类型的宽度**截断
+                                // (i32 目标 ⇒ 低 32 位)—— 与运行时语义一致
+                                // (字面量默认 i32,`as` 才转换)。
+                                let mut d_l_folded: i64 = 0 as i64;
+                                let d_l_ok = cg_const_fold(d_l_init, &d_l_folded);
+                                if d_l_ok != (0 as i32) {
+                                    let d_l_prim = (*d_l_t).prim;
+                                    if d_l_prim == PRIM_I8()  || d_l_prim == PRIM_U8()  {
+                                        d_l_folded = d_l_folded & (255 as i64);
+                                    } else if d_l_prim == PRIM_I16() || d_l_prim == PRIM_U16() {
+                                        d_l_folded = d_l_folded & (65535 as i64);
+                                    } else if d_l_prim == PRIM_I32() || d_l_prim == PRIM_U32() {
+                                        d_l_folded = d_l_folded & (4294967295 as i64);
+                                    }
+                                    ir_emit_data_lld(ir, "%lld" as *u8, d_l_folded);
                                 } else {
                                     ir_emit_data_str(ir, "0" as *u8);
                                 }

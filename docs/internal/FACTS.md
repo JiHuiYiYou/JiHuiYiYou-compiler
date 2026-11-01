@@ -35,8 +35,8 @@
 
 | 门 | 值 |
 |---|---|
-| `python regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP**（281 total） |
-| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 281 · 可跑 261 · 真断言 201 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **264 PASS + 0 XFAIL + 0 failed + 20 SKIP**（284 total） |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 284 · 可跑 264 · 真断言 204 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
 | `compiler/tests/bootstrap/artifact_checks.sh` | **17 道**（`check_*` 函数数）· 0 FAIL |
 | `compiler/tests/bootstrap/fixed_point.sh` | N=10 跨代 byte-equal 全绿（`.il` 与 `.s`；门数由脚本内部计数，不在此声明） |
 | `compiler/tests/bootstrap/closure_check.sh` | PASS（v2.s == v3.s，逐字节相同） |
@@ -57,10 +57,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **165** |
+| 条目总数 | **174** |
 | ACTIVE | **1** —— [`W-170`](workarounds.md#w-170)：`jhyy build` 不处理 `#[link_section]` |
 | DEFERRED | 0 |
-| RESOLVED / SUPERSEDED / INVALID | 151 / 11 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 157 / 14 / 2 |
 
 ---
 

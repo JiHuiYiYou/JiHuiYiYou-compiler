@@ -1,0 +1,72 @@
+// toplevel_init.jhyy — 顶层 `let` 初始化器的常量折叠
+//
+// W-173 (2026-11-01 真修):顶层 `let mut g: T = expr;` 的初始化器之前**只对
+// NODE_INT 字面量**折叠,其余一律 emit 0 ⇒
+//
+//   let mut gx: i32 = (0 - 1);   // → 0  ❌(应当 -1)
+//   let mut gy: i32 = 2 * 3 + 4; // → 0  ❌(应当 10)
+//
+// 顶层全局落在 .data 段(编译期常量)⇒ 初始化器**必须**是编译期常量 ——
+// 这不是「少支持一个表达式」,而是「顶层全局的语义就是编译期常量」。
+//
+// 真修加了编译期常量折叠器(cg_const_fold),支持整数常量表达式:
+// 字面量 / 一元(- ~ !) / 二元(+ - * / % << >> & | ^) / 整型 as 转换。
+//
+// ── 期望值推导(纯算术,不抄实现输出)───────────────────────────────
+//   42                → 42
+//   1 + 2             → 3
+//   (0 - 1)           → -1
+//   2 * 3 + 4         → 10
+//   (10 + 5) * 2      → 30
+//   1 << 4            → 16
+//   300 as i32        → 300
+//   (5 as i64) + (3 as i64) → 8
+//
+// 截断(补码环绕,与运行时整数语义一致 —— spec §4.2「整数溢出是定义行为」):
+//   2147483647 + 1            (i32 目标) → -2147483648
+//   (4294967295 as u32) + (1 as u32) (u32 目标) → 0
+//
+// ⚠️ 折叠**不做隐式类型提升**(spec §2.4:无后缀整数字面量默认 i32)
+//    ⇒ `1 + 2` 按 i32 算;要 i64 必须显式 `as i64`。
+//
+// 记分:每错一个 case 加 1。EXIT = 0 ⇒ 全对。
+//
+// EXPECT: 0
+// EXPECT-OUT: "lit=42 expr=3 neg=-1 mul=10"
+// EXPECT-OUT: "paren=30 shift=16 cast=300 i64v=8"
+// EXPECT-OUT: "ovf=-2147483648 uovf=0"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+let mut lit: i32 = 42;
+let mut expr: i32 = 1 + 2;
+let mut neg: i32 = (0 - 1);
+let mut mul: i32 = 2 * 3 + 4;
+let mut paren: i32 = (10 + 5) * 2;
+let mut shift: i32 = 1 << 4;
+let mut cast: i32 = 300 as i32;
+let mut i64v: i64 = (5 as i64) + (3 as i64);
+let mut ovf: i32 = 2147483647 + 1;
+let mut uovf: u32 = (4294967295 as u32) + (1 as u32);
+
+fn main_jhyy() -> i32 {
+    let mut fail: i32 = 0;
+
+    printf("lit=%d expr=%d neg=%d mul=%d\n", lit, expr, neg, mul);
+    if lit != 42 { fail = fail + 1; }
+    if expr != 3 { fail = fail + 1; }
+    if neg != -1 { fail = fail + 1; }
+    if mul != 10 { fail = fail + 1; }
+
+    printf("paren=%d shift=%d cast=%d i64v=%d\n", paren, shift, cast, i64v as i32);
+    if paren != 30 { fail = fail + 1; }
+    if shift != 16 { fail = fail + 1; }
+    if cast != 300 { fail = fail + 1; }
+    if i64v != (8 as i64) { fail = fail + 1; }
+
+    printf("ovf=%d uovf=%d\n", ovf, uovf as i32);
+    if ovf != -2147483648 { fail = fail + 1; }
+    if uovf != (0 as u32) { fail = fail + 1; }
+
+    fail
+}

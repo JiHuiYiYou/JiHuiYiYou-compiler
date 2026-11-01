@@ -299,6 +299,15 @@
 | [W-168](#w-168) | RESOLVED | `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI... |
 | [W-169](#w-169) | SUPERSEDED | 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem... |
 | [W-170](#w-170) | ACTIVE | `jhyy build` **不处理 `#[link_section]`** ⇒ 该... |
+| [W-171](#w-171) | RESOLVED | 无符号序比较(`cu*`)emitter 没配 ⇒ 落 `add` 兜底 ⇒ 返回两数之和 |
+| [W-172](#w-172) | RESOLVED | 切片元素赋值整个被丢弃(无 store)+ `let mut` 绑定切片读也是垃圾值 |
+| [W-173](#w-173) | RESOLVED | 顶层 `let` 初始化器只对整数字面量求值 ⇒ 表达式 / f64 / struct 拿不到值 |
+| [W-174](#w-174) | SUPERSEDED | 数组按值传参 ⇒ callee 改到**调用方**数组 —— spec §10.1 措辞与 ABI §3.3 矛盾 |
+| [W-175](#w-175) | RESOLVED | `if/else` 分支块类型规则未入 spec + 报错无「怎么改」指引 |
+| [W-176](#w-176) | SUPERSEDED | stdlib 命名风格不统一 + 「import 后怎么调用」的规则没写进规范 |
+| [W-177](#w-177) | RESOLVED | `std/fmt.jhyy` 的过期注释 —— 「jhyy 不支持 *u8 + i64」 |
+| [W-178](#w-178) | RESOLVED | `-o` 的输出路径**无条件追加 `.exe`** ⇒ `-o game_run.exe` 得到 `game_run.exe.exe` |
+| [W-179](#w-179) | SUPERSEDED | `while` 里的 `continue` 跳过自增 ⇒ 死循环(惯用手写 while 的坑) |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12898,3 +12907,598 @@ $ grep -c '^\s*\.section' ls_b.s
 - 相关:**W-112**(`#[link_section]` 落到真的 .s —— 修了 `compile` 路径,漏了 `build`)
 - 相关:**W-168**(`jhyy build` 的 `-o` 与退出码 —— 同一批发现,顺带暴露了本条)
 - 现有门:`artifact_checks.sh link_section` —— 只验 `compile --no-link`,⇒ 抓不到本条
+
+---
+
+<a id="w-171"></a>
+## W-171: 无符号序比较(`cu*`)在 emitter 里**没配** ⇒ 落 `add` 兜底 ⇒ 返回**两数之和**
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — emitter 补齐 cu* 8 个 opcode + unsigned 条件码
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「短路 && + u8」那条时实测出的真根因)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:**
+`compiler/src0/codegen_amd64_emit_call.jhyy:2131-2151` 的 compare op dispatcher
+——它只认 `cslt` / `csgt` / `csle` / `csge` / `ceq` / `cne` **6 个**前缀,
+**`cult` / `cugt` / `cule` / `cuge`(`w`+`l` 共 8 个 opcode)一个都不认** ⇒ 全部落到
+文件末尾的 `add` 兜底分支(`codegen_amd64_emit_call.jhyy:2671` 附近)。
+
+前端(`compiler/src0/codegen.jhyy:3435-3478`)在**操作数类型是无符号**时
+正确地发出了 `cultw` / `cugtw` / `culew` / `cugew` / `cultl` / `cugtl` / `culel` / `cugel`
+—— 是**后端没接**。
+
+触发写法:**任何以无符号类型为左操作数的 `<` `<=` `>` `>=`**。
+
+**症状(2026-11-01 实测):**
+比较结果 = **两个操作数之和**,不是 0/1:
+
+```jhyy
+let a: u8 = 65 as u8;
+let b: u8 = 48 as u8;
+(a >= b) as i32   // → 113   (65 + 48 = 113)  ❌ 应当是 1
+(a <= b) as i32   // → 122   (65 + 57 = 122)  ❌ 应当是 0
+```
+
+覆盖 `u8` / `u16` / `u32` / `u64` 四种宽度、`<` `<=` `>` `>=` 四个算子
+—— 全部返回 `src1 + src2`。`==` / `!=` 走 `ceq` / `cnew` ⇒ **正常**。
+
+**衍生症状(比比较值错更致命):**
+
+1. **死循环** —— `while` 条件里的无符号比较恒真(和 ≠ 0):
+   ```jhyy
+   let mut k: u32 = 0;
+   while k < 3 { k = k + 1 as u32; }   // ❌ 死循环(实测 20s 超时)
+   ```
+   生成的 .s 是 `addl` + `cmpl $0` —— 即「加法结果非零即真」。
+
+2. **越界访问** —— 循环体里的 u8 边界判断恒真 ⇒ 索引跑飞 ⇒ ACCESS_VIOLATION:
+   ```jhyy
+   while *(buf + m) >= 48 as u8 && *(buf + m) <= 57 as u8 { m = m + 1; }
+   // ❌ 0xC0000005(实测:65+48=113 真、65+57=122 真 ⇒ 条件恒真 ⇒ 越界)
+   ```
+
+3. **`for i in 0..n`(n 无符号)侥幸正确** —— `for` 走
+   `codegen.jhyy:4359-4372` 的**另一条** `cmp_op_str` 选择路径,那里虽然也发
+   `cultw`,但循环变量类型推断把它转成了有符号 ⇒ 没踩到本条。
+   ⇒ **`for` 正确不代表 `while` 正确**。
+
+**根因:**
+compare dispatcher 用 `cg_find_sub(op_text, len, "cslt", 4)` 之类的**子串匹配**
+识别 op —— `cultw` 里没有 `cs` 前缀 ⇒ 4 个 `cs*` 分支全不命中;
+`ceq` / `cne` 也不命中;再往后的算术 op 链(`sub`/`mul`/`div`/`rem`/`and`/`xor`/`or`/`shl`/`shr`)
+也都不命中 ⇒ 一路落到最后的 `add` 兜底。
+
+⇒ **不是「短路 `&&` 的 phi 宽度问题」** —— `&&` / `||` / 单比较 / 纯表达式
+四种写法**全都错**,短路语义本身是对的(用有符号操作数实测:
+`0 && boom()` 不执行 `boom()`,`1 && boom()` 执行)。
+
+**workaround:**
+把无符号操作数**先转成有符号**再比较(转成 `i32` 即可 —— 值域 0..255 不会溢出):
+
+```jhyy
+// ❌ 不绕(触发本条):
+while *(buf + m) >= 48 as u8 { ... }
+
+// ✅ 绕:
+while (*(buf + m) as i32) >= 48 { ... }
+```
+
+`==` / `!=` **不需要绕**(走 `ceq` / `cnew`,正常)。
+
+**影响范围:**
+- 任何用无符号类型做序比较的用户程序 ⇒ **静默错值**,且常以死循环 / 越界崩溃现形。
+- 编译器自身**不受影响** —— `compiler/src0/` 里没有无符号序比较
+  ⇒ 自举闭环一直是绿的 ⇒ 这条能长期存活。
+- 现有门**完全盲**:`compiler/tests/examples/` 下**没有任何**无符号序比较用例
+  (`grep -l "u8 *[<>]"` 零命中),`regress.py` 里也没有 u8/u32/u64 相关测试
+  ⇒ 回归套件对这个洞是盲的。
+
+**失效条件:**
+emitter 的 compare dispatcher 补齐 `cult*` / `cugt*` / `cule*` / `cuge*` 8 个分支
+(或把「无符号」与「有符号」统一到同一套 cmp+setcc 发射路径)。
+
+⚠️ 修法要改 `compiler/src0/codegen_amd64_emit_call.jhyy` ⇒ 新增局部变量会移位
+模块级 temp 编号 ⇒ 自举产物行为漂移 ⇒ 需走「刷新自举锚点 + D43 baseline
+re-pin + 全量回归」一整套发版级流程(per W-168 / W-170 同款)。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_emit_call.jhyy:2131-2151`(compare dispatcher)
+  + `compiler/src0/codegen_amd64_emit_call.jhyy:2671` 附近(`add` 兜底)
+- 前端:`compiler/src0/codegen.jhyy:3435-3478`(正确发出 `cu*`)
+- 另见:`compiler/src0/codegen.jhyy:4359-4372`(`for` 的另一条 `cmp_op_str` 路径)
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 4.2「有符号 / 无符号、32 / 64 位、
+  浮点的比较指令按操作数类型分别选择」—— 规范写对了,**实现没做到**
+
+### 2026-11-01 真修
+
+**改了什么:** `compiler/src0/codegen_amd64_emit_call.jhyy` 三处:
+
+1. **compare dispatcher** —— 补 `cult` / `cugt` / `cule` / `cuge` 四个前缀的识别
+   (原先只认 `cslt`/`csgt`/`csle`/`csge`/`ceq`/`cne`)。
+   复用 `is_cslt`/`is_csgt`/`is_csle`/`is_csge` 作「是哪种比较」,新增
+   `is_unsigned_cmp` 标志区分 signed / unsigned。
+2. **`is_int_cmp` 宽度判定** —— 同样补上四个前缀 ⇒ `cugel` 的 `cmp_op_qt`
+   正确取 QBE_L(64 位)而不是 qt(比较结果恒为 word ⇒ 32 位)。
+   ⚠️ 漏了这一处会得到「64 位无符号比较被截成 32 位」——比原 bug 更隐蔽。
+3. **条件码选取** —— signed 用 `setl`/`setg`/`setle`/`setge`(读 SF/OF),
+   unsigned 用 `setb`/`seta`/`setbe`/`setae`(读 CF/ZF)。
+
+**为什么条件码必须分两组:** x86 的无符号比较条件码读 CF/ZF,有符号的读 SF/OF。
+用错一组 ⇒ 大数比较静默反号。
+
+**验证:**
+- `compiler/tests/examples/unsigned_cmp.jhyy`(新增门)—— 覆盖 u8/u16/u32/u64 四种宽度
+  × `<` `<=` `>` `>=` 四个算子 + `==`/`!=` + `while` 无符号条件。
+  含**高位值**判据(u8=200 / u32=4000000000 / u64=2^64-1)—— signed 实现会在
+  这些值上出错,是「真修 vs 假修」的分水岭。
+- 修前二进制(HEAD 的 `jhyy.exe`)跑同一测试 ⇒ 输出全错 + **EXIT=124(超时)**,
+  证明门**能抓到真失败**(不是恒过的假信号)。
+- 全量回归 262/262 PASS(见同批 W-172 / W-173 的真修)。
+
+**产物的汇编核对:** 修后生成的 `.s` 里 setcc 统计 = `seta`×3 / `setae`×4 /
+`setb`×1 / `setbe`×1 / `sete`×1 —— **无一个 signed 码混入**,且 unsigned 码齐全。
+
+**变异测试(2026-11-01,证明门在检验语义而不只是「没崩」):**
+把 `cult` 的条件码从 `setb` 改成 `setl`(模拟「只补了一半」)⇒ 重编 ⇒
+`unsigned_cmp.jhyy` 变红(EXIT=1,`u32: l<h=0` 应为 1)⇒ 门抓到了。
+
+---
+
+<a id="w-172"></a>
+## W-172: 切片元素赋值**整个被丢弃**(无 store)+ `let mut` 绑定切片**读也是垃圾值**
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — 切片写路径补齐 + mut 绑定走 16 字节拷贝
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「切片元素赋值静默失效」那条时实测)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:**
+1. **写** —— `compiler/src0/codegen.jhyy:3050` 的 `NODE_ASSIGN` → `NODE_INDEX`
+   分支只处理 `KIND_ARRAY() || KIND_POINTER()`:
+   ```jhyy
+   if (*at).kind == KIND_ARRAY() || (*at).kind == KIND_POINTER() {
+       ...  // 有 cg_store_enum_image ⇒ 真的写下去
+   }
+   // KIND_SLICE 没有分支 ⇒ 整个写被丢弃
+   ```
+2. **读** —— `let mut s: [*]T = ...` 的**初始化**多了一层 `alloc16` + `storel`,
+   存的是**槽地址**而不是 slice 值(16 字节 `{data, len}`)⇒ 后续读拿到的是错的。
+
+**症状(2026-11-01 实测):**
+```jhyy
+let arr: [i32; 4] = [10, 20, 30, 40];
+
+// 写:编译通过、运行无错、数组纹丝不动
+let mut s: [*]i32 = arr as [*]i32;
+s[0] = 999;
+printf("%d\n", arr[0]);      // → 10  ❌ 应当是 999
+
+// 读:let mut 绑定的切片读出垃圾值
+let mut s2: [*]i32 = arr as [*]i32;
+printf("%d\n", s2[0]);       // → 807402048  ❌ 应当是 10
+```
+
+**实测矩阵(2026-11-01):**
+
+| 形态 | 读 | 写 |
+|---|---|---|
+| `let s: [*]i32 = arr as [*]i32`(非 mut) | ✅ 10 | ❌ 无效 |
+| `let s2: [*]i32 = s`(非 mut 拷贝) | ✅ 10 | ❌ 无效 |
+| `let mut s3: [*]i32 = arr as [*]i32` | ❌ 垃圾值 | ❌ 无效 |
+| `let mut s4: [*]i32 = s`(mut 拷贝) | ❌ 垃圾值 | ❌ 无效 |
+
+⇒ **台账原描述「读正常、写不落地」只在**非 `mut` 绑定**下成立**;
+`let mut` 绑定 ⇒ **读写全废**。
+
+**根因:**
+- 写:`NODE_ASSIGN` 的 `NODE_INDEX` 分支缺 `KIND_SLICE` ⇒ IL 里只 emit 了
+  `%t55 =w copy 999`(右值),**没有任何 store**。
+- 读:`let mut` 的局部变量初始化路径对 slice 做了「存槽地址」而不是「拷贝 16 字节值」。
+
+**workaround:**
+用**裸指针**走(实测有效,写也能穿透到调用方数组):
+```jhyy
+let p: *i32 = arr as *i32;
+p[0] = 999;                  // ✅ arr[0] → 999
+*(arr as *i32 + 1 as i64) = 777;   // ✅ arr[1] → 777
+```
+
+**影响范围:**
+- 任何对切片做元素赋值 / 用 `let mut` 绑定切片的用户程序 ⇒ **静默 no-op**
+  或**静默错值**。
+- `for x in slice` 迭代**不受影响**(只读路径)。
+- 现有门**完全盲**:`compiler/tests/examples/array_to_slice.jhyy` 只验**读**且
+  用的是**非 mut** 绑定 ⇒ 正好绕开了两个坑。
+
+**失效条件:**
+- 写:`NODE_ASSIGN` 的 `NODE_INDEX` 分支补 `KIND_SLICE`(需要 slice 的
+  `data`/`len` 两字段布局处理,与 `NODE_INDEX` 读路径 `codegen.jhyy:3545`
+  已有的 slice 分支对称)。
+- 读:`let mut` 的聚合初始化走 `cg_copy_agg`(struct/array 已有,slice 缺)。
+
+**引用:**
+- 源码:`compiler/src0/codegen.jhyy:3050`(`NODE_ASSIGN` → `NODE_INDEX` 分支)
+  + `compiler/src0/codegen.jhyy:3545`(`NODE_INDEX` 读路径的 slice 分支 —— 只读侧有)
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 10.2 只列了「字面量 / 索引 / 子切片 /
+  长度 / 迭代」—— **未提赋值** ⇒ 规范没定义该行为
+
+### 2026-11-01 真修
+
+**改了什么:** `compiler/src0/codegen.jhyy` 两处:
+
+1. **切片元素赋值** —— `NODE_ASSIGN` 的 `NODE_INDEX` 分支补 `KIND_SLICE`:
+   `loadl` 取 data 指针 → 加索引偏移 → store(与 `NODE_INDEX` 读路径对称)。
+2. **`let mut` 切片绑定** —— 新增 `cg_copy_slice`:拷那 16 字节 `{data, len}`
+   (而不是只拷 8 字节地址)。
+
+**⚠️ 踩过的坑(重要,后来者必读):** slice 的「值」在 IR 里有**两种形态** ——
+  · **槽地址**形态:slice 字面量 / 表达式求值结果。存进一个槽时,槽里放的是那个
+    slice 槽的**地址**(8 字节)。例:`&[&[1,2,3], &[10,20,30]]` 的元素类型是 slice
+    ⇒ 元素槽里放的是内层 slice 槽的地址。
+  · **槽内容**形态:局部变量的**存储**。槽里放的是 `{data, len}` 那 16 字节。
+
+第一次修复时在 `cg_emit_store` 的 dispatcher 里**无条件**把 slice 路由到拷贝
+⇒ **`for_in_slice_nested` / `slice_iter_nested_basic` 两个既有测试当场崩
+(EXIT=127)** —— 因为 slice 字面量的元素是「槽地址」,被当成「槽内容」拷了 16 字节
+⇒ 元素值变成 `{地址, 垃圾}` ⇒ 迭代时越界。
+
+⇒ **教训**:`cg_emit_store` 被两种场景共用,不能一刀切。
+「拷 16 字节」只在**明确要值语义**的地方调用(本条: `let mut` 局部变量绑定),
+其余地方维持「存 8 字节槽地址」。修法 = 把拷贝逻辑拆成独立函数 `cg_copy_slice`,
+只在 `NODE_LET` 的 mut 分支调用。
+
+**验证:**
+- `compiler/tests/examples/slice_write.jhyy`(新增门)—— 四个 case:
+  非 mut 绑定 + 写 / mut 绑定 + 读 / mut 绑定 + 写 / 切片形参 + 元素赋值。
+  切片是**视图** ⇒ 写必须**穿透**到原数组。
+- 修前二进制跑同一测试 ⇒ EXIT=9(9 个 case 失败),`arr0=10`(写没生效)、
+  `mut_read=-1384123752`(垃圾值)、`bubble data=10,20,30,40`(没变)。
+- 全量回归 262/262 PASS(两个既有 slice 测试已恢复)。
+
+**变异测试(2026-11-01):** 把切片赋值分支改成 `if false` ⇒ 重编 ⇒
+`slice_write.jhyy` 变红(EXIT=8,`A: s0=10` 写没生效、`bubble data` 未变)⇒ 门抓到了。
+
+---
+
+<a id="w-173"></a>
+## W-173: 顶层 `let` 初始化器**只对整数字面量求值** ⇒ 表达式 / f64 / struct 拿不到值
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — 加编译期常量折叠器(整数常量表达式)
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「顶层 let 初始化器」那条时实测)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:**
+顶层 `let` / `let mut` 的初始化器 —— 表达式形式不被求值,槽位保持零初始化。
+
+**症状(2026-11-01 实测):**
+```jhyy
+let mut lit: i32 = 42;          // → 42    ✅ 字面量
+let mut expr: i32 = 1 + 2;       // → 0     ❌ 表达式(应当 3)
+let mut f_lit: f64 = 3.5;        // → 0     ❌ f64 字面量
+let mut s_lit: Pair = Pair{..};  // → 垃圾值 ❌ struct 字面量
+```
+
+**函数内同样写法正常**(对照组):
+```jhyy
+fn main_jhyy() -> i32 {
+    let mut fx: i32 = (0 - 1);   // → -1    ✅
+    let mut fy: i32 = 2 * 3 + 4; // → 10    ✅
+}
+```
+⇒ **不是「表达式求值不对」,是「顶层这条路径不求值表达式」**。
+
+**根因:**
+顶层初始化路径只对**字面量**做常量折叠,表达式被跳过 ⇒ 槽位保持零初始化。
+**未读 codegen 源码定位到具体行** —— 已知是「顶层变量初始化」与「函数内 let 初始化」
+两条路径不同,但具体哪个函数负责顶层初始化尚未定位。
+
+**workaround:**
+顶层只用字面量;需要表达式就放到函数体内(顶层 `let mut g = 5;` 这种
+「无类型标注 + 整数字面量」是安全的)。
+
+**影响范围:**
+- 顶层全局变量的初值 ⇒ **静默错值**(整数表达式得 0,f64 得 0,struct/指针读垃圾)。
+- 规范 § 3 已记载**一半**：「只有整数类型的顶层变量初始化正确:`let mut f: f64 = 3.5;`
+  读到 0(初始化器被丢弃);指针 / struct 类型的顶层变量是未定义读」——
+  但**没提「整数类型 + 表达式」这一格也是 0**,而这恰是本条最常见的触发形态。
+
+**失效条件:**
+顶层初始化走与函数内 `let` 相同的求值路径(或至少支持常量表达式折叠)。
+
+**引用:**
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 3(顶层变量)、§ 1.4(顶层声明)
+- 源码:顶层初始化路径(**待定位** —— 与函数内 `let` 初始化的分叉点)
+
+### 2026-11-01 真修
+
+**根因定位:** `compiler/src0/codegen.jhyy` 的 `cg_module` Pass A —— 顶层
+`let mut g_x: T = expr;` 走 `data $g_x = { w <value> }`(**编译期常量**,落 `.data` 段),
+而 value 只在 `NODE_INT` 时折叠,其余一律 emit `0`。
+
+**关键洞察:** 顶层全局落在 `.data` 段 ⇒ 它的初始化器**必须**是编译期常量。
+所以这不是「少支持一个表达式」的 bug,而是**顶层全局的语义就是编译期常量** ——
+修法就是补一个常量折叠器,而不是把顶层全局改造成「运行时初始化」(那要动
+整个初始化顺序,改动面大得多)。
+
+**改了什么:** `compiler/src0/codegen.jhyy` 新增 `cg_const_fold`(编译期常量折叠):
+
+| 形态 | 支持 |
+|---|---|
+| `NODE_INT` | ✅ 字面量 |
+| `NODE_UNARY` | ✅ `-x` / `~x` / `!x` |
+| `NODE_BINARY` | ✅ `+ - * / % << >> & \| ^` |
+| `NODE_CAST` | ✅ 整型之间的 `as`(按目标宽度截断) |
+
+折叠出的值按**目标类型的宽度**截断(i32 目标 ⇒ 低 32 位)—— 与运行时语义一致。
+
+**⚠️ 两条刻意的边界:**
+- **不做隐式类型提升** —— spec §2.4「无后缀整数字面量默认 i32」⇒ `1 + 2` 按 i32 算;
+  要 i64 必须显式 `as i64`。折叠器照此办理。
+- **f64 / struct / 指针类型的顶层变量仍然不折叠** —— 保持修前行为。
+  它们的语义问题与本条不同(spec §3 已记载「指针 / struct 类型的顶层变量是
+  未定义读」),不在本条的修复范围内。⇒ **规范 §3 那句话要改**:它现在只覆盖
+  「整数类型 + 整数字面量」,而修后是「整数类型 + 整数常量表达式」。
+
+**⚠️ 折叠失败(除零 / 非整型 / 不认识的形态)⇒ emit 0** —— 保持修前行为,不引入新语义。
+
+**验证:**
+- `compiler/tests/examples/toplevel_init.jhyy`(新增门)—— 覆盖字面量 / 四则 /
+  括号 / 移位 / `as` 转换 / i64 混合,外加**补码环绕**判据
+  (i32: `2147483647 + 1` → -2147483648;u32: `4294967295 as u32 + 1 as u32` → 0)。
+- 修前二进制跑同一测试 ⇒ EXIT=8(8 个 case 失败),`expr=0 neg=0 mul=0`。
+- 全量回归 262/262 PASS。
+
+**变异测试(2026-11-01):** 把折叠器调用退回「只认 NODE_INT」⇒ 重编 ⇒
+`toplevel_init.jhyy` 变红(EXIT=9,`lit=0 expr=0 neg=0 mul=0`)⇒ 门抓到了。
+
+---
+
+<a id="w-174"></a>
+## W-174: 数组按值传参 ⇒ callee 改到**调用方**数组 —— spec §10.1 措辞与 ABI §3.3 矛盾
+
+**状态:** SUPERSEDED closed 2026-11-01 (v4.1.3) — 不是待修的 bug:实现与 ABI §3.3 一致,矛盾的是语言规范「定长数组」那节的措辞
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「数组按值传参 → 栈槽踩踏」那条)
+**日期:** 2026-11-01
+
+**触发面:** `fn f(p: [i32; N])` —— 形参类型是定长数组。
+
+**症状(2026-11-01 实测):**
+```jhyy
+fn bump(p: [i32; 3]) -> i32 { p[0] = p[0] + 100; p[1] = 999; return p[0]; }
+let mut arr: [i32; 3] = [1, 2, 3];
+bump(arr);
+// → 返回 101;arr[0] == 101、arr[1] == 999  ← 调用方数组被改了
+```
+⇒ callee 与 caller **共享**同一个数组。
+
+**根因:** **不是内存不安全,是文档矛盾。**
+- **实现 = ABI § 3.3** —— 明文写着:「`[T; N]` 传**一个 `l`**（数组自身地址），
+  **不建副本**（实质按引用）」;「⚠️ 只有 `struct` 真正建副本。
+  `enum` / `[T; N]` / 切片是按地址传递。」
+- **spec § 10.1** 却写「按值传参时调用者建副本、传地址（见 ABI § 3.3）」——
+  引用了 ABI 段落,**结论却与它相反**。
+
+⇒ **矛盾的是 spec 的措辞,不是实现。** 修 spec 即可(不该改实现 ——
+那会与 ABI § 3.3 冲突,且破坏所有用户代码)。
+
+**not-a-bug:** 实现与 ABI § 3.3 **完全一致**(数组 = 按引用传递),语义**定义良好**、
+无内存不安全、无踩踏、无野指针。
+
+**实测的崩溃面 —— 复现不出来(2026-11-01,6 组形态全部稳定无崩):**
+
+| 形态 | 结果 |
+|---|---|
+| 单参数 + 写回 | 稳定,别名语义 |
+| 三参数(`many(x, y, z)`) | 稳定,三者各自别名到对应数组 |
+| `[i64; 16]` | 稳定 |
+| `[[i32; 3]; 2]` 嵌套 | 稳定 |
+| 临时量传参(`f([1,2,3])`) | 稳定 |
+| 递归 + 数组参数 | 稳定 |
+
+⇒ 外部台账声称的「**5/5 稳定崩** / `0xC0000005` / 栈槽踩踏 / 野指针 /
+Heisenbug」—— **本机 6 组形态全部复现不出**。该描述**无实测支撑**,
+与「W-102 池重叠」家族**无关**(W-102 是 self-hosted 编译器编泛型结构体字面量
+SEGV,已 RESOLVED,与数组传参语义无关)。
+
+**修法(已完成):** spec § 10.1 的措辞改成与 ABI § 3.3 一致,并**明写警告**
+「数组按值传参 = 按引用,callee 改得到调用方的数组;只有 `struct` 才是真按值」。
+
+**superseder:** 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` § 10.1(措辞已改)
+
+---
+
+<a id="w-175"></a>
+## W-175: `if/else` 分支块类型规则未入 spec + 报错无「怎么改」指引
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — spec §5.1 补规则 + 报错文案补指引
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「if/else 类型规则」那条)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:** 任何 `if/else` 的两个分支「末句类型不同」的程序。
+
+**症状(2026-11-01 实测):**
+```jhyy
+if c == 1 { say("x"); }        // 分支类型 = say 的返回类型(i32)
+else { do(); flag = 2; }        // 分支类型 = 赋值语句的类型(())
+// → error: if/else branches must have same type
+```
+报错只说「类型不同」,**不告诉用户分支类型是怎么定的** ⇒ 用户看不出怎么改。
+
+**根因:** 规则是「**分支块的类型 = 该块里最后一条语句的类型**」
+(赋值语句 → `()`;调用语句 → 调用的返回类型),但 spec § 5.1 只写了
+「有 else → 表达式,类型是两个分支的统一类型」—— **没写块类型怎么定**。
+
+**修法(已完成):**
+1. spec § 5.1 补完整规则 + 两个分支必须「以同种语句收尾」+ 修法示例。
+2. `compiler/src0/sema.jhyy` 的报错文案补指引:
+   `if/else branches must have same type: a branch block's type is the type of
+   its LAST statement (assignment -> (), call -> the call's return type), so
+   both branches must end with the same kind of statement`
+
+**⚠️ 踩过的坑(jhyy 侧 if/else 的类型规则很挑):**
+分支块末句类型必须**一致** ⇒ 形如
+`if c { r = -x; } else { return 0; }` 会报
+`if/else branches must have same type`(一边末句是赋值 `()`,一边是 `return` i32)。
+⇒ **同一函数里不能在一个分支 `return`、另一个分支赋值** ——
+改用 flag 变量 + 统一的 return。
+
+**引用:**
+- 规范:`docs/abis/jhyy-lang-spec-v4.0.0.md` § 5.1
+- 源码:`compiler/src0/sema.jhyy`(NODE_IF 的类型不一致分支)
+
+---
+
+<a id="w-176"></a>
+## W-176: stdlib 命名风格不统一 + 「import 后怎么调用」的规则没写进规范
+
+**状态:** SUPERSEDED closed 2026-11-01 (v4.1.3) — 命名风格是历史既有(改它破坏兼容性);规则已写进规范 § 15
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「import 前缀不统一」那条)
+**日期:** 2026-11-01
+
+**触发面:** 任何 `import <stdlib 模块>;` 之后调用模块函数。
+
+**症状(2026-11-01 实测):**
+- `import fmt;` ⇒ 调 `fmt_i32(...)`(模块名 + `_` + 函数名)
+- `import io;` ⇒ 调 `std_io_print(...)`(带 `std_` 前缀)
+- 写 `io_print(...)` ⇒ `undefined variable`(**没有**「你是不是想写 …」提示)
+
+⇒ 各模块的命名风格历史上不统一(`mem`/`fmt`/`string`/`arena` 用 `<mod>_<fn>`;
+`io`/`os`/`vec`/`math` 用 `std_<mod>_<fn>`)。
+
+**根因:** 命名风格是历史既有;**真正的缺陷是「规则没写」** ——
+读者只能从 § 15 的 API 表反推「import 后要写哪个名字」。
+
+**not-a-bug(不改命名的理由):** 统一前缀 ⇒ **重命名 stdlib 的公开 API** ⇒
+破坏所有用户已写的代码(这些名字已经进了用户的 `.jhyy` 文件)⇒ 代价远大于收益。
+**正确修法是把规则写清楚。**
+
+**⚠️ 「两套写法自相矛盾」这个判断不成立(2026-11-01 实测澄清):**
+外部台账称「import 时不许写 `mod::`」与「规范说可以用 `mod::fn()`」矛盾。
+实测**两者一致**:
+- `import std::vec;` 解析错误 ✓(import 用**模块名本身**,不带 `std::`)
+- `vec::std_vec_new(...)` **编译通过并运行** ✓(限定调用 = 「模块名::源码里的函数名」)
+- `fmt::fmt_i32(...)` **编译通过并运行** ✓
+
+⇒ 两处的「模块名」是**同一个东西**(`vec` / `fmt`,都不是 `std::vec`)。
+**没有矛盾。**
+
+**修法(已完成):** spec § 15 补「import 之后怎么调用」规则:
+- import **不加任何前缀**,直接用模块里定义的完整函数名
+- 列出两种命名风格(`<mod>_<fn>` vs `std_<mod>_<fn>`)+ 「不确定时看 § 15 的 API 表」
+- 提醒写错名字的报错是 `undefined variable`(无相似名提示)
+
+**superseder:** 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md` § 15(规则已补)
+
+---
+
+<a id="w-177"></a>
+## W-177: `std/fmt.jhyy` 的过期注释 —— 「jhyy 不支持 *u8 + i64」
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — 注释已订正(纯注释改动 ⇒ 产物逐字节不变)
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「stdlib 过期注释」那条)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:** `compiler/src0/std/fmt.jhyy` 的 `ptr_add` helper 上方注释。
+
+**症状:** 注释写「本地指针算术 helper (jhyy 不支持 *u8 + i64)」。
+但**指针算术早已实装** —— W-055「spec §9.5 指针算术 `p + 1` 整节未实现」
+已于 **v1.7.0** RESOLVED。
+
+**实测(2026-11-01):** `*(buf + i)`(buf 是 `*u8`、i 是 `i64`)正常工作
+—— 实测 `*(buf + 0)` = 100、`*(buf + 3)` = 103(缓冲区预填 100..107)。
+
+⇒ 注释在**误导后来人** —— 让人以为必须绕道写 `(p as i64 + off) as *u8`。
+
+**根因:** 注释写于指针算术实装之前,之后没跟着更新。
+
+**修法(已完成):** 注释改成「本地指针算术 helper」+ 说明
+「旧注释的『jhyy 不支持 *u8 + i64』**已过期**(W-055 已于 v1.7.0 关闭);
+本 helper 保留是为了**可移植性** —— 它不依赖指针算术的类型规则」。
+
+**⚠️ 纯注释改动是免费的** —— lexer 在 codegen 前剥掉注释 ⇒
+`jhyy.exe` 逐字节不变,不用刷锚点、不用重跑回归(per `feedback_*` 规约)。
+
+**引用:**
+- 源码:`compiler/src0/std/fmt.jhyy`(`ptr_add` 上方注释)
+- 相关:**W-055**(指针算术 `p + 1` 整节未实现 —— v1.7.0 RESOLVED)
+
+---
+
+<a id="w-178"></a>
+## W-178: `-o` 的输出路径**无条件追加 `.exe`** ⇒ `-o game_run.exe` 得到 `game_run.exe.exe`
+
+**状态:** RESOLVED closed 2026-11-01 (v4.1.3) — 已有 .exe 后缀就不追加
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「CLI -o 追加 .exe」那条)
+**日期:** 2026-11-01 (ACTIVE) → 2026-11-01 (真修)
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_compile` —— `exe_path` 的生成。
+
+**症状(2026-11-01 实测):**
+```
+$ jhyy compile game.jhyy -o game_run.exe
+$ ls
+game_run.exe.exe      ← ❌ 多了一个 .exe
+```
+
+**根因:** `exe_path = out_buf + ".exe"` **无条件**追加,
+没有「已经有了就别再加」的判断。
+
+**修法(已完成):** 加 `str_ends_with_exe(s)` helper(大小写不敏感)
+⇒ `exe_path` 已以 `.exe` 结尾时**不再追加**。
+(Windows 目标固定 `.exe`;用户显式给的后缀是 `.exe` 时尊重之。)
+
+**实测(修后):**
+| 命令 | 产物 |
+|---|---|
+| `-o o1.exe` | `o1.exe` ✓ |
+| `-o o2` | `o2.exe` ✓(保持原行为 —— 没后缀就补上) |
+| `-o o3.EXE` | `o3.EXE` ✓(大小写不敏感) |
+
+**⚠️ 踩过的坑(jhyy 语法):**
+1. 读字节必须写成 `(*((p as i64 + off) as *u8)) as i32` ——
+   直接 `as *i32` 的指针转换在 sema 里不被接受。
+2. `(*((s as i64 + n - (4 as i64)) as *u8)) as i32` 这样的**一行嵌套**会报
+   `type mismatch in binary` —— **同一算式拆成中间变量就正常**。
+   ⇒ `as` 与括号嵌套的解析边界不稳 ⇒ 这类算式一律拆开写。
+3. `cmd_run` 内部传的 `-o` 是 `<input>_run`(无 `.exe`)⇒ **不受本条影响**,
+   仍会正确补上 `.exe`。
+
+**引用:**
+- 源码:`compiler/src0/main.jhyy`(`cmd_compile` 的 `exe_path` 生成 + `str_ends_with_exe` helper)
+
+---
+
+<a id="w-179"></a>
+## W-179: `while` 里的 `continue` 跳过自增 ⇒ 死循环（惯用手写 while 的坑）
+
+**状态:** SUPERSEDED closed 2026-11-01 (v4.1.3) — 不是 bug:语义**符合规范**;已把警告补进规范
+**Filed-by:** 2026-11-01 (外部问题台账复核 —— 复核「continue 跳过自增」那条)
+**日期:** 2026-11-01
+
+**触发面:** `while` 循环体里 `continue` 出现在**自增语句之前**。
+
+**症状(2026-11-01 实测):**
+```jhyy
+// ❌ 死循环(实测 20s 超时)
+while i < 5 { if i == 2 { continue; } i = i + 1; n = n + 1; }
+
+// ✅ 正常(i=5 n=4)
+while i < 5 { i = i + 1; if i == 2 { continue; } n = n + 1; }
+```
+
+**根因:** `continue` 在 `while` 里跳到**条件重测** —— 循环体里 `continue` **之后**
+的语句一律不执行。`while` **没有**自增语句(自增是你自己写在循环体里的普通语句)
+⇒ `continue` 恰好把它跳过了 ⇒ 计数器永远不变 ⇒ 死循环。
+
+**not-a-bug:** 语义**符合规范** —— 语言规范「break / continue」那节明写着
+`while` 的 `continue` 目标是「**重新测试条件**」,`for` 的是 `i++`。
+⇒ 不是编译器 bug,是**惯用手写 `while` 的坑**。
+
+**修法(已完成):** 语言规范「break / continue」那节补警告:
+`while` 的 `continue` 直接跳到条件重测 ⇒ **自增必须写在 `continue` 之前**
+(或改用 `for` —— `for` 的 `continue` 会执行 `i++`)。
+
+**⚠️ 外部台账说「语义本身符合规范,但规范只字未提 continue」—— 后半句不准确:**
+规范**已经写了** `continue` 目标表(`while` → 重新测试条件 / `for` → `i++`),
+只是没配「自增写在 continue 之前会死循环」的警告 ⇒ 本条补的就是那个警告。
+
+**superseder:** 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md`「break / continue」那节(警告已补)

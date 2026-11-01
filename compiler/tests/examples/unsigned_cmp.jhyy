@@ -1,0 +1,112 @@
+// unsigned_cmp.jhyy — 无符号序比较(`<` `<=` `>` `>=` on u8/u16/u32/u64)
+//
+// W-171 (2026-11-01 真修):后端 compare dispatcher **只认** `cslt`/`csgt`/
+// `csle`/`csge`/`ceq`/`cne` —— `cult*`/`cugt*`/`cule*`/`cuge*` 8 个 opcode
+// 一个都不认 ⇒ 全部落 `add` 兜底 ⇒ **比较结果 = 两个操作数之和**。
+//
+// 修前实测(同一个二进制、同一条语句):
+//   let a: u8 = 65 as u8;  let b: u8 = 48 as u8;
+//   (a >= b) as i32   → 113   ← 65 + 48 = 113,不是 1
+//   (a <= b) as i32   → 122   ← 65 + 48 = 122,不是 0
+//
+// 危害不限于「值错」:
+//   · `while` 条件里的无符号比较恒真(和 ≠ 0)⇒ **死循环**
+//   · 循环体里的 u8 边界判断恒真 ⇒ 索引跑飞 ⇒ **越界访问 / 0xC0000005**
+//
+// 为什么这个洞能长期存活:**回归套件对无符号序比较完全是盲的**
+//   (`compiler/tests/examples/` 下原本没有任何一个无符号序比较用例,
+//    `regress.py` 里也没有 u8/u32/u64 相关测试)—— 本文件就是补这个门。
+//
+// ── 期望值推导(由无符号比较的数学定义推出,不抄实现输出)────────────
+// bool → i32 用 `if c { 1 } else { 0 }`(jhyy 的比较结果是 bool)。
+// 每个 case 期望 1 = 真 / 0 = 假。
+//
+// u8:  hi=200 lo=100  (200 > 100 无符号为真;若被当 signed 解释则 200 是负数 → 假)
+//   hi >  lo → 1      hi >= lo → 1      hi <  lo → 0
+//   lo >  hi → 0      lo >= hi → 0      lo <  hi → 1
+//   eq: a == a → 1    a != a → 0
+//
+// u32: h32 = 4000000000(> 2^31,signed 下是负数) l32 = 100
+//   h32 >  l32 → 1    h32 >= l32 → 1    l32 <  h32 → 1
+//
+// u64: h64 = 18446744073709551615(2^64-1,signed 下是 -1) l64 = 1
+//   h64 >  l64 → 1    h64 >= l64 → 1    l64 <  h64 → 1
+//
+// while: `while k < 3 { k = k + 1 }`(k: u32)必须终止且 k == 3
+//   修前:比较恒真 ⇒ 死循环(实测 20s 超时)
+//
+// 记分:每错一个 case 加 1,另外 while 不终止则根本不返回。
+// EXIT = 0 ⇒ 全对。
+//
+// EXPECT: 0
+// EXPECT-OUT: "u8: hi>lo=1 hi>=lo=1 hi<lo=0 lo>hi=0 lo>=hi=0 lo<hi=1"
+// EXPECT-OUT: "u8 eq: a==a=1 a!=a=0"
+// EXPECT-OUT: "u32: h>l=1 h>=l=1 l<h=1"
+// EXPECT-OUT: "u64: h>l=1 h>=l=1 l<h=1"
+// EXPECT-OUT: "u32 while k=3"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn b(x: bool) -> i32 {
+    if x { 1 } else { 0 }
+}
+
+fn main_jhyy() -> i32 {
+    let mut fail: i32 = 0;
+
+    /* ── u8 ── */
+    let hi: u8 = 200 as u8;
+    let lo: u8 = 100 as u8;
+    let c1 = b(hi > lo);
+    let c2 = b(hi >= lo);
+    let c3 = b(hi < lo);
+    let c4 = b(lo > hi);
+    let c5 = b(lo >= hi);
+    let c6 = b(lo < hi);
+    printf("u8: hi>lo=%d hi>=lo=%d hi<lo=%d lo>hi=%d lo>=hi=%d lo<hi=%d\n", c1, c2, c3, c4, c5, c6);
+    if c1 != 1 { fail = fail + 1; }
+    if c2 != 1 { fail = fail + 1; }
+    if c3 != 0 { fail = fail + 1; }
+    if c4 != 0 { fail = fail + 1; }
+    if c5 != 0 { fail = fail + 1; }
+    if c6 != 1 { fail = fail + 1; }
+
+    /* ── u8 相等(走 ceq/cnew,修前就是对的 —— 钉住别被改坏)── */
+    let a: u8 = 7 as u8;
+    let e: u8 = 7 as u8;
+    let c7 = b(a == e);
+    let c8 = b(a != e);
+    printf("u8 eq: a==a=%d a!=a=%d\n", c7, c8);
+    if c7 != 1 { fail = fail + 1; }
+    if c8 != 0 { fail = fail + 1; }
+
+    /* ── u32(高位值 > 2^31)── */
+    let h32: u32 = 4000000000 as u32;
+    let l32: u32 = 100 as u32;
+    let c9 = b(h32 > l32);
+    let c10 = b(h32 >= l32);
+    let c11 = b(l32 < h32);
+    printf("u32: h>l=%d h>=l=%d l<h=%d\n", c9, c10, c11);
+    if c9 != 1 { fail = fail + 1; }
+    if c10 != 1 { fail = fail + 1; }
+    if c11 != 1 { fail = fail + 1; }
+
+    /* ── u64(2^64-1)── */
+    let h64: u64 = 18446744073709551615 as u64;
+    let l64: u64 = 1 as u64;
+    let c12 = b(h64 > l64);
+    let c13 = b(h64 >= l64);
+    let c14 = b(l64 < h64);
+    printf("u64: h>l=%d h>=l=%d l<h=%d\n", c12, c13, c14);
+    if c12 != 1 { fail = fail + 1; }
+    if c13 != 1 { fail = fail + 1; }
+    if c14 != 1 { fail = fail + 1; }
+
+    /* ── while + 无符号条件:必须终止 ── */
+    let mut k: u32 = 0;
+    while k < 3 { k = k + 1 as u32; }
+    printf("u32 while k=%d\n", k as i32);
+    if k != (3 as u32) { fail = fail + 1; }
+
+    fail
+}

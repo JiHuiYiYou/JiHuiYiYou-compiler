@@ -1946,6 +1946,10 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
                     || cg_find_sub(op_text, op_text_len, "csgt" as *u8, 4 as i64) >= (0 as i64)
                     || cg_find_sub(op_text, op_text_len, "csle" as *u8, 4 as i64) >= (0 as i64)
                     || cg_find_sub(op_text, op_text_len, "csge" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "cult" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "cugt" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "cule" as *u8, 4 as i64) >= (0 as i64)
+                    || cg_find_sub(op_text, op_text_len, "cuge" as *u8, 4 as i64) >= (0 as i64)
                     || cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64)
                     || cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
                     is_int_cmp = 1 as i32;
@@ -2091,6 +2095,10 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let mut is_csge: i32 = 0 as i32;
     let mut is_ceq: i32 = 0 as i32;
     let mut is_cnew: i32 = 0 as i32;
+    // W-171 (2026-11-01 真修):当前比较是**无符号**(cult/cugt/cule/cuge)。
+    // x86 的 unsigned 条件码(setb/seta/setbe/setae)与 signed(setl/setg/setle/setge)
+    // 读的是不同的 flag ⇒ 必须分开选,不能共用一套。
+    let mut is_unsigned_cmp: i32 = 0 as i32;
     // v2.11.12 (W-074.6 + W-074.7 5-op 真修): and / or / xor / shl / shr emit
     // (per QBE IL spec — all 5 are valid IL ops used by jhyy codegen for big_test
     // bit_pack and other tests; previous v2.11.x had lexer silently skip them all).
@@ -2136,6 +2144,28 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             is_csle = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "csge" as *u8, 4 as i64) >= (0 as i64) {
             is_csge = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cult" as *u8, 4 as i64) >= (0 as i64) {
+            // W-171 (2026-11-01 真修): **无符号**序比较(cult/cugt/cule/cuge)。
+            // 修前:dispatcher 只认 cslt/csgt/csle/csge ⇒ cu* 全部落 `add` 兜底
+            //      ⇒ 比较结果 = 两操作数之和(实测 u8: 65>=48 → 113 = 65+48)。
+            //      ⇒ while 条件恒真 ⇒ 死循环 / 越界访问 ⇒ 0xC0000005。
+            // 这里复用 is_cslt/is_csgt/is_csle/is_csge 作「是哪种比较」,
+            // 用 is_unsigned_cmp 区分 signed(setl/setg/setle/setge)与
+            // unsigned(setb/seta/setbe/setae)—— x86 的条件码分两组:
+            //   signed:   setl/setg/setle/setge 读 SF/OF
+            //   unsigned: setb/seta/setbe/setae 读 CF/ZF
+            // cmp 的操作数顺序不变(src1 - src2),只是取 flag 的方式不同。
+            is_cslt = 1 as i32;
+            is_unsigned_cmp = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cugt" as *u8, 4 as i64) >= (0 as i64) {
+            is_csgt = 1 as i32;
+            is_unsigned_cmp = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cule" as *u8, 4 as i64) >= (0 as i64) {
+            is_csle = 1 as i32;
+            is_unsigned_cmp = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "cuge" as *u8, 4 as i64) >= (0 as i64) {
+            is_csge = 1 as i32;
+            is_unsigned_cmp = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "ceq" as *u8, 3 as i64) >= (0 as i64) {
             is_ceq = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "cne" as *u8, 3 as i64) >= (0 as i64) {
@@ -2597,7 +2627,32 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         // 注:GAS ATT `cmp src, dst` 是 `dst - src`。我们 %rax 已 = src1,
         // 要算 "src1 - src2" 的 flag 所以 cmp(-src2, %rax) → flags = src1 - src2。
         // 设 csltw %t1, %t2 → flag 配 setl("src1 < src2" signed)。
-        let cc: *u8 = if is_cslt != (0 as i32) { "l" as *u8 } else { if is_csgt != (0 as i32) { "g" as *u8 } else { if is_csle != (0 as i32) { "le" as *u8 } else { if is_csge != (0 as i32) { "ge" as *u8 } else { if is_ceq != (0 as i32) { "e" as *u8 } else { "ne" as *u8 } } } } };
+        //
+        // W-171 (2026-11-01 真修):**无符号**比较(cult/cugt/cule/cuge)读的是
+        // 另一组条件码 —— unsigned 用 CF/ZF,signed 用 SF/OF:
+        //   cult(无符号 <)  → setb   (CF=1)
+        //   cugt(无符号 >)  → seta   (CF=0 且 ZF=0)
+        //   cule(无符号 <=) → setbe  (CF=1 或 ZF=1)
+        //   cuge(无符号 >=) → setae  (CF=0)
+        // 修前这四个 op 压根没进这个分支(落 `add` 兜底)⇒ 结果 = 两数之和。
+        //
+        // ⚠️ cc 的选取用**扁平语句块**而非嵌套 if-else 表达式 ——
+        //   嵌套两层的 `if ... { if ... {} else {} } else { if ... {} }` 超过
+        //   jhyy parser 的嵌套能力(实测:error: expected ;, got })。
+        let mut cc: *u8 = "ne" as *u8;
+        if is_ceq != (0 as i32) {
+            cc = "e" as *u8;
+        } else if is_cnew != (0 as i32) {
+            cc = "ne" as *u8;
+        } else if is_cslt != (0 as i32) {
+            if is_unsigned_cmp != (0 as i32) { cc = "b" as *u8; } else { cc = "l" as *u8; }
+        } else if is_csgt != (0 as i32) {
+            if is_unsigned_cmp != (0 as i32) { cc = "a" as *u8; } else { cc = "g" as *u8; }
+        } else if is_csle != (0 as i32) {
+            if is_unsigned_cmp != (0 as i32) { cc = "be" as *u8; } else { cc = "le" as *u8; }
+        } else if is_csge != (0 as i32) {
+            if is_unsigned_cmp != (0 as i32) { cc = "ae" as *u8; } else { cc = "ge" as *u8; }
+        }
         let _c1 = sb_append_cstr(arena, s, "\tcmp" as *u8);
         let _c1s = sb_append_cstr(arena, s, size_suffix_for_qt(cmp_op_qt));
         let _c2 = sb_append_cstr(arena, s, " " as *u8);

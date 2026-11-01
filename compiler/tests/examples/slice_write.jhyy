@@ -1,0 +1,84 @@
+// slice_write.jhyy — 切片元素赋值 + `let mut` 切片绑定
+//
+// W-172 (2026-11-01 真修):两处 codegen 缺口,都是**静默**的。
+//
+// ① 切片元素赋值**整个被丢弃** —— `NODE_ASSIGN` 的 `NODE_INDEX` 分支只处理
+//    KIND_ARRAY / KIND_POINTER,没有 KIND_SLICE ⇒ IL 里只剩右值的 copy,
+//    **没有任何 store** ⇒ 编译通过、运行无错、数组纹丝不动。
+//
+// ② `let mut s: [*]T = ...` 绑定后**读出垃圾值** —— 该路径走
+//    cg_store_enum_image → cg_emit_store → primitive,按 qbe_type_of(slice)
+//    存 **8 字节** ⇒ 槽里放的是**槽地址**而不是 {data, len}
+//    ⇒ 后续 `s[0]` 从「地址+0」读 ⇒ 拿到 data 指针的低 32 位。
+//
+// 为什么这个洞能长期存活:`array_to_slice.jhyy` 只验**读**且用的是
+// **非 mut** 绑定 ⇒ 正好绕开了两个坑 —— 本文件把两个坑都补上。
+//
+// ── 期望值推导 ───────────────────────────────────────────────────
+// 切片是**视图**:写 `s[i] = v` 必须**穿透**到被切的原数组。
+//
+// A. 非 mut 绑定 + 写:
+//    s[0] = 999 ⇒ arr[0] = 999,且 s[0] 读回 999
+// B. mut 绑定 + 读: s[0] 必须等于 arr[0](修前是垃圾值)
+// C. mut 绑定 + 写: s[1] = 777 ⇒ arr[1] = 777,且 s[1] 读回 777
+// D. 切片参数形式:`bubble` 形参是 [*]i32,函数内 `arr[j] = arr[j+1]`
+//    ⇒ 调用方数组必须真的被改 ⇒ data = 20,30,40,40(滑动一格)
+//
+// 记分:每错一个 case 加 1。EXIT = 0 ⇒ 全对。
+//
+// EXPECT: 0
+// EXPECT-OUT: "A: s0=999 arr0=999"
+// EXPECT-OUT: "B: mut_read=10"
+// EXPECT-OUT: "C: s1=777 arr1=777"
+// EXPECT-OUT: "D: bubble data=20,30,40,40"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+// D: 切片形参 + 元素赋值(修前整个写被丢弃 ⇒ data 不变)
+fn bubble(arr: [*]i32) -> i32 {
+    let mut j: i32 = 0;
+    while j < 3 {
+        arr[j] = arr[j + 1];
+        j = j + 1;
+    }
+    return arr[0];
+}
+
+fn main_jhyy() -> i32 {
+    let mut fail: i32 = 0;
+
+    /* A: 非 mut 绑定 + 写(修前:编译通过、运行无错、数组不变) */
+    let arr: [i32; 4] = [10, 20, 30, 40];
+    let mut s: [*]i32 = arr as [*]i32;
+    s[0] = 999;
+    printf("A: s0=%d arr0=%d\n", s[0], arr[0]);
+    if s[0] != 999 { fail = fail + 1; }
+    if arr[0] != 999 { fail = fail + 1; }
+
+    /* B: mut 绑定 + 读(修前:垃圾值) */
+    let arr2: [i32; 4] = [10, 20, 30, 40];
+    let mut s2: [*]i32 = arr2 as [*]i32;
+    printf("B: mut_read=%d\n", s2[0]);
+    if s2[0] != 10 { fail = fail + 1; }
+
+    /* C: mut 绑定 + 写 + 读回 */
+    let arr3: [i32; 4] = [10, 20, 30, 40];
+    let mut s3: [*]i32 = arr3 as [*]i32;
+    s3[1] = 777;
+    printf("C: s1=%d arr1=%d\n", s3[1], arr3[1]);
+    if s3[1] != 777 { fail = fail + 1; }
+    if arr3[1] != 777 { fail = fail + 1; }
+
+    /* D: 切片形参 + 元素赋值 */
+    let mut data: [i32; 4] = [10, 20, 30, 40];
+    let sl: [*]i32 = data as [*]i32;
+    let r = bubble(sl);
+    printf("D: bubble data=%d,%d,%d,%d\n", data[0], data[1], data[2], data[3]);
+    if r != 20 { fail = fail + 1; }
+    if data[0] != 20 { fail = fail + 1; }
+    if data[1] != 30 { fail = fail + 1; }
+    if data[2] != 40 { fail = fail + 1; }
+    if data[3] != 40 { fail = fail + 1; }
+
+    fail
+}

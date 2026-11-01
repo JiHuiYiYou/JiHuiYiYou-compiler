@@ -259,6 +259,45 @@ fn str_concat_at(dst: *u8, off: i64, src: *u8) -> i64 {
     return off + n;
 }
 
+// str_ends_with_exe: s 是否以 ".exe" 结尾（大小写不敏感）
+//
+// P2-5 (2026-11-01):`-o` 的输出路径**无条件**追加 ".exe" ⇒ 用户写
+// `-o game_run.exe` 得到 `game_run.exe.exe`。本 helper 供调用方判断
+// 「已经有了就别再加」。
+fn str_ends_with_exe(s: *u8) -> i32 {
+    let n: i64 = strlen(s);
+    if n < (4 as i64) {
+        return 0 as i32;
+    }
+    // 末 4 字节 == ".exe"（大小写不敏感）
+    //
+    // ⚠️ 算式必须**拆成中间变量** —— 写成一行嵌套
+    //    `(*((s as i64 + n - (4 as i64)) as *u8)) as i32`
+    //    会报「type mismatch in binary」(实测:同一算式拆开后正常)。
+    //    `as` 与括号嵌套的解析边界不稳 ⇒ 一律拆开写。
+    let base: i64 = s as i64;
+    let off0: i64 = base + n - (4 as i64);
+    let p0: *u8 = off0 as *u8;
+    let c0: i32 = (*p0) as i32;
+    let off1: i64 = base + n - (3 as i64);
+    let p1: *u8 = off1 as *u8;
+    let c1: i32 = (*p1) as i32;
+    let off2: i64 = base + n - (2 as i64);
+    let p2: *u8 = off2 as *u8;
+    let c2: i32 = (*p2) as i32;
+    let off3: i64 = base + n - (1 as i64);
+    let p3: *u8 = off3 as *u8;
+    let c3: i32 = (*p3) as i32;
+    if c0 != (46 as i32) { return 0 as i32; }   // '.'
+    // 'e' / 'E'
+    if c1 != (101 as i32) && c1 != (69 as i32) { return 0 as i32; }
+    // 'x' / 'X'
+    if c2 != (120 as i32) && c2 != (88 as i32) { return 0 as i32; }
+    // 'e' / 'E'
+    if c3 != (101 as i32) && c3 != (69 as i32) { return 0 as i32; }
+    return 1 as i32;
+}
+
 // ════════════════════════════════════════════════════
 // inline_imports: 翻译 v0 resolve_imports (main.c:241) + resolve_one_import
 //   (main.c:101) → jhyy 版 AST-level merge。
@@ -1652,9 +1691,17 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
     let nul2 = (asm_path as i64 + off2) as *u8;
     store_byte_i32(nul2, 0 as i32);
     str_copy(exe_path, out_buf);
-    let off3 = str_concat_at(exe_path, n_o, ".exe" as *u8);
-    let nul3 = (exe_path as i64 + off3) as *u8;
-    store_byte_i32(nul3, 0 as i32);
+    // P2-5 (2026-11-01):`-o` 的输出路径**已有 .exe 就别再追加**。
+    // 修前无条件追加 ⇒ `-o game_run.exe` 产出 `game_run.exe.exe`。
+    // (Windows 目标固定 .exe;非 .exe 后缀是用户显式指定的 ⇒ 尊重之。)
+    if str_ends_with_exe(out_buf) != (0 as i32) {
+        let nul3e = (exe_path as i64 + n_o) as *u8;
+        store_byte_i32(nul3e, 0 as i32);
+    } else {
+        let off3 = str_concat_at(exe_path, n_o, ".exe" as *u8);
+        let nul3 = (exe_path as i64 + off3) as *u8;
+        store_byte_i32(nul3, 0 as i32);
+    }
 
     let mut r1: i32 = 0 as i32;
     if bil_rc == (2 as i32) {

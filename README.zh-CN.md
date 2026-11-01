@@ -136,7 +136,7 @@ echo $?    # => 42
 
 ```bash
 python regress.py
-# => 261/261 passed (全部有断言), 0 failed, 20 skipped (of 281 total)
+# => 264/264 passed (全部有断言), 0 failed, 20 skipped (of 284 total)
 ```
 
 ### 验证自举闭环
@@ -263,8 +263,8 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py` | **261 PASS + 0 XFAIL + 0 failed + 20 SKIP**(281 total) |
-| 断言强度审计 | 扫 281 / 可跑 261 / 真断言 201 / 零信号 0 |
+| `regress.py` | **264 PASS + 0 XFAIL + 0 failed + 20 SKIP**(284 total) |
+| 断言强度审计 | 扫 284 / 可跑 264 / 真断言 204 / 零信号 0 |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | PASS(N=10 —— `.il` 与 `.s` 跨代 byte-equal) |
 | `artifact_checks.sh` | **17 PASS / 0 FAIL** |
