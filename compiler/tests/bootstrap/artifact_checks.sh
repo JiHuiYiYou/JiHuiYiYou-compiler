@@ -293,6 +293,97 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# 1b. W-170 — `jhyy build` 必须与 `jhyy compile --no-link` 产出**逐字节相同**的 .s
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 症状(2026-10-30 实测,修前):`jhyy build` 产出的 .s 里**一条 .section 都没有**
+# —— `#[link_section(".text.boot")]` 在 build 路径上完全失效且**零告警**
+# (W-112 于 2026-10-20 修好了 compile 路径,漏了 build 路径)。
+#
+# 为什么是「逐字节比」而不是「grep .section」:
+#   ① 只 grep build 侧 ⇒ compile 侧被动过(丢了 .section)时门不会红
+#      —— 现有 check_link_section 覆盖那一侧,但它不在同一道门里。
+#   ② 两侧**各自独立**断言(.section 在 + 归属 _start)⇒ **两侧同时退化也红**。
+#   ③ 再加「两侧 .s 逐字节相同」⇒ 任何**残留**差异都红。
+#      (两条路径的 codegen 输入逐字节相同:同一个 build_il / 同一块 IR buffer /
+#       同一个 target / .s 里不嵌任何路径 ⇒ 产物必须逐字节相同)
+#
+# ⚠️ 覆盖面:只覆盖 in-mem 路径(四个 target 全是 BACKEND_SELF,正常路径恒走它)。
+#    fallback(in-mem 后端失败 ⇒ build_il 只落 .il、**不产 .s**)不覆盖 ——
+#    那是 W-170 之外的另一个缺口(W-171)。
+check_link_section_build() {
+    hdr "W-170  jhyy build 与 compile --no-link 的 .s 是否逐字节相同(含 #[link_section])"
+    [ -x "$JHYY_EXE" ] || { skip "link_section_build" "jhyy.exe 不存在"; return; }
+
+    local src="$WORK/lsb.jhyy"
+    local b="$WORK/lsb_b"      # build 产物(无扩展名 ⇒ .s 落在它旁边)
+    local c="$WORK/lsb_c"      # compile --no-link 产物
+    cat > "$src" <<'EOF'
+#[link_section(".text.boot")]
+fn _start() -> i32 { return 42; }
+fn main_jhyy() -> i32 { return _start(); }
+EOF
+
+    # ⚠️ 先删干净:上一轮的陈旧 .s 绝不能被当成本轮产物
+    # (W-086 那类「编译器静默 exit 0 但不产 .s」的假阳性)。
+    rm -f "$WORK/lsb_b.s" "$WORK/lsb_c.s" "$WORK/lsb_b.il" "$WORK/lsb_c.il"
+
+    if ! "$JHYY_EXE" build --target=amd64_win "$src" -o "$b" > "$WORK/lsb_b.log" 2>&1; then
+        badenv "link_section_build" "build 失败:$(tail -3 "$WORK/lsb_b.log" | tr '\n' ' ')"
+        return
+    fi
+    if ! "$JHYY_EXE" compile --target=amd64_win --no-link "$src" -o "$c" > "$WORK/lsb_c.log" 2>&1; then
+        badenv "link_section_build" "compile --no-link 失败:$(tail -3 "$WORK/lsb_c.log" | tr '\n' ' ')"
+        return
+    fi
+    if [ ! -s "$WORK/lsb_b.s" ]; then
+        badenv "link_section_build" "build 没产出 .s(lsb_b.s 不存在或为空)"
+        return
+    fi
+    if [ ! -s "$WORK/lsb_c.s" ]; then
+        badenv "link_section_build" "compile --no-link 没产出 .s(lsb_c.s 不存在或为空)"
+        return
+    fi
+
+    # ── 断言 1(两侧**各自独立**):.section .text.boot 必须在,且归属 _start ──
+    #
+    # 「归属 _start」用 awk 看**紧随 .section 之后的第一个 .globl 行** ——
+    # 只 grep `.section` 会漏掉「section 贴到别的函数上」这种错位。
+    local side f nsec owner
+    for side in b c; do
+        f="$WORK/lsb_$side.s"
+        # 注意:`grep -c` 无匹配时输出 0 但退出码为 1,`|| echo 0` 会拼成两行 0
+        # (第一版就栽在这)。用 `|| true`。
+        nsec=$(grep -cE '^[[:space:]]*\.section' "$f" 2>/dev/null || true)
+        nsec=${nsec:-0}
+        if [ "$nsec" -eq 0 ]; then
+            bad "link_section_build" "$side 侧的 .s 里 0 条 .section 指令 —— #[link_section] 是 no-op(b 侧=W-170 未修 / c 侧=W-112 回归)"
+            return
+        fi
+        if ! grep -qE '\.section[[:space:]]+\.text\.boot' "$f"; then
+            bad "link_section_build" "$side 侧有 $nsec 条 .section,但没有 .text.boot —— 属性名没生效"
+            return
+        fi
+        owner=$(awk '
+            /^[[:space:]]*\.section[[:space:]]+\.text\.boot/ { want = 1; next }
+            want && /^[[:space:]]*\.globl/ { print $2; exit }
+        ' "$f")
+        if [ "$owner" != "_start" ]; then
+            bad "link_section_build" "$side 侧 .section .text.boot 归属的函数是 '$owner'(期望 _start)—— section 贴错函数了"
+            return
+        fi
+    done
+
+    # ── 断言 2(最强):两条路径的 .s 必须**逐字节相同** ──
+    if ! cmp -s "$WORK/lsb_b.s" "$WORK/lsb_c.s"; then
+        bad "link_section_build" "build 的 .s 与 compile --no-link 的 .s **不逐字节相同** —— 两条路径仍有差异:$(diff "$WORK/lsb_b.s" "$WORK/lsb_c.s" 2>/dev/null | head -4 | tr '\n' ' ')"
+        return
+    fi
+
+    ok "link_section_build(build ≡ compile --no-link,逐字节相同,含 .section .text.boot)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 2. W-113 — asm!/fence 的字节必须落在 `ret` 之前
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -1228,6 +1319,7 @@ want helpers_symbols && check_helpers_symbols
 want crossvolume_rename && check_crossvolume_rename
 want build_o_flag && check_build_o_flag
 want link_section    && check_link_section
+want link_section_build && check_link_section_build
 want asm_before_ret  && check_asm_before_ret
 want holds_bitmap    && check_holds_bitmap
 want holds_cap_source && check_holds_cap_source

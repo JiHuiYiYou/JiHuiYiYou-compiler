@@ -1596,15 +1596,67 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
         out_buf = user_out;
     }
     let r = build_il(input, out_buf, t);
-    if user_out == (0 as *u8) { free(derived); }
     // W-168 (2026-10-30 真修):build_il 的返回值语义是
     //   2 = in-mem 自研后端已直接 emit .s(**成功**)
     //   0 = 老 .il-on-disk 路径(还要跑 run_backend)
     //   1 = 失败
     // cmd_compile 早就把这个 2 归一成 0,cmd_build 之前**直接透传**
     // ⇒ `jhyy build` 成功时退出码是 2 ⇒ shell / CI 把它当失败。
-    if r == (2 as i32) { return 0 as i32; }
-    return r;
+    if r == (1 as i32) {
+        if user_out == (0 as *u8) { free(derived); }
+        return 1 as i32;
+    }
+    //
+    // ⚠️ `free(derived)` 挪到函数末尾(下面):user_out==0 时 `out_buf` 就是
+    // `derived` ⇒ 在这里 free 之后 `out_buf` 会变悬垂指针。cmd_compile 也是
+    // 把 free 放在末尾的(main.jhyy cmd_compile 尾部)—— 正是为了避开这个坑。
+    //
+    // 算 .s 路径(与 build_il 内部、cmd_compile 同一公式:out_buf + ".s")
+    let n_b = strlen(out_buf);
+    let asm_buf = malloc(1024 as i64);
+    let asm_path = asm_buf;
+    str_copy(asm_path, out_buf);
+    let off_b = str_concat_at(asm_path, n_b, ".s" as *u8);
+    let nul_b = (asm_path as i64 + off_b) as *u8;
+    store_byte_i32(nul_b, 0 as i32);
+    if r == (0 as i32) {
+        // fallback:build_il 只写了 .il(它自己写的,同一公式 output + ".il"),
+        // .s 要靠 run_backend 补 —— 对齐 cmd_compile 的同一分支。
+        //
+        // W-183 (2026-11-02 真修):修前 cmd_build 这里**直接 return 0**
+        // ⇒ 磁盘上没有 .s,退出码却是 0 ⇒ shell / CI 以为成功了。
+        let il_buf = malloc(1024 as i64);
+        let il_path = il_buf;
+        str_copy(il_path, out_buf);
+        let off_i = str_concat_at(il_path, n_b, ".il" as *u8);
+        let nul_i = (il_path as i64 + off_i) as *u8;
+        store_byte_i32(nul_i, 0 as i32);
+        let r1 = run_backend(il_path, asm_path, t);
+        free(il_buf);
+        if r1 != (0 as i32) {
+            free(asm_buf);
+            if user_out == (0 as *u8) { free(derived); }
+            return 1 as i32;
+        }
+    }
+    // W-170 (2026-11-02 真修):把 `#[link_section("X")]` 的 `.section X` 插进 .s。
+    //
+    // 修前:该属性在 build 路径上**完全失效且零告警** —— 产出的 .s 里一条
+    // `.section` 都没有(实测 522 B vs compile 的 536 B)。根因:
+    // apply_link_section_directives 只在 cmd_compile 与 link_with_gcc 被调用,
+    // cmd_build 两处都不调 ⇒ 没有任何人消费 codegen 写的 side-file。
+    //
+    // 现在两条子命令的产物**逐字节相同** ⇒ `jhyy build` 可以替代
+    // `jhyy compile --no-link`。
+    //
+    // ⚠️ 为什么不在 build_il 里下沉(台账 W-170 的原草案):
+    //   build_il 的 fallback 路径此时 .s 还不存在,而 apply 会**先把 side-file
+    //   unlink 掉**(main.jhyy apply_link_section_directives)⇒ cmd_compile 之后
+    //   那次调用变 no-op ⇒ W-112 回归(--no-link 的 .s 丢 .section)。
+    let _lsd = apply_link_section_directives(asm_path);
+    free(asm_buf);
+    if user_out == (0 as *u8) { free(derived); }
+    return 0 as i32;
 }
 
 // cmd_compile: build + QBE + gcc。支持 `-o <output>` flag（v0.8 commit 4 补；

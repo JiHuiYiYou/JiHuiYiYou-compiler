@@ -6,17 +6,19 @@
 // the test verifies:
 // [SKIP 移除 2026-10-15] v1.4.4 把 jhyy.exe flip 成 jhyy-side binary 后本理由失效 —— 2026-10-15 去掉 SKIP,实测 PASS
 //   1. link_section-annotated fn compiles
-//   2. readelf shows the symbol in the custom section   ← ⚠️ 见下方「已知失效」
+//   2. readelf shows the symbol in the custom section   ← **这条本文件不验**(见文件头)
 //   3. main_jhyy returns 0 (EXIT:0)
 //
-// ⚠️ 已知失效(2026-10-15 实测,regress harness 判不出来,只能人工查):
-//   `#[link_section(".text.boot")]` 在当前 compiler/build/bin/jhyy.exe
-//   (jhyy-side)上**完全不生效** —— 实测 `_section_directive.buf` 是 0 字节,
-//   `objdump -h <exe>` 只有 `.text` 一段、没有 `.text.boot`,`_start` 落在
-//   普通 .text 里。所以下面第 2 条 "symbol in custom section" 事实上没在测。
-//   本文件因此只断言「带该属性的函数能编、能被调用、返回值正确」。
-//   复核命令(等修好后应能看到 .text.boot):
-//     objdump -h compiler/build/bin/_regress_link_section_boot.exe | grep text.boot
+// ⚠️ 本文件**仍只断言 `_start()` 返回 42** —— 它验不到 section 归属。
+//   (section 归属在 `.s` 层面验:门 `artifact_checks.sh` 的 `link_section`
+//    与 `link_section_build`,它们 grep 产物 .s 里的 `.section .text.boot`
+//    及其归属的函数名。)
+//
+//   属性本身**已打通**:W-112(2026-10-20)修好 `compile` 路径,
+//   W-170(2026-11-02)修好 `build` 路径 ⇒ 两条路径的 .s 逐字节相同。
+//   人工复核命令(看 .s 而不是 exe —— exe 里能不能看到 .text.boot 取决于
+//   链接器,不可靠):
+//     grep -A2 '\.section .text.boot' <产物>.s
 //
 // Verifiable via:
 //   readelf -S build/link_section_boot.exe | grep "\.text\.boot"   # ≥ 1 hit

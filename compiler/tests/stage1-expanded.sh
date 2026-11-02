@@ -58,10 +58,9 @@ for t in "${TESTS[@]}"; do
     rm -f "$v0_actual" "$v1_actual"
 
     # ⚠️ 用 `compile --no-link` 而不是 `build`:
-    #   (2026-10-30 W-168 修后 `jhyy build` 已支持 `-o`,但**仍不能**替代本段 ——
-    #    `cmd_compile` 产出 .s 后还会跑 `apply_link_section_directives`
-    #    (W-112 的 `#[link_section]` 处理),`cmd_build` 不跑 ⇒ 含该属性的程序
-    #    两条路径的 .s 不同。)
+    #   (2026-11-02 W-170 修后两条路径的 .s 已**逐字节相同** —— 但**本脚本
+    #    仍用 `compile --no-link`**:这条路径的 .s 是既有基线,换路径要重新锚定
+    #    基线,收益不抵成本。)
     #   这也是项目既有的惯用法(compiler/tests/bootstrap/closure_check.sh)。
     if ! "${JHY_0}" compile --no-link "${src}" -o "${t}_v0_tmp" >/dev/null 2>"$OUT_DIR/${t}_v0.err"; then
         echo "[FAIL] $t — v0 compile failed:"

@@ -201,9 +201,9 @@ flag:
 > ⚠️ **没有 `jhyy --version`** —— 它从来就不存在。跑它会打一行 `unknown command`
 > 并 **exit 1**。版本横幅在 **`jhyy --help` 的首行**(不带参数跑 `jhyy` 也一样)。
 >
-> ⚠️ `jhyy build` 与 `jhyy compile --no-link` **不等价**:后者在产出 `.s` 之后还会跑
-> `apply_link_section_directives`,`build` 不跑 ⇒ 用了 `#[link_section]` 的程序两条路径
-> 产出的 `.s` 不同(见 `W-170`)。工具链请用 `compile --no-link`。
+> ✅ `jhyy build` 与 `jhyy compile --no-link` 现在产出**逐字节相同**的 `.s`
+> (两条路径都处理 `#[link_section]`,`.section` 指令也一致)。这个等价性由
+> `link_section_build` 那道产物级门钉住。
 
 ---
 
@@ -267,9 +267,9 @@ JiHuiYiYou-compiler/
 | 断言强度审计 | 扫 285 / 可跑 265 / 真断言 205 / 零信号 0 |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | PASS(N=10 —— `.il` 与 `.s` 跨代 byte-equal) |
-| `artifact_checks.sh` | **17 PASS / 0 FAIL** |
+| `artifact_checks.sh` | **18 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS(v2.s == v3.s,逐字节相同) |
-| ACTIVE workaround | **1** —— [`W-170`](docs/internal/workarounds.md):`jhyy build` 不处理 `#[link_section]` |
+| ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.2.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.2.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.2.vsix` | 已发布(VS Code 扩展) |

@@ -177,9 +177,9 @@ cat test.s
 ./test.exe; echo $?
 ```
 
-⚠️ `jhyy build` 与 `jhyy compile --no-link` **不等价**：前者不跑
-`apply_link_section_directives` ⇒ 用了 `#[link_section]` 的程序两条路径产物不同
-（`W-170`）。工具链一律用 `compile --no-link`。
+✅ `jhyy build` 与 `jhyy compile --no-link` **等价**（`W-170` 已修,2026-11-02）：
+两条路径产出的 `.s` **逐字节相同**（含 `#[link_section]` 的 `.section` 指令）——
+门：`artifact_checks.sh` 的 `link_section_build`（它就是逐字节比这两条路径）。
 
 ---
 

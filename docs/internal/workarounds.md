@@ -298,7 +298,7 @@
 | [W-167](#w-167) | RESOLVED | alloc 池的栈预留**写死 8192 字节** ⇒ 每个函数的帧 ≥8352 ⇒... |
 | [W-168](#w-168) | RESOLVED | `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI... |
 | [W-169](#w-169) | SUPERSEDED | 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem... |
-| [W-170](#w-170) | ACTIVE | `jhyy build` **不处理 `#[link_section]`** ⇒ 该... |
+| [W-170](#w-170) | RESOLVED | `jhyy build` **不处理 `#[link_section]`** ⇒ 该... |
 | [W-171](#w-171) | RESOLVED | 无符号序比较(`cu*`)emitter 没配 ⇒ 落 `add` 兜底 ⇒ 返回两数之和 |
 | [W-172](#w-172) | RESOLVED | 切片元素赋值整个被丢弃(无 store)+ `let mut` 绑定切片读也是垃圾值 |
 | [W-173](#w-173) | RESOLVED | 顶层 `let` 初始化器只对整数字面量求值 ⇒ 表达式 / f64 / struct 拿不到值 |
@@ -311,6 +311,7 @@
 | [W-180](#w-180) | RESOLVED | `&mut [i32; N]` / `&T` **不能索引** ⇒ 「通过引用改数组元素」不可用 |
 | [W-181](#w-181) | SUPERSEDED | 数组 / 切片下标**不做运行时边界检查** ⇒ 越界直接踩内存 |
 | [W-182](#w-182) | SUPERSEDED | 崩溃**没有符号化栈回溯** ⇒ 定位靠手读 `.s` |
+| [W-183](#w-183) | RESOLVED | `jhyy build` 的 fallback 路径 —— **退出码 0 但磁盘上没有 `.s`** |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -12771,13 +12772,14 @@ usage 串抄的是 `compile` 的写法。
 - 自举闭环第 1 代收敛;`make` 产出新锚点(见下)
 - 全量回归 **258/278 PASS + 0 XFAIL + 0 failed + 20 SKIP**(含新增的
   `logical_nested.jhyy`,见 W-169)
-- `artifact_checks.sh` 全量 **17 PASS / 0 FAIL**
+- `artifact_checks.sh` 全量 **18 PASS / 0 FAIL**
 
 **⚠️ 修后的两个已知边界(别踩):**
-- **`jhyy build` ≠ `jhyy compile --no-link`**:后者在产出 .s 之后还会跑
-  `apply_link_section_directives`(W-112 的 `#[link_section]` 处理),
-  `cmd_build` **不跑** ⇒ 含该属性的程序两条路径的 .s 不同。
-  ⇒ bench / stage1-expanded.sh 继续用 `compile --no-link -o`,**不要**换成 `build -o`。
+- ~~**`jhyy build` ≠ `jhyy compile --no-link`**~~ —— **该边界已由 W-170 消除
+  (2026-11-02)**:两条路径产出的 .s 现在**逐字节相同**(含 `#[link_section]`
+  的 `.section` 指令;门:`artifact_checks.sh link_section_build`)。
+  ⇒ bench / stage1-expanded.sh **仍**用 `compile --no-link -o` —— 不是因为不等价,
+  而是那条路径的 .s 是既有基线,换路径要重新锚定基线,收益不抵成本。
 - `jhyy build` 仍是**只编不链**的子命令(不产 .exe)。
 
 **引用:**
@@ -12848,9 +12850,9 @@ v4.x 换成 **in-mem 自研后端**后,约束对象(QBE 的 nested phi)**已不�
 <a id="w-170"></a>
 ## W-170: `jhyy build` **不处理 `#[link_section]`** ⇒ 该 attribute 在 build 路径上静默 no-op
 
-**状态:** ACTIVE since 2026-10-30 (v4.1.2) — build 路径缺 apply_link_section_directures;真修待排期
+**状态:** RESOLVED closed 2026-11-02 (v4.1.3) — build 路径缺 apply_link_section_directures;新增常驻门 artifact_checks link_section_build
 **Filed-by:** 2026-10-30 (仓库清理 —— 补 W-168 时发现 `jhyy build` ≠ `jhyy compile --no-link`)
-**日期:** 2026-10-30
+**日期:** 2026-10-30 (ACTIVE) → 2026-11-02 (真修)
 
 **触发面:** `compiler/src0/main.jhyy` 的 `cmd_build` —— `jhyy build` 子命令。
 
@@ -12914,6 +12916,64 @@ $ grep -c '^\s*\.section' ls_b.s
 ---
 
 <a id="w-171"></a>
+### 2026-11-02 真修
+
+**改了什么:** `compiler/src0/main.jhyy` 的 `cmd_build` 两处:
+
+1. **W-170 本体** —— `build_il` 成功返回 2(in-mem 后端已写好 `.s`)之后,
+   照 `cmd_compile` 的现成模式算出 `asm_path = out_buf + ".s"` 并调
+   `apply_link_section_directives(asm_path)` ⇒ `.section` 指令进到 build 的产物里。
+2. **W-183(相邻缺口,一并修)** —— `build_il` 返回 0(fallback)时补调 `run_backend`
+   (修前**直接 return 0** ⇒ 磁盘上没有 `.s`,退出码却是 0)。
+
+**⚠️ 一个必须避开的坑:`free(derived)` 的位置。**
+`cmd_build` 里 `out_buf` 在没有 `-o` 时**就是 `derived`** 那个缓冲
+(`main.jhyy`: `let mut out_buf: *u8 = derived;`)⇒ 若在 `free(derived)` 之后
+再读 `out_buf`,就是 use-after-free。
+⇒ 本次把 `free(derived)` **挪到函数末尾**(`cmd_compile` 一直就是这么做的)。
+
+**⚠️ 为什么**不**按本条原来的「修法草案」下沉到 `build_il`(2026-11-02 复核时改判):
+
+| 草案(下沉到 `build_il` 的 in-mem 分支之后) | 实际采用(在 `cmd_build` 补调用) |
+|---|---|
+| 调用点**不减反增**:`cmd_compile:1731` 那次**仍必须保留** —— `build_il` 的 fallback 路径此时 `.s` **还不存在**(要等 caller 的 `run_backend` 之后才诞生)⇒ 下沉只覆盖 in-mem 路径 | 调用点 2 处(`cmd_compile` + `cmd_build`),与现状同量 |
+| 还要**移动 220 行**(`apply_link_section_directives` 定义在 `build_il` 之后,而 jhyy **无 forward reference**)⇒ diff 与回归面显著更大 | `cmd_compile` / `build_il` / `link_with_gcc` **一行不动** ⇒ W-112 零回归面 |
+| 把「`.s` 已存在」这个前置条件**藏进 `build_il`** ⇒ 放错位置(无条件调用)会:apply 先把 side-file unlink 掉、再 `fopen(.s)` 失败 ⇒ 之后 `cmd_compile:1731` 找不到 side-file ⇒ **W-112 回归** | 守卫条件写在**调用点上**(`if r == 2`),读者一眼看得见 |
+
+⇒ 真正的防漏机制是**门**(`link_section_build`),不是代码结构。
+
+**验证(2026-11-02 实测):**
+
+| 验证 | 结果 |
+|---|---|
+| 新门 `artifact_checks.sh link_section_build` × **修前二进制**(`git show HEAD:...jhyy.exe`) | ❌ **红**(exit 1):「b 侧的 .s 里 0 条 .section 指令」⇒ 门能抓到本条,不是恒绿 |
+| 新门 × **修后二进制** | ✅ **绿**(exit 0):「build ≡ compile --no-link,逐字节相同,含 .section .text.boot」 |
+| build 路径产物 | `.s` 536 B / 1 条 `.section`(修前 522 B / 0 条)⇒ 与台账 2026-10-30 的实测对齐 |
+| **compile 侧没被改坏** | 229 个 example 逐个用修前/修后二进制各编一次 `compile --no-link` ⇒ **.s 逐字节相同,0 差异** ⇒ W-112 零回归(实证,不是推理) |
+| 全量回归 | 265/265 PASS |
+
+**门的三个断言**(为什么不能只 grep):
+1. 两侧**各自独立**断言 `.section .text.boot` 在 + 归属 `_start`(紧随 `.section` 的第一个 `.globl`)
+   ⇒ **两侧同时退化也红**(只断言「build ≡ compile」时两侧同时坏仍绿)。
+2. 两侧 `.s` **逐字节相同** ⇒ 任何残留差异都红。
+   (成立前提:两条路径的 codegen 输入逐字节相同 —— 同一个 `build_il` / 同一块 IR
+   buffer / 同一个 target / `.s` 里**不嵌任何路径**(`.file` 计数 0、`dbgloc` 被丢弃)。)
+
+**变异测试(2026-11-02,证明断言不是空断言):**
+把门里 fixture 的 `#[link_section(".text.boot")]` 一行去掉 ⇒ 两侧都是 0 条
+`.section` ⇒ **断言 1 立刻红**(「b 侧的 .s 里 0 条 .section 指令」)⇒ 抓到了。
+⇒ 断言 1 抓的是真的,不是「cmp 恰好相等」蒙对的。
+
+**⚠️ 覆盖面:** 只覆盖 in-mem 路径(四个 target 全是 `BACKEND_SELF`,正常路径恒走它)。
+**W-183 的 fallback 分支没有门** —— 它只在 in-mem 后端 emit 失败时可触发
+⇒ 只能靠代码审阅保证,不要假装它被测到了。
+
+**引用:**
+- 源码:`compiler/src0/main.jhyy`(`cmd_build`)
+- 门:`compiler/tests/bootstrap/artifact_checks.sh` 的 `check_link_section_build`(新增)
+- 相关:**W-112**(compile 路径的同款修复 —— 本条是它的 build 侧对应物)
+- 相关:**W-168**(`jhyy build` 的 `-o` —— 同函数、同日挖出)
+
 ## W-171: 无符号序比较(`cu*`)在 emitter 里**没配** ⇒ 落 `add` 兜底 ⇒ 返回**两数之和**
 
 **状态:** RESOLVED closed 2026-11-01 (v4.1.3) — emitter 补齐 cu* 8 个 opcode + unsigned 条件码
@@ -13666,3 +13726,36 @@ $ ./prog.exe
 3. runtime 加崩溃处理器 + 栈展开
 
 **superseder:** 无(工具链策略变更尚未排期)—— 见上面「要做的前置条件」
+
+
+---
+
+<a id="w-183"></a>
+## W-183: `jhyy build` 的 fallback 路径 —— **退出码 0 但磁盘上没有 `.s`**
+
+**状态:** RESOLVED closed 2026-11-02 (v4.1.3) — fallback 分支补调 run_backend
+**Filed-by:** 2026-11-02 (W-170 复核时顺带挖出 —— 同函数、同根因)
+**日期:** 2026-11-02 (ACTIVE) → 2026-11-02 (真修)
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_build` —— `build_il` 返回 **0** 的分支
+(in-mem 自研后端 `codegen_amd64_run_text` **失败**时走这条)。
+
+**症状(修前):** `build_il` 在 fallback 路径下**只写 `.il`**,`.s` 要靠 caller 调
+`run_backend` 补 —— 而 `cmd_build` **不调** ⇒ 磁盘上没有 `.s`,
+但它 `return r`(= 0)⇒ **退出码 0**。
+
+⇒ 用户/CI 以为编译成功了,却找不到产物。
+
+**根因:** `cmd_compile` 的同一分支会调 `run_backend`(`main.jhyy` cmd_compile 的
+`r1 = run_backend(il_path, asm_path, t);`)⇒ **`cmd_build` 的路径处理比
+`cmd_compile` 少了一截**(与 W-170 同族:两处各算一遍,其中一处漏了后处理)。
+
+**修法(2026-11-02):** `cmd_build` 的 fallback 分支补调 `run_backend`,
+失败则返回 1(与 `cmd_compile` 对齐)。
+
+**⚠️ 这个分支**没有门**:它只在 in-mem 后端 emit 失败时可触发
+(四个 target 全是 `BACKEND_SELF`,正常路径恒走 in-mem)⇒ 只能靠代码审阅保证。
+
+**引用:**
+- 源码:`compiler/src0/main.jhyy`(`cmd_build` 的 fallback 分支)
+- 相关:**W-170**(`jhyy build` 的 `#[link_section]` —— 同函数、同日挖出)

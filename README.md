@@ -207,9 +207,9 @@ Targets: `amd64_win` (default, hosted Windows) · `amd64_win_freestanding` (UEFI
 > `unknown command` and exits 1. The version banner is the **first line of
 > `jhyy --help`** (and of `jhyy` with no arguments).
 >
-> ⚠️ `jhyy build` and `jhyy compile --no-link` are *not* equivalent: `build` does not run
-> `apply_link_section_directives`, so programs using `#[link_section]` produce different
-> `.s` on the two paths (see `W-170`). Prefer `compile --no-link` for tooling.
+> ✅ `jhyy build` and `jhyy compile --no-link` now produce **byte-identical** `.s`
+> (both apply `#[link_section]`, so the `.section` directives match too). The
+> equivalence is pinned by the `link_section_build` artifact check.
 
 ---
 
@@ -274,9 +274,9 @@ JiHuiYiYou-compiler/
 | Assertion audit | 281 scanned / 261 runnable / 201 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | PASS (N=10 — `.il` and `.s` byte-equal across generations) |
-| `artifact_checks.sh` | **17 PASS / 0 FAIL** |
+| `artifact_checks.sh` | **18 PASS / 0 FAIL** |
 | `closure_check.sh` | PASS (v2.s == v3.s, byte-identical) |
-| ACTIVE workarounds | **1** — [`W-170`](docs/internal/workarounds.md): `jhyy build` doesn't apply `#[link_section]` |
+| ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |

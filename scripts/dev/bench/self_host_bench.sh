@@ -50,11 +50,11 @@ run3() {
 # ── A 段:前端(lex→parse→sema→codegen→emit .s),不链接 ──
 #
 # ⚠️ 为什么用 `compile --no-link` 而不是 `build`:
-#   **两者不等价** —— `cmd_compile` 在产出 .s 之后还会跑
-#   `apply_link_section_directives`(把 `#[link_section("X")]` 的 `.section X`
-#   插进 .s,per W-112),而 `cmd_build` **不跑** ⇒ 含 `#[link_section]` 的程序,
-#   两条路径的 .s 不同。
-#   (2026-10-30 W-168 修后 `jhyy build` 已支持 `-o`,但仍**不能**替代本段。)
+#   (2026-11-02 W-170 修后两条路径的 .s 已**逐字节相同** —— `build` 现在也跑
+#    `apply_link_section_directives`(把 `#[link_section("X")]` 的 `.section X`
+#    插进 .s,per W-112)⇒ 连 `#[link_section]` 的归属都一致。
+#    但**本脚本仍用 `compile --no-link`**:这条路径的 .s 是既有基线,
+#    换路径要重新锚定基线,收益不抵成本。)
 #   这也是项目既有的惯用法 —— `compiler/tests/bootstrap/closure_check.sh`
 #   用的正是 `compile --no-link -o`。
 echo "===== A. jhyy compile --no-link (codegen only, no gcc link) ====="

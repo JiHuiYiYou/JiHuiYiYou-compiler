@@ -64,7 +64,7 @@
                 "panel": "new"
             },
             "problemMatcher": [],
-            "detail": "Compile .jhyy to .s only (no linking). NOTE: `jhyy build` does not apply #[link_section] — use `jhyy compile --no-link` for tooling (W-170)"
+            "detail": "Compile .jhyy to .s only (no linking). NOTE: `jhyy build` now produces byte-identical .s (W-170 closed)"
         }
     ]
 }
