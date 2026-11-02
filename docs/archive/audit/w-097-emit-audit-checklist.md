@@ -1,6 +1,6 @@
 # W-097 emit-path deep audit checklist
 
-**Date:** 2026-10-09 · **Author:** MiniMax-M3 · **Status:** in-progress (Phase 2 of W-097 sprint, per v4.0.2.3 plan)
+**Date:** 2026-10-09 · **Status:** in-progress (Phase 2 of W-097 sprint, per v4.0.2.3 plan)
 **Strategy:** per `feedback_deep_audit_checklist_first` — list all emit paths with operand-order / literal-emit / binop concerns BEFORE fixing, sub-bugs → fresh W-NNN entries
 
 ## Scope

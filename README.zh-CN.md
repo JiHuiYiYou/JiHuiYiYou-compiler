@@ -214,7 +214,7 @@ flowchart TB
     src[".jhyy 源码"] --> lex["Lexer → Token 流"]
     lex --> parse["Parser → AST"]
     parse --> sema["Sema → 标注 AST"]
-    sema --> il["codegen.jhyy<br/>发 QBE 风格 IL 文本到**内存**"]
+    sema --> il["codegen.jhyy<br/>发 QBE 风格 IL 文本到内存"]
     il --> sb["codegen_amd64_inmem<br/>lex → 解析 → emit → peephole"]
     sb --> asm[".s (amd64)"]
     asm --> ln["as + ld(gcc)"]
@@ -244,7 +244,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试(274 个 .jhyy + 5 个子目录)— regress.py 自动跑
+│   │   ├── examples/           集成测试(285 个 .jhyy + 5 个子目录)— regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -345,12 +345,13 @@ MIT —— 见 [`LICENSE`](LICENSE)。
 
 ---
 
-## Contributors
+## 贡献者
 
 - **人类作者**:JHYY
-- **AI 协作**:MiniMax-M3(通过 [Claude Code](https://claude.ai/code) CLI 工作流参与设计、编码、调试、文档)
+- **AI 辅助**:设计、编码、调试与文档由 AI 编码辅助工具
+  ([Claude Code](https://claude.ai/code) CLI 工作流)参与产出。
 
-自 v0.6 起所有 sprint 的实现 + 文档由 JHYY + MiniMax-M3 协作完成。
+自 v0.6 起所有 sprint 均由人机协作完成。
 
 ---
 

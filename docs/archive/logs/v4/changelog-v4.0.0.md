@@ -652,7 +652,7 @@ fn cg_local_t_from_global(global_t: i64) -> i64 {
 <a id="v4023"></a>
 ## v4.0.2.3 — W-075 mem_set i64-store 真修 (b32|shift|OR workaround for W-098)
 
-**Date:** 2026-10-09 · **Author:** MiniMax-M3 · **Status:** wip (single-commit ship pending)
+**Date:** 2026-10-09 · **Status:** wip (single-commit ship pending)
 
 ### Summary
 
@@ -761,7 +761,7 @@ fn mem_set(dst: *u8, val: i32, n: i64) -> *u8 {
 <a id="v4024"></a>
 ## v4.0.2.4 — W-098 i64 literal emit 真修 (3-tier: emit + IR + cast)
 
-**Date:** 2026-10-09 · **Author:** MiniMax-M3 · **Status:** wip (single-commit ship pending)
+**Date:** 2026-10-09 · **Status:** wip (single-commit ship pending)
 
 ### Summary
 
@@ -887,7 +887,7 @@ W-075 mem_set b32|shift|OR workaround 仍 valid (back-compat 测试 PASS)。Reve
 <a id="v404"></a>
 ## v4.0.4 — W-101 v4.0.4 wip Step 1 logging ship + Step 2 bitmap REVERTED (5th attempt)
 
-**Date:** 2026-10-11 · **Author:** MiniMax-M3 · **Status:** wip (single-commit ship pending, W-101 ACTIVE 仍阻塞 v4.0.0 final tag per user 政策 "v4 不发")
+**Date:** 2026-10-11 · **Status:** wip (single-commit ship pending, W-101 ACTIVE 仍阻塞 v4.0.0 final tag per user 政策 "v4 不发")
 
 ### Summary
 
@@ -1024,7 +1024,7 @@ emit_binop writes sete result to -16512(%rbp) (.s line 70238) → CLOBBER %t9191
 <a id="v405"></a>
 ## v4.0.5 — W-101 v4.0.5 wip attempt #6 separate address-holder pool REVERTED (6th attempt)
 
-**Date:** 2026-10-11 · **Author:** MiniMax-M3 · **Status:** wip (single-commit ship pending; W-101 ACTIVE 仍阻塞 v4.0.0 final tag per user 政策 "v4 不发")
+**Date:** 2026-10-11 · **Status:** wip (single-commit ship pending; W-101 ACTIVE 仍阻塞 v4.0.0 final tag per user 政策 "v4 不发")
 
 ### Summary
 
@@ -1165,7 +1165,7 @@ W-101 (ACTIVE since 2026-10-09) 仍 ACTIVE — fix direction (separate address-h
 <a id="v406"></a>
 ## v4.0.6 — W-101 attempt #7 1-iter RCA + 1-line edit fix caller (SUCCESS)
 
-**Date:** 2026-10-12 · **Author:** MiniMax-M3 · **Status:** wip (single commit pending; W-101 真根因修, **attempt #7 SUCCESS**)
+**Date:** 2026-10-12 · **Status:** wip (single commit pending; W-101 真根因修, **attempt #7 SUCCESS**)
 
 ### Summary
 

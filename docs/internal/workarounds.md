@@ -4877,7 +4877,7 @@ v1.8.1 patch 修了:
 - `feedback_document_workarounds_in_docs` workaround 必须详细登记
 - `feedback_changelog_umbrella` v1.x 单 umbrella CHANGELOG
 - `feedback_audit_single_commit_diff` audit 走 `git show <sha>` 不跨 commit diff
-- `feedback_commit_coauthor` MiniMax-M3 co-author
+- `feedback_commit_coauthor` commit trailer 必须带 co-author
 
 **v1.8.3.1 真修详情 (2026-08-29 ship 后 field test):**
 
@@ -6716,7 +6716,7 @@ W-097 audit checklist (`docs/archive/audit/w-097-emit-audit-checklist.md`) 原�
 **状态:** RESOLVED closed 2026-10-09 (v4.0.2) — i64 literal emit 真修 ship 3-tier fix:emit + IR + cast side
 **提交/说明:** 2026-10-09 (v4.0.2.4 wip
 **日期:** 2026-10-09 (W-075 mem_set 真修 2nd attempt 时 1-iter RCA 找真根因) → 2026-10-09 (W-097 deep audit + 3-tier fix ship)
-**Filed-by:** MiniMax-M3
+**Filed-by:** audit-w097-2026-10-09
 
 **触发面:**
 - 任何 i64 类型 literal > 32-bit range (high bit 31 set 或 high 32 bits non-zero) — codegen emit `movl $lit_lower32, -off(%rbp); movl -off(%rbp), %eax; cltq; movq %rax, -off(%rbp)` 模式,把 64-bit literal 截成 lower 32 bit + sign-extend,高 32 位丢
@@ -6821,7 +6821,7 @@ W-097 audit checklist (`docs/archive/audit/w-097-emit-audit-checklist.md`) 原�
 **状态:** RESOLVED closed 2026-10-09 (v4.0.2) — emit_call sret 路径无条件 `movl %eax, -<slot>(%rbp)` clobber 第一个 local (Stage 2 closure chain 第一关 SEGV 真修)
 **提交/说明:** 2026-10-09 (v4.0.2.5 wip — sret early-return 早返 ship
 **日期:** 2026-10-09 (W-097 hoist 7-site 真修后, Stage 1→2 PASS, Stage 2→3 SEGV in `parser__parse_expr` with `rcx=0` 1-iter RCA 找 sret clobber)
-**Filed-by:** MiniMax-M3
+**Filed-by:** audit-w097-2026-10-09
 
 **触发面:**
 - 任何 sret-style call: `let mut t = empty_token();` / `let mut t = parser_peek(...);` / etc — IR 形态 `call $fn(args)` 无 `=qt` 前缀, 走 sret 写回 caller-provided hidden first arg pointer (per Win/SysV ABI 大 struct ret)
@@ -6881,7 +6881,7 @@ if ret_temp_id == (0 as i64) {
 **状态:** RESOLVED closed 2026-10-12 (v4.0.6) — emit_binop ceqw dst_id 走 existing local address-holder slot 而非 new temp slot → Stage 2→3 SEGV at parse_expr
 **提交/说明:** 2026-10-12 (v4.0.6 wip — attempt #7 SUCCESS, 3-arg `cg_alloc_slot(state, size, is_addr)` + audit § 5 separate address-holder pool 物理 disjoint; 5/5 PASS on main.jhyy
 **日期:** 2026-10-09 (W-100 sret 真修 ship 后, Stage 2→3 closure 仍 SEGV; `parser__parse_expr+54146` 在 `mov %eax,(%r8)` with r8=0 1-iter RCA 找 ceqw slot 错位) → 2026-10-12 (attempt #7 SUCCESS 真修, 1-iter RCA 严格按 attempt #6 gdb evidence, 1.5h 闭环)
-**Filed-by:** MiniMax-M3
+**Filed-by:** audit-w097-2026-10-09
 
 **触发面:**
 - `parser__parse_expr` 第 130-180 行 ceqw 比较链 — 多个连续 `ceqw %tD1, %tD2, %t9191` 写回 dst_id

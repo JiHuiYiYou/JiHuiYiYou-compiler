@@ -220,7 +220,7 @@ flowchart TB
     src[".jhyy source"] --> lex["Lexer → Token stream"]
     lex --> parse["Parser → AST"]
     parse --> sema["Sema → annotated AST"]
-    sema --> il["codegen.jhyy<br/>emits QBE-style IL text to **memory**"]
+    sema --> il["codegen.jhyy<br/>emits QBE-style IL text to memory"]
     il --> sb["codegen_amd64_inmem<br/>lex → parse → emit → peephole"]
     sb --> asm[".s (amd64)"]
     asm --> ln["as + ld (gcc)"]
@@ -251,7 +251,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests (274 .jhyy files + 5 subdirectories) — run by regress.py
+│   │   ├── examples/           integration tests (285 .jhyy files + 5 subdirectories) — run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -271,7 +271,7 @@ JiHuiYiYou-compiler/
 | Metric | Value |
 |--------|-------|
 | `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) |
-| Assertion audit | 281 scanned / 261 runnable / 201 real assertions / 0 zero-signal |
+| Assertion audit | 285 scanned / 265 runnable / 205 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | PASS (N=10 — `.il` and `.s` byte-equal across generations) |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |
@@ -358,11 +358,10 @@ MIT — see [`LICENSE`](LICENSE).
 ## Contributors
 
 - **Human author:** JHYY
-- **AI collaborator:** MiniMax-M3 — contributes to design, implementation, debugging and
-  documentation through the [Claude Code](https://claude.ai/code) CLI workflow
+- **AI-assisted** — design, implementation, debugging and documentation are produced with AI
+  coding-assistant tooling ([Claude Code](https://claude.ai/code) CLI workflow)
 
-Since v0.6, every sprint's implementation and documentation have been produced by JHYY
-and MiniMax-M3 together.
+Since v0.6, every sprint has been built collaboratively with AI assistance.
 
 ---
 
