@@ -488,7 +488,7 @@ keyboard/mouse 事件的 message struct、focus revoke race、surface destructio
 | 表 | 当前适合表达 | 必须补充，否则无法静态验证 |
 |---|---|---|
 | `cap_init` | 对象类别、初始 rights/depth、init call、provenance seed | **目标 CNode、parent cap、init 阶段、生命周期 owner、quiesce callback offset、是否允许进一步 derive** |
-| `ipc_dispatch` | msg_tag、handler offset、cap offset 表 | **cap slot 位图、type/rights allowlist、handler 版本** |
+| `ipc_dispatch` | msg_tag、handler offset、cap offset 表 | **cap slot 位图、type/rights allowlist**（版本口径 = 全文件 `version` + `abi_version`，**不 per-handler** —— 见 § 5.3） |
 | `region_table` | 区域类别、地址、长度、R/W/X/share、增长/复制/pin/lazy | **cache/ordering、page size policy、owner、生命周期、WCET 属性** |
 | `contract`（建议） | 栈、sleep、中断、锁、分配、panic | **编译器输出是否可信、是否签名、是否可被 loader 忽略** |
 
@@ -525,7 +525,14 @@ cap_offsets 位图与 type_tag allowlist。
 
 ### 5.3 版本化与禁止隐式默认值
 
-- **表项必须版本化** —— loader 必须理解最低版本与 cap wire 扩展，不能交给服务进程
+- **版本是全局的，不 per-handler** —— 版本口径 = **binary-format § 4 Header 的 `version:u16`（格式版本）
+  + `abi_version:u8`（ABI 主版本）**；loader 按这两个字段决定能不能认这份文件
+  ⇒ **表项里不再放版本号**（`ipc_dispatch` / `cap_init` / `region_table` 都不放）。
+  - **为什么不用 per-handler 版本**：消息契约里逐 handler 版本 ⇒「一个文件里不同 handler
+    处于不同版本」成为常态 ⇒ loader 要做 per-handler 兼容矩阵 ⇒ 复杂度与收益不成比例。
+  - **handler 的行为差异已经有版本化的载体**：`msg_tag` + `contract` 子节
+    （cap slot bitmap / type allowlist / rights lower bound）—— 改了这些就是改了 `version`。
+  - loader 必须理解最低版本与 cap wire 扩展，不能交给服务进程 —— 这一条**由全局版本承担**。
 - **禁止隐式默认值** —— 未记载的字段不能靠 loader 猜
 - **未知 section kind 的处理策略必须显式** —— loader 可以拒绝未知 kind，
   但**不能把新 section 当垃圾数据**
@@ -554,6 +561,14 @@ cap_offsets 位图与 type_tag allowlist。
 - 若编译器让「持有 `&mut Frame`」直接操作物理页 ⇒ **越过边界**
 - 若内核只验证 cap 的 cnode_idx/rights，却拒绝暴露对象类型
   ⇒ **迫使每个服务用整数和 magic number 重建类型系统**
+
+> 📎 **本文里「unsafe」是概念性说法，不是关键字。**
+> JHYY **不引入 `unsafe` 关键字** —— 特权表达走**属性**
+> （`#[trusted]` / `#[unsafe_cap_ctor]`），决策与理由见
+> [`JHYY_编译器侧设计终版.md` § 5.1](JHYY_编译器侧设计终版.md#51-capt-rights--编译器侧实现要点)。
+> ⇒ 本文 § 7 / § 9 / § 12 里的「unsafe primitive / unsafe 构造函数 / unsafe 包装 /
+> unsafe API」读作「**不受语言检查保护的**」这一类语义，**不是**「JHYY 有个叫 unsafe 的关键字」。
+> ⚠️ 另注：`region_table` 的 kind 名 `unsafe_share` 是**字段名**，与关键字无关。
 
 ### 6.2 四种必须破例的情况
 

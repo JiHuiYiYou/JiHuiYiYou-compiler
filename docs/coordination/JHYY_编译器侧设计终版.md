@@ -440,6 +440,7 @@ target tuple `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv
 | `effect_table` | may_sleep/irq/preempt/alloc 的调用图结论 | loader、分析器 |
 | `lock_order` | class 偏序、边、强依赖 | loader、lockdep |
 | `cap_map` | handler 的 cap slot bitmap、type allowlist、rights lower bound | trusted IPC 校验 |
+| `version`（**全文件级**，不 per-handler） | 格式版本 + ABI 主版本 ⇒ 写进 `.jhyynb` Header（per binary-format § 4） | loader 判定能不能认这份文件 |
 | `layout_table` | type id、size、align、field fingerprint | kernel、CO-RE 式匹配 |
 | `naked_table` | handler stack budget、clobber、preserve | loader |
 | `termination_table` | panic category、noreturn、recoverable set | fault handler |
@@ -590,7 +591,7 @@ R4 单独说：`grant` 意味着「可以把这个能力再转给别人」，是
 |---|---|
 | 成本 | `unsafe` 是一整套语言级语义（块 / fn / trait / impl / lint 生态 / 与 borrow 的交互），而 JHYY 连 `&mut` 的完整语义都还停在 W-105 的**最小版** |
 | 需求 | JHYY 要的只有一件事：让「绕过 capability 构造」**可标注、可统计、可审计** ⇒ 属性就够 |
-| 零新语法 | `#[...]` 属性语法**已经存在**（`#[inline]` / `#[naked]` / `#[no_std]` / `#[link_section]`）⇒ 这是决定性理由。⚠️ **未知属性会被解析后静默忽略**（`parser.jhyy:parse_attributes` 的 else 分支只认 `inline`/`naked`/`link_section`，其余一路吃到 `]`）⇒ `#[ipc_handler]` / `#[trusted]` / `#[unsafe_cap_ctor]` **今天全是 no-op**（编译器里 `ipc_handler` 零命中），语义要另做 |
+| 零新语法 | `#[...]` 属性语法**已经存在**（`#[inline]` / `#[naked]` / `#[no_std]` / `#[link_section]`）⇒ 这是决定性理由。⚠️ **未知属性会被解析后静默忽略**（`parser.jhyy:parse_attributes` 的 else 分支只认 `inline`/`naked`/`link_section`，其余一路吃到 `]`）⇒ `#[ipc_handler]` / `#[trusted]` / `#[unsafe_cap_ctor]` **今天全是 no-op**（编译器里 `ipc_handler` 零命中），语义要另做<br>⚠️ **OS 侧 § 7 / § 9 / § 12 里通篇说的「unsafe」是概念性说法，不是关键字** —— 见 [OS 侧 § 6.1 的词汇口径注记](JHYY_OS侧设计终版.md#61-分工公式) |
 | 贴合场景 | cap 构造只发生在 **kernel bootstrap**（整个模块都是特权）⇒ **模块级** `#[trusted]` 更合适 |
 
 ⇒ **明确不做**：`unsafe` 关键字 / `unsafe fn` / `unsafe trait` / `unsafe` 块。
