@@ -127,7 +127,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | **整数隐式提升** | ❌ **未实装**（规则**已定**，见 §4.2）⚠️ | `i64 + 1` 报 "type mismatch in binary"；`i64 + (1 as i64)` 通过；`i64 < i64` 正常 ⇒ **不是比较运算符的问题**。而 `let x: i64 = 10` **通过**（字面量在 let/赋值处有 coerce，`sema.jhyy:2172-2183`）⇒ **同一套字面量在两个位置规则不同**。lang-spec §2.4 只写了「整数与浮点之间不允许隐式转换」，**整数之间没写** ⇒ 规范缺口。**已定规则**：字面量按期望类型解释、变量之间不转换（§4.2） |
 | UEFI EFIAPI wrapper | ❌ **未实装** | abi §12.8 —— `emit_entry_point` / `no_crt_init` 两个钩子都是空实现 |
 | 交叉容器后端（PE/ELF 由 target 决定） | ❌ **未实装** | abi §12.9 —— 容器格式由宿主机 `ld` 决定 |
-| Windows 控制台 UTF-8 | ❌ **运行时未设** | abi §12.14 —— `runtime.c` 的 `main` 不调 `SetConsoleOutputCP(65001)` |
+| Windows 控制台 UTF-8 | ✅ **已实装**（2026-10-31 起） | abi §12.14 —— `runtime.c` 的 `main` 在 **stdout 是控制台时**调 `SetConsoleOutputCP(CP_UTF8)` + `SetConsoleCP(CP_UTF8)`；管道 / 重定向时不动代码页 |
 | `emit_volatile` | ⚠️ **只发注释、什么都不做** | `codegen_amd64_emit_call.jhyy:2742`；后端**能**识别 volatile（`tok.qbe_type == QBE_VOLATILE_MARKER()`）却**无拒绝机制** |
 
 ### 2.3 三处已订正的旧结论
@@ -140,11 +140,16 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 
 > 📎 **动手前先写十行复现，确定是哪一类。别信任何人的转述，包括 AI 报告。**
 
-### 2.4 一处陈旧的规范条目（本轮审核新发现）
+### 2.4 两处陈旧的规范条目（本轮审核新发现）
 
 **abi §12.13「旁路文件走固定路径」已经过时** —— W-136（v4.0.21）已给 side-file 加 pid 后缀，
 实测 12 路并发逐字节相同。**该条应从偏离表移除**（表头已声明「已修复的偏离会从本表移除，编号随之前移」）。
 ⇒ 归入 v4.9(OS-5) 的 ABI 收敛一并订正。
+
+**abi §12.14「Windows 控制台 UTF-8 不由运行时设置」同样过时** —— 2026-10-31 起
+`runtime.c` 的 `main` 在 **stdout 是控制台时**调 `SetConsoleOutputCP(CP_UTF8)` + `SetConsoleCP(CP_UTF8)`
+（commit `54c4a23`）⇒ 权威 ABI §12.14 现行文已改口。**该条也应从偏离表移除**
+⇒ 与 §12.13 一并归入 v4.9(OS-5) 订正。
 
 ---
 
@@ -423,7 +428,7 @@ target tuple `amd64_win` / `amd64_win_freestanding` / `amd64_sysv` / `amd64_sysv
 
 **`.jhyynb` 的 contract section（kind=9）**：
 
-> ⚠️ **kind=9 不在 binary-format 里** —— binary-format § 4 的 section kind 只分配到 0–7
+> ⚠️ **kind=9 不在 binary-format 里** —— binary-format § 5「Section Table」的 section kind 只分配到 **0–8**（kind 8 = `.tls`，预留）
 > （`debug_group` = 6），**binary-format § 17「Open」第 5 条明说「Section kind 9-255 分配策略」是未决问题**。
 > ⇒ 下面的 kind=9 与 8 个子节是**本文的提案**（OS 侧 §2.2 同样把它标成「**建议新增**」），
 > **不是 binary-format 已记载的结论**；binary-format 侧记的是 § 12 `debug_group` 里的
@@ -885,7 +890,7 @@ E0601: capability rights escalation
 | 12.11 | SysV eightbyte 宽度规则只对第 0 个成立 | 偏离 SysV | OS-5 |
 | 12.12 | SysV 溢出的 f64 栈参缺 16 字节对齐 | 偏离 SysV | OS-4（**可提前**） |
 | **12.13** | **旁路文件走固定路径** | ⚠️ **已过时 —— W-136 已修** ⇒ **应从表移除** | OS-5 顺带订正 |
-| 12.14 | Windows 控制台 UTF-8 不由运行时设置 | 实现特征 | OS-3 |
+| **12.14** | **Windows 控制台 UTF-8 由运行时设置**（2026-10-31 起） | ⚠️ **已过时 —— 运行时已实装** ⇒ **应从表移除** | OS-5 顺带订正 |
 
 **验收门**：14 条降至 **≤ 3 条**且均为显式兼容性例外；abi-hash CI 不回归；
 hosted + freestanding 两套 smoke 全绿。
