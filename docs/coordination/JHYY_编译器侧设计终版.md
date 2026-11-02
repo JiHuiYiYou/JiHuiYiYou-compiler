@@ -112,7 +112,7 @@ bool 值未归一化、CLI 多余输入文件被静默忽略、整数隐式提�
 | `&&` / `\|\|` 短路（含嵌套） | `codegen.jhyy:3209-3248`；实测三种嵌套形状均短路 |
 | 数字字面量 `0o` / `0b` 前缀 | W-128（v4.0.20） |
 | side-file 路径加 pid 后缀 ⇒ 并发编译不互踩 | W-136（v4.0.21）；A/B 实测 12/12 逐字节相同 |
-| `0o`/`0b`/`alignof` 等已在回归门内 | regress 279 total（2026-10-30 实测 259 PASS + 0 XFAIL + 20 SKIP） |
+| `0o`/`0b`/`alignof` 等已在回归门内 | regress 全量门内（**基线数见 [FACTS.md § 2](../internal/FACTS.md#2-回归与门)** —— 不在此复述） |
 
 ### 2.2 P0 待做（逐条 + 证据）
 
@@ -590,7 +590,7 @@ R4 单独说：`grant` 意味着「可以把这个能力再转给别人」，是
 |---|---|
 | 成本 | `unsafe` 是一整套语言级语义（块 / fn / trait / impl / lint 生态 / 与 borrow 的交互），而 JHYY 连 `&mut` 的完整语义都还停在 W-105 的**最小版** |
 | 需求 | JHYY 要的只有一件事：让「绕过 capability 构造」**可标注、可统计、可审计** ⇒ 属性就够 |
-| 零新语法 | 属性语法**已经存在**（`#[naked]` / `#[no_std]` / `#[link_section]` / `#[ipc_handler]`）⇒ 这是决定性理由 |
+| 零新语法 | `#[...]` 属性语法**已经存在**（`#[inline]` / `#[naked]` / `#[no_std]` / `#[link_section]`）⇒ 这是决定性理由。⚠️ **未知属性会被解析后静默忽略**（`parser.jhyy:parse_attributes` 的 else 分支只认 `inline`/`naked`/`link_section`，其余一路吃到 `]`）⇒ `#[ipc_handler]` / `#[trusted]` / `#[unsafe_cap_ctor]` **今天全是 no-op**（编译器里 `ipc_handler` 零命中），语义要另做 |
 | 贴合场景 | cap 构造只发生在 **kernel bootstrap**（整个模块都是特权）⇒ **模块级** `#[trusted]` 更合适 |
 
 ⇒ **明确不做**：`unsafe` 关键字 / `unsafe fn` / `unsafe trait` / `unsafe` 块。
@@ -722,13 +722,14 @@ handler 所需的 rights 不超过调用 ABI 可携带范围；调用前后栈�
 #[ipc_handler(tag = 0x1001, version = 1, cap_slots = 1)]
 fn handle_map_frame(msg: &MapFrameMsg) -> MapFrameReply { ... }
 
-#[repr(c, align = 8)]
 struct MapFrameMsg {
     frame: Cap<Frame, RW>,
     vaddr: u64,
     _pad: [u8; 4],
 }
 ```
+
+> ⚠️ **jhyy 没有 `repr`**（lang-spec § 19.1「布局总原则」：无 `packed` / `repr(...)`，一律自然对齐 + 显式 `_pad*` 字段）⇒ 上面例子里**不写** `#[repr(c, align = 8)]`（实测那样写**根本编不过**：属性只认 `inline`/`naked`/`link_section`，`struct` 前放属性会被当表达式位置解析而报错）。`_pad: [u8; 4]` 是**显式补齐**，不是 `repr` 的活。
 
 **cap-offset 表的 wire 格式仍由内核解析** ⇒ 内核必须检查 offset、slot 存在性和 rights，
 但 **trusted sender 的布局不一致被前移到编译期**。
@@ -910,7 +911,7 @@ hosted + freestanding 两套 smoke 全绿。
 |---|---|---|
 | **规则转化率** | 「文档里写着」→「编译不过」的规则条数 | 逐期递增（见 §8.1） |
 | **静默错误清零** | P0 七项中已闭合的项数 | **0 / 7**（P0 未启动） |
-| **静默错误残余** | `spec_argc_argv` 式「验的不是它声称的东西」的门数 | 回归套件 **0 XFAIL**（2026-10-30：259 PASS + 0 XFAIL + 20 SKIP / 279 total） |
+| **静默错误残余** | `spec_argc_argv` 式「验的不是它声称的东西」的门数 | 回归套件 **0 XFAIL**（基线数见 [FACTS.md § 2](../internal/FACTS.md#2-回归与门)） |
 
 ### 8.3 每个新特性的准入检查表
 

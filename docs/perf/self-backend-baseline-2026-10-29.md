@@ -118,7 +118,7 @@ prologue frames=1045   chkstk calls=1045
 | 风险 | 对策 |
 |---|---|
 | pre-scan `per_fn_alloc` 低估 ⇒ 池长出帧外 ⇒ 静默踩坏栈 | 该估算**自带余量**(`total_a + max(total_a/2, 8, 64-bit binop 数)*8`,`state.jhyy:2148`),不是裸和;**再加一条响亮失败**:函数体 emit 完检查池底没越过预留边界,越了直接编译失败(沿用 W-120 / W-130 的「响亮失败远好过静默错代码」规矩) |
-| 帧变小后暴露原本被大帧意外撑住的越界 | 全量 regress + 自举闭环 + `artifact_checks.sh` 14 条门全绿才算过 |
+| 帧变小后暴露原本被大帧意外撑住的越界 | 全量 regress + 自举闭环 + `artifact_checks.sh` 全部门全绿才算过（门数见 [FACTS § 2](../internal/FACTS.md#2-回归与门)） |
 | `artifact_checks.sh` 的 `per_fn_frame` 门断言 f500 vs f1099 帧比 < 4 | 帧变小后比值只会更稳;但**门要重新验一次**(造红灯) |
 
 **新增常驻门**(建议):`artifact_checks.sh frame_bloat` ——

@@ -126,7 +126,7 @@ v4.6+ ─ 语言特性链(lifetime → closure → dyn Trait → HKT)
 | 风险 | 对策 |
 |---|---|
 | pre-scan `per_fn_alloc` 低估 ⇒ 池长出帧外 ⇒ 静默踩坏栈 | 该估算**自带余量**(`total_a + max(total_a/2, 8, 64-bit binop 数)*8`,`state.jhyy:2148`);**再加响亮失败**:函数体 emit 完检查池底未越过预留边界,越了直接编译失败(沿用 W-120 / W-130 的规矩) |
-| 帧变小后暴露原本被大帧意外撑住的越界 | 全量 regress + 自举闭环 + `artifact_checks.sh` 14 条门全绿 |
+| 帧变小后暴露原本被大帧意外撑住的越界 | 全量 regress + 自举闭环 + `artifact_checks.sh` 全部门全绿 |
 | `per_fn_frame` 门(f500 vs f1099 帧比 < 4)语义变化 | 重新验 + 造红灯 |
 
 **新增常驻门** `artifact_checks.sh frame_bloat`:断言「真实函数帧中位数 < 1KB」
@@ -206,9 +206,9 @@ alloc_pool_size = 8192 + per_fn_alloc
 **gate**: `-O1` 与 `-O0` 语义等价(同一组用例输出逐字相同);
 优化后 `.s` 长度 ≤ 不优化 +5%;**`-O0` 必须仍 byte-equal**。
 
-### v4.3.1 —— `artifact_checks.sh` 去文本耦合
+### v4.4.3 —— `artifact_checks.sh` 去文本耦合
 
-**为什么现在做**:这 14 条门里有 4 条是**汇编文本断言**
+**为什么现在做**:这 18 条门里有 4 条是**认死寄存器名 / 栈槽编号 / 帧布局字面形状的断言**
 (`holds_bitmap` 认死 `%r8` + `%tN` 注释格式;`sysv_memory_class` 认死
 `movq %r10, 0(%rsp)`;`sysv_arg_spill` 认死 `r8d`/`r9d`/`16(%rbp)`;
 `per_fn_frame` 认死 `subq $N, %rsp` 的形状)。
@@ -245,7 +245,7 @@ v4.4 的寄存器分配器会**同时**改寄存器名、栈槽编号、帧布�
 - 新门:「`-O0` 产物 sha 与基线一致」+「`-O1` 产物访存指令数显著下降」
 - 分步 ship,每步能单独回滚
 
-**gate**: 每子版本独立可 ship;`artifact_checks` 的 4 条文本耦合门在 v4.3.1
+**gate**: 每子版本独立可 ship;`artifact_checks` 的 4 条文本耦合门在 v4.4.3
 之后不再拦路;全量 regress + 自举闭环 + perf 数字每版记录。
 
 #### v4.4.0 实施要点(2026-10-29 测量 + 源码勘察得出)
@@ -486,7 +486,7 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 - **不做 `-O2` / `-O3` / PGO / LTO** —— v4.3 只做 `-O1`
 - **不重写 `regalloc.jhyy`** —— 复用它的贪心分配核心,重写的是它周围缺失的 90%
 - **不改默认优化级别** —— 默认保持 `-O0`(现有 byte-equal 门全绿)
-- **不碰 `artifact_checks.sh` 的判据语义**,直到 v4.3.1 专门处理
+- **不碰 `artifact_checks.sh` 的判据语义**,直到 v4.4.3 专门处理
 
 ---
 
@@ -498,7 +498,7 @@ eligible **58070 = 58070**、池满 **1345 = 1345**、分配 56725 vs 56719(差 
 4. 往 [`docs/internal/workarounds.md`](../../internal/workarounds.md) 登记新发现的 workaround
 
 > ⚠️ **改 codegen 不会让任何 sha 基线变红** —— 所有门都是运行时算 sha 比两次运行。
-> 真正会红的是 `artifact_checks.sh` 的 4 条汇编文本断言(v4.3.1 处理)和
+> 真正会红的是 `artifact_checks.sh` 的 4 条文本耦合断言(v4.4.3 处理)和
 > 需要重新提交 `jhyy.exe` 这件事。
 
 ## Cross-ref
