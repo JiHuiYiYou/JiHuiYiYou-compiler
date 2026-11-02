@@ -725,11 +725,11 @@ fn handle_map_frame(msg: &MapFrameMsg) -> MapFrameReply { ... }
 struct MapFrameMsg {
     frame: Cap<Frame, RW>,
     vaddr: u64,
-    _pad: [u8; 4],
+    _pad: [u8; 8],
 }
 ```
 
-> ⚠️ **jhyy 没有 `repr`**（lang-spec § 19.1「布局总原则」：无 `packed` / `repr(...)`，一律自然对齐 + 显式 `_pad*` 字段）⇒ 上面例子里**不写** `#[repr(c, align = 8)]`（实测那样写**根本编不过**：属性只认 `inline`/`naked`/`link_section`，`struct` 前放属性会被当表达式位置解析而报错）。`_pad: [u8; 4]` 是**显式补齐**，不是 `repr` 的活。
+> ⚠️ **jhyy 没有 `repr`**（lang-spec § 19.1「布局总原则」：无 `packed` / `repr(...)`，一律自然对齐 + 显式 `_pad*` 字段）⇒ 上面例子里**不写** `#[repr(c, align = 8)]`（实测那样写**根本编不过**：属性只认 `inline`/`naked`/`link_section`，`struct` 前放属性会被当表达式位置解析而报错）。`_pad: [u8; 8]` 是**显式补齐**，不是 `repr` 的活（Cap 8B + vaddr 8B + pad 8B = **24B**，align 8 ⇒ **无隐式 padding**；写成 `[u8; 4]` 会让 sizeof 补到 24 而多出 4B 尾随隐式 padding）。
 
 **cap-offset 表的 wire 格式仍由内核解析** ⇒ 内核必须检查 offset、slot 存在性和 rights，
 但 **trusted sender 的布局不一致被前移到编译期**。

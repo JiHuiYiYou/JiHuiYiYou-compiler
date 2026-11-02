@@ -312,6 +312,7 @@
 | [W-181](#w-181) | SUPERSEDED | 数组 / 切片下标**不做运行时边界检查** ⇒ 越界直接踩内存 |
 | [W-182](#w-182) | SUPERSEDED | 崩溃**没有符号化栈回溯** ⇒ 定位靠手读 `.s` |
 | [W-183](#w-183) | RESOLVED | `jhyy build` 的 fallback 路径 —— **退出码 0 但磁盘上没有 `.s`** |
+| [W-184](#w-184) | DEFERRED | peephole 对 > 4096 字节的 `.s` **整段跳过** ⇒ 真实产物上 peephole 从来没跑过 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -13759,3 +13760,40 @@ $ ./prog.exe
 **引用:**
 - 源码:`compiler/src0/main.jhyy`(`cmd_build` 的 fallback 分支)
 - 相关:**W-170**(`jhyy build` 的 `#[link_section]` —— 同函数、同日挖出)
+
+
+<a id="w-184"></a>
+## W-184: peephole 对 > 4096 字节的 `.s` **整段跳过** —— 真实产物上 peephole 从来没跑过
+
+**状态:** DEFERRED —— 归 v4.4.5 任务 1(真修排期见 `docs/plans/v4/v4.4.5-plan.md`)
+**Filed-by:** 2026-11-02 (文档审核时从源码注释里读出来 —— **workaround 在代码里,台账里没有条目**)
+**日期:** 2026-11-02 (文档审核时发现)
+
+**触发面:** `compiler/src0/codegen_amd64_peephole.jhyy` 的 `peephole_fold` ——
+`.s` 超过 **4096 字节**就 `return input`(**整段跳过 fold**,原样直传)。
+
+**症状:** 自举产物的 `.s` 规模是 MB 级 ⇒ **真实程序永远走跳过分支**
+⇒ peephole 只在 hello-world 级输入上跑过 ⇒ **任何「`.s` 级 pass」的验证都缺一个可信的 `.s` 级工具**
+(v4.4.5-plan 把这条列为「非性能但必须先修」的原因)。
+
+**根因(⚠️ 至今未定位):** 源码注释自陈(v2.13.0 埋 workaround 时写下的):
+`peephole_concat_loop` 在大输入上**静默崩** —— trace 停在 "concat start",
+到不了 "concat end" / `jh_write_file` ⇒ peephole 返回 **inconsistent fold**,
+触发后续 self-backend **静默 skip `.s` 写盘**。
+注释原文:「RCA pending(jhyy codegen 对 1.5K+ line concat loop 有 silent exit,
+**具体 root cause 待 Phase 2+ 真修**)」⇒ **根因至今没有定位**。
+
+**绕法(现在生效的):** `len > 4096` ⇒ 整段跳过 fold。
+
+**什么修法能取代它:** `docs/plans/v4/v4.4.5-plan.md` **任务 1** ——
+去掉 4096 限制或改分块处理,并让 **peephole 的 fold 计数可观测**(证明它真的跑了)。
+
+**⚠️ 历史 ID 说明:** 源码注释里写的是「**W-074.6.1 partial closure**」——
+`W-074.6.1` 是 **W-074.6 的历史子编号**(W-074.6 本体是「自举 `.s` 截断 / multifn silent fail」
+的 3 个 sub-bug,已于 2026-10-15 RESOLVED)⇒ **当前台账没有 `W-074.6.1` 这个条目**
+⇒ 本条另起编号,`W-074.6.1` 只作历史别名。
+
+**引用:**
+- 源码:`compiler/src0/codegen_amd64_peephole.jhyy:537-547`(workaround + 根因注释)、`:545`(4096 判断)
+- plan:`docs/plans/v4/v4.4.5-plan.md` 任务 1
+- 相关:**W-074.6**(历史父条目,本体已 RESOLVED)、**W-074.7**(peephole 同族)

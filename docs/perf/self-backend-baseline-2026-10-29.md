@@ -32,7 +32,7 @@
 `runtime_perf.py`(CPython `perf_counter` → Win32 QueryPerformanceCounter;
 min-of-7;输出先逐字比对 gcc 产物,不一致直接 FAIL):
 
-| 程序 | gcc -O0 | gcc -O1 | gcc -O2 | **jhyy** | jhyy/gcc-O0 | jhyy/gcc-O2 |
+| 程序 | gcc -O0 | gcc -O1 | gcc -O2 | **jhyy**(v4.2.1 前) | jhyy/gcc-O0 | jhyy/gcc-O2 |
 |---|---|---|---|---|---|---|
 | **fib** | 89.7ms | 72.4ms | 55.5ms | **307.9ms** | **3.43x** | 5.55x |
 | **ack** | 28.5ms | 25.4ms | 22.9ms | **134.7ms** | **4.73x** | 5.89x |
@@ -101,11 +101,15 @@ prologue frames=1045   chkstk calls=1045
 
 ---
 
-## 四、修法(交给 v4.2.1)
+## 四、修法(v4.2.1 —— ✅ 已 ship)
+
+> ⚠️ **本节写于修法落地之前**;修法已于 **v4.2.1** ship(commit `05e01f22`,
+> 「帧尺寸按函数实际需要算(去掉写死的 8192 预留)⇒ ~41% 运行时」)⇒
+> **修后的实测见 § 七**。下面的「现状 / 应为」保留作历史对照。
 
 ```
-现状:  alloc_pool_size = 8192 + per_fn_alloc
-应为:  alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
+修前:  alloc_pool_size = 8192 + per_fn_alloc
+修后:  alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
 ```
 
 `local_max` 是**该函数精确已知**的 local temp 上限
@@ -121,7 +125,7 @@ prologue frames=1045   chkstk calls=1045
 | 帧变小后暴露原本被大帧意外撑住的越界 | 全量 regress + 自举闭环 + `artifact_checks.sh` 全部门全绿才算过（门数见 [FACTS § 2](../internal/FACTS.md#2-回归与门)） |
 | `artifact_checks.sh` 的 `per_fn_frame` 门断言 f500 vs f1099 帧比 < 4 | 帧变小后比值只会更稳;但**门要重新验一次**(造红灯) |
 
-**新增常驻门**(建议):`artifact_checks.sh frame_bloat` ——
+**新增常驻门**(✅ 已落地):`artifact_checks.sh frame_bloat` ——
 断言「真实函数帧的中位数 < 1KB」且「`___chkstk_ms` 调用数 == 0」。
 这条门直接锁死本轮的收益,防止将来回退。
 

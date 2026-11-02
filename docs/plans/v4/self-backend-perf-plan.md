@@ -36,8 +36,10 @@
 
 **旧报告漏掉的、本轮新增的两条**:
 
-1. **每个函数的帧至少 8352 字节**(`emit_ctrl.jhyy:565` 的写死常量 8192)
-   ⇒ **100% 的函数每次调用都走 `___chkstk_ms` 探页** ⇒ **实测 ~41% 的运行时**
+1. ~~**每个函数的帧至少 8352 字节**(写死常量 8192)~~ ⇒ **100% 的函数每次调用都走
+   `___chkstk_ms` 探页** ⇒ **实测 ~41% 的运行时**
+   —— ⚠️ **本条已被 v4.2.1 修掉**(commit `05e01f22`:去掉写死的 8192 预留 ⇒ 中位帧 8368 → 288 B、
+   chkstk 调用 1045 → 46)。上面这句是**修前**的发现,留着作对照。
 2. **CLI 根本没有 `-O` 开关**(只有 `-o` / `--target=`)
 
 ---
@@ -107,11 +109,11 @@ v4.6+ ─ 语言特性链(lifetime → closure → dyn Trait → HKT)
 
 ### v4.2.1 —— 帧尺寸公式修复 ⭐
 
-**改动**(`codegen_amd64_emit_ctrl.jhyy:565`):
+**改动**(`codegen_amd64_emit_ctrl.jhyy`) —— ✅ **已 ship**(commit `05e01f22`,v4.2.1):
 
 ```
-现状:  alloc_pool_size = 8192 + per_fn_alloc
-改为:  alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
+修前:  alloc_pool_size = 8192 + per_fn_alloc
+修后:  alloc_pool_size = 32 + (local_max+1)*8 + per_fn_alloc
 ```
 
 `local_max` 是该函数**精确已知**的 local temp 上限(`emit_ctrl.jhyy:544`);
