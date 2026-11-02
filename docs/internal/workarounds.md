@@ -308,6 +308,9 @@
 | [W-177](#w-177) | RESOLVED | `std/fmt.jhyy` 的过期注释 —— 「jhyy 不支持 *u8 + i64」 |
 | [W-178](#w-178) | RESOLVED | `-o` 的输出路径**无条件追加 `.exe`** ⇒ `-o game_run.exe` 得到 `game_run.exe.exe` |
 | [W-179](#w-179) | SUPERSEDED | `while` 里的 `continue` 跳过自增 ⇒ 死循环(惯用手写 while 的坑) |
+| [W-180](#w-180) | RESOLVED | `&mut [i32; N]` / `&T` **不能索引** ⇒ 「通过引用改数组元素」不可用 |
+| [W-181](#w-181) | SUPERSEDED | 数组 / 切片下标**不做运行时边界检查** ⇒ 越界直接踩内存 |
+| [W-182](#w-182) | SUPERSEDED | 崩溃**没有符号化栈回溯** ⇒ 定位靠手读 `.s` |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -13502,3 +13505,164 @@ while i < 5 { i = i + 1; if i == 2 { continue; } n = n + 1; }
 只是没配「自增写在 continue 之前会死循环」的警告 ⇒ 本条补的就是那个警告。
 
 **superseder:** 规范 `docs/abis/jhyy-lang-spec-v4.0.0.md`「break / continue」那节(警告已补)
+
+---
+
+<a id="w-180"></a>
+## W-180: `&mut [i32; N]` / `&T` **不能索引** ⇒ 「通过引用改数组元素」不可用
+
+**状态:** RESOLVED closed 2026-11-02 (v4.1.3) — sema 接受 KIND_REF + codegen 按「ref 指向什么」分派
+**Filed-by:** 2026-11-02 (外部问题台账复核 —— 复核「P1-1 &mut 数组不能索引」那条)
+**日期:** 2026-11-02 (ACTIVE) → 2026-11-02 (真修)
+
+**触发面:** 任何 `p[i]`,其中 `p` 的类型是 `&mut T` / `&T` 且 `T` 本身可索引(数组/指针/切片)。
+
+**症状(2026-11-02 实测,修前):**
+```jhyy
+fn bump(p: &mut [i32; 3]) -> i32 { p[0] = 42; return p[0]; }
+// → error: cannot index into type
+```
+⇒ `&mut` 之前只能**解引用**(`*p`),不能**索引**(`p[i]`)。
+
+**危害:** 不算「静默」—— **编译期明确报错** ⇒ 用户看得见、能绕。
+但绕法是退回裸指针(`*(p + i)`)⇒ **绕过了 W-105 的借用独占检查** ⇒
+「用 `&mut` 表达意图」这条路整个堵死。
+
+**根因:** `sema.jhyy` 的 `infer_type` 的 `NODE_INDEX` 分支只认
+`KIND_ARRAY` / `KIND_POINTER` / `KIND_SLICE` ⇒ `KIND_REF` 落到
+`cannot index into type`。codegen 侧同因(索引路径不认 REF)。
+
+**修法(已完成):**
+1. `sema.jhyy` — `NODE_INDEX` 接受 `KIND_REF`(内层须本身可索引:
+   array / pointer / slice)⇒ 元素类型取内层的 elem。
+2. `codegen.jhyy` — 索引与赋值两条路径都按「**ref 指向什么**」分派。
+   ⚠️ 关键:**引用指向的是「那个变量」,不是「变量的内容」** ⇒ 三种形态的
+   load 次数不同:
+
+   | base | ref 值是什么 | load 次数 | 理由 |
+   |---|---|---|---|
+   | 数组 / 指针 | — | 0 | base 已是首元素地址 |
+   | 切片 | slice 槽地址 | 1 | loadl 取 data 指针 |
+   | REF→数组 | `&arr[0]` | 0 | ref 值**就是**首元素地址 |
+   | REF→指针 | `&p`(指针**变量**) | **1** | 要先 loadl 取指针值 |
+   | REF→切片 | `&s`(slice 槽) | 1 | loadl 取 data 指针 |
+
+3. 规范「借用 `&T` / `&mut T`」那节补「索引 vs 解引用」的说明 +
+   **引用到指针时要多解一层**的警告。
+
+**⚠️ 踩过的坑(第一版实现是错的):** 最初把 REF→指针也当成「ref 值 = 首元素地址」
+⇒ 实测 `via_ptr` 读出 **1953767712**(指针变量自身的字节)而不是 **77**
+(pointee 的值)⇒ **必须再解一层**。这个坑只有专门写一条
+「ref 到裸指针」的用例才抓得到 —— 数组形态全对时它是隐形的。
+
+**验证:**
+- `compiler/tests/examples/ref_index.jhyy`(新增门)—— 五个 case:
+  `&mut` 数组(读+写穿透) / 共享引用读 / `&mut` 局部变量 /
+  **`&mut` 到裸指针** / `&mut` 到切片。
+- 修前二进制跑同一测试 ⇒ **编译期就失败**(`cannot index into type`)
+  ⇒ 门确实堵住了这个盲区。
+- 全量回归 265/265 PASS。
+
+**变异测试(2026-11-02,两次,读/写路径各一个):**
+- 变异 A:写路径 REF→POINTER 不更新 base(丢掉 load 结果)⇒ `D2: pointee=77`
+  (期望 55)⇒ EXIT=1 ⇒ 抓到。
+- 变异 B:读路径 REF→POINTER 不再 load ⇒ `D: via_ptr=1242567904`
+  (读出指针变量自身的字节)⇒ EXIT=1 ⇒ 抓到。
+
+⚠️ **第一次变异时门是「假绿」的** —— 当时的用例只测了 REF→指针的**读**,
+变异改的是**写**路径 ⇒ 测试全过。**变异测试帮我们发现了测试自己的覆盖缺口**
+⇒ 补了 case D2(写穿透到 pointee)才真正堵上。
+⇒ 教训:**「用例覆盖了某个形态」≠「用例能区分该形态的实现」** ——
+读与写必须各有一个用例。
+
+**引用:**
+- 源码:`compiler/src0/sema.jhyy`(`infer_type` 的 `NODE_INDEX` 分支)
+  + `compiler/src0/codegen.jhyy`(`NODE_INDEX` 读路径 + `NODE_ASSIGN`→`NODE_INDEX` 写路径)
+- 相关:**W-105**(`&mut` 真能用 —— 本条补上它的最后一块:索引)
+
+---
+
+<a id="w-181"></a>
+## W-181: 数组 / 切片下标**不做运行时边界检查** ⇒ 越界直接踩内存
+
+**状态:** SUPERSEDED closed 2026-11-02 (v4.1.3) — 不是待修的 bug:越界检测已排在 v4.15 (OS-16) 的 KASAN
+**Filed-by:** 2026-11-02 (外部问题台账复核 —— 复核「P1-2 无边界检查」那条)
+**日期:** 2026-11-02
+
+**触发面:** 任何数组 / 切片下标。
+
+**症状(2026-11-02 实测):**
+```jhyy
+let arr: [i32; 4] = [1, 2, 3, 4];
+let v = arr[100];     // → 读到垃圾值(实测 2),不报错
+```
+
+**根因:** 索引路径**不生成任何检查** —— 这是**刻意的设计选择**
+(语言规范「定长数组」那节明写「下标**不做**运行时边界检查」)。
+
+**not-a-bug(为什么不该在语言层补):**
+1. **已排在 OS 线**:[`docs/plans/v4/v4.15-plan.md`](../plans/v4/v4.15-plan.md)
+   (OS-16 可信工具链)的 **KASAN** 明写拦「越界 + use-after-scope」。
+   那份 plan 还给了**排序理由**:
+   > KCFI、shadow stack 和 WCET **不应与 P2 栈分析同权**。
+   > 它们重要,却依赖函数类型、调用图、ABI 稳定和实时模型。
+
+   ⇒ **在语言层塞一个手写边界检查 = 提前做 v4.15 的一半,且是劣化版**
+   (没有 shadow memory / address space / def-use)。
+2. **技术上也不便宜**:
+   - 索引的 base 可能是**裸指针**(长度未知)⇒ 检查只能对「已知长度的
+     array / slice」做 ⇒ codegen 要区分「有长度的 base」与「裸指针 base」。
+   - 运行时**没有 panic 机制**(`runtime.c` 里 `grep setjmp` = 0;
+     `panic_handler.jhyy` 是 "M0 stub, divergence loop")⇒ 越界了
+     **没有地方报** ⇒ 得先造 panic 基础设施。
+   - 改 codegen ⇒ 全量 `.s` 漂移 ⇒ 走发版级流程。
+
+**现状定性:** 这不是「忘了做」,是**排在 v4.15 的正确位置**。
+⇒ **不要在语言层重复实现**(per 上面第 1 条的排序理由)。
+
+**superseder:** [`docs/plans/v4/v4.15-plan.md`](../plans/v4/v4.15-plan.md)(OS-16 KASAN 拦越界)
+
+---
+
+<a id="w-182"></a>
+## W-182: 崩溃**没有符号化栈回溯** ⇒ 定位靠手读 `.s`
+
+**状态:** SUPERSEDED closed 2026-11-02 (v4.1.3) — 不是待修的 bug:符号化与 byte-equal 可复现构建门互斥,须走独立 debug 构建通道
+**Filed-by:** 2026-11-02 (外部问题台账复核 —— 复核「P1-3 无符号化回溯」那条)
+**日期:** 2026-11-02
+
+**触发面:** 任何崩溃(ACCESS_VIOLATION / 段错误)。
+
+**症状(2026-11-02 实测):**
+```
+$ ./prog.exe
+<崩溃>            # stderr 全空,exit code 3221225477,没有任何调用栈信息
+```
+
+**根因(三层,缺一不可):**
+1. **`.s` 里零个 `.loc` / `.file`** —— IL 层有 `dbgloc` 指令,但 backend
+   **主动丢弃**它(`codegen_amd64.jhyy`:`dbgfile / dbgloc / { / }` —
+   不 emit .s body,仅让 parse_and_emit 不卡 cursor)。
+2. **链接用 `-g0`** —— `main.jhyy` 的链接行硬写
+   `-g0 -Wl,--build-id=none`(D26 **byte-equal 可复现性**要求)。
+3. **运行时没有崩溃处理器** —— `runtime.c` 里没有 signal handler,
+   `grep setjmp` = 0。
+
+**not-a-bug(为什么现在做不了):**
+- 第 2 点是**硬冲突**:符号化需要调试信息,而 `-g0` 是「产物逐字节可复现」
+  这道门的硬要求 ⇒ **符号化与 byte-equal 门互斥**。
+  ⇒ 要做,必须先决定「符号化走哪条路」—— 例如**独立的 debug 构建通道**
+  (debug 产物不参与 byte-equal 门),这是**工具链策略变更**,
+  不是本条能承载的。
+- 第 3 点意味着**光有符号化也不够**:得再有崩溃处理器把回溯打出来
+  (栈展开 / `RtlCaptureStackBackTrace` 之类)⇒ 又是一层。
+
+**现状定性:** 这是**工具链能力缺口**,不是语言 / 编译器的正确性缺陷
+(程序行为是对的;崩的是真的崩 —— 越界 / 野指针)。
+
+⇒ **要做的前置条件(按依赖序):**
+1. 先定「debug 构建通道」策略(产物与 byte-equal 门的关系)
+2. backend 把 `dbgloc` 落成 `.loc` / `.file`
+3. runtime 加崩溃处理器 + 栈展开
+
+**superseder:** 无(工具链策略变更尚未排期)—— 见上面「要做的前置条件」

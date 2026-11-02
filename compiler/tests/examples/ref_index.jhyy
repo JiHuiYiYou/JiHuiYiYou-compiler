@@ -1,0 +1,116 @@
+// ref_index.jhyy — `&mut T` / `&T` 的**索引**(`p[i]`)
+//
+// W-180 (2026-11-02 真修):`&mut` 之前只能**解引用**(`*p`),不能**索引**
+// (`p[i]`)⇒ 报 `cannot index into type`。
+//
+// ⇒ 「通过引用改数组元素」这条最自然的写法直接不可用,用户只能退回裸指针
+// (`*(p + i)`)—— 而裸指针绕过了 W-105 的借用独占检查。
+//
+// 修法:sema 的 NODE_INDEX 接受 `KIND_REF`(内层须本身可索引),
+// codegen 的索引/赋值路径按「ref 指向什么」分派。
+//
+// ── 语义(按「ref 指向的是那个变量」推导,不是「ref 就是元素地址」)────────
+//
+// `&mut arr`(arr: [i32;3])的 ref 值 = **&arr[0]** ⇒ `r[i]` = arr[i]
+//   ⇒ r[0] = 42 ⇒ arr[0] == 42(**写穿透到调用方**)
+//
+// `&mut pv`(pv: *i32)的 ref 值 = **&pv**(指针变量本身!)⇒ `r[0]` = (*r)[0]
+//   = pv 指向的值 ⇒ 读出 77(不是指针变量自身的字节!)
+//   ⚠️ 这是最容易搞错的一格:ref 到指针时,**要再解一层**。
+//
+// `&mut sl`(sl: [*]i32)的 ref 值 = **&sl**(slice 槽)⇒ `r[0]` = (*r)[0] = sl[0]
+//
+// ── 期望值(纯语义推导)────────────────────────────────────────────
+//
+// A. `bump(&mut arr)`:读 p[0] 得原值 1;写 p[0]=42 / p[1]=99
+//    ⇒ 调用方 arr 变成 42,99,3(**穿透**)
+// B. 共享引用 `peek(&arr)` ⇒ p[1] == 99
+// C. `let r = &mut a; r[0] = 100;` ⇒ r[0] == 100
+// D. `&mut` 到裸指针 ⇒ p[0] == 77(pointee 的值)
+// E. `&mut` 到切片 ⇒ p[0] == 10
+//
+// 记分:每错一个 case 加 1。EXIT = 0 ⇒ 全对。
+//
+// EXPECT: 0
+// EXPECT-OUT: "A: old=1 arr=42,99,3"
+// EXPECT-OUT: "B: peek=99"
+// EXPECT-OUT: "C: local=100"
+// EXPECT-OUT: "D: via_ptr=77"
+// EXPECT-OUT: "D2: pointee=55"
+// EXPECT-OUT: "E: via_slice=10"
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn malloc(size: i64) -> *u8;
+
+// A: &mut [i32;3] 形参 —— 读 + 写,且写必须穿透到调用方
+fn bump(p: &mut [i32; 3]) -> i32 {
+    let old = p[0];
+    p[0] = 42;
+    p[1] = 99;
+    return old;
+}
+
+// B: 共享引用读
+fn peek(p: &[i32; 3]) -> i32 { return p[1]; }
+
+// D: &mut 到裸指针 —— p[0] 应是 **pointee** 的值(不是指针变量自身的字节)
+fn via_ptr(p: &mut *i32) -> i32 { return p[0]; }
+
+// D2: &mut 到裸指针的**写** —— p[0] = v 应改 **pointee**,不是指针变量
+fn set_ptr(p: &mut *i32, v: i32) -> i32 {
+    p[0] = v;
+    return 0;
+}
+
+// E: &mut 到切片 —— p[0] 应是切片的第 0 个元素
+fn via_slice(p: &mut [*]i32) -> i32 { return p[0]; }
+
+fn main_jhyy() -> i32 {
+    let mut fail: i32 = 0;
+
+    /* A */
+    let mut arr: [i32; 3] = [1, 2, 3];
+    let old = bump(&mut arr);
+    printf("A: old=%d arr=%d,%d,%d\n", old, arr[0], arr[1], arr[2]);
+    if old != 1 { fail = fail + 1; }
+    if arr[0] != 42 { fail = fail + 1; }
+    if arr[1] != 99 { fail = fail + 1; }
+    if arr[2] != 3 { fail = fail + 1; }
+
+    /* B */
+    printf("B: peek=%d\n", peek(&arr));
+    if peek(&arr) != 99 { fail = fail + 1; }
+
+    /* C: &mut 局部变量后索引 */
+    let mut a: [i32; 3] = [7, 8, 9];
+    let r = &mut a;
+    r[0] = 100;
+    printf("C: local=%d\n", r[0]);
+    if r[0] != 100 { fail = fail + 1; }
+    if a[0] != 100 { fail = fail + 1; }
+
+    /* D: &mut 到裸指针 —— 读 + 写都作用在 pointee 上
+       ⚠️ 同一个指针变量不能连借两次(W-105 的借用独占检查会拒)⇒ 用两个
+          指向同一处的变量(语义等价:测的是「写穿透到 pointee」) */
+    let raw = malloc(16 as i64);
+    *(raw as *i32) = 77;
+    let mut pv1: *i32 = raw as *i32;
+    let got = via_ptr(&mut pv1);
+    printf("D: via_ptr=%d\n", got);
+    if got != 77 { fail = fail + 1; }
+    // D2: 写 —— 应改 pointee(*(raw as *i32)),不是指针变量自身
+    let mut pv2: *i32 = raw as *i32;
+    let _sp = set_ptr(&mut pv2, 55);
+    let after = *(raw as *i32);
+    printf("D2: pointee=%d (期望 55)\n", after);
+    if after != 55 { fail = fail + 1; }
+
+    /* E: &mut 到切片 */
+    let mut arr2: [i32; 3] = [10, 20, 30];
+    let mut s: [*]i32 = arr2 as [*]i32;
+    let gs = via_slice(&mut s);
+    printf("E: via_slice=%d\n", gs);
+    if gs != 10 { fail = fail + 1; }
+
+    fail
+}

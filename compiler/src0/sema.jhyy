@@ -2067,6 +2067,26 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             (*n).type_ptr = t as *u8;
             return t;
         }
+        // W-180 (2026-11-02):`&mut [i32; N]` / `&[i32; N]` 也能索引 ——
+        // 解引用一次再索引(内层必须本身可索引:array / pointer / slice)。
+        //
+        // 修前:`&mut` 只能**解引用**(`*p`),不能**索引**(`p[i]`)⇒
+        // 「通过引用改数组元素」这条最自然的写法直接报
+        // `cannot index into type` ⇒ 用户只能退回裸指针。
+        //
+        // 运行时表示(实测 IL):`&mut arr` 产出的 ref 值**就是 arr[0] 的地址**
+        // ⇒ `p[i]` 与 `*u8` 索引同形(元素连续)⇒ codegen 侧与 KIND_POINTER 一致。
+        if (*arr_type).kind == KIND_REF() {
+            let ref_inner = (*arr_type).elem as *Type;
+            if ref_inner != (0 as *Type) {
+                let rk = (*ref_inner).kind;
+                if rk == KIND_ARRAY() || rk == KIND_POINTER() || rk == KIND_SLICE() {
+                    let t = (*ref_inner).elem as *Type;
+                    (*n).type_ptr = t as *u8;
+                    return t;
+                }
+            }
+        }
         let _x1 = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                  "cannot index into type" as *u8);
         let v = type_void(ta);

@@ -613,6 +613,24 @@ let r = &mut v;
 - `&T`（共享）在表达式位置的**类型表示仍是 KIND_POINTER** —— `&mut expr` 才是 `KIND_REF(is_mut=1)`。
 - 不支持链式 `&&T`；不支持生命周期标注 `'a`。
 - **借用检查只做到最小程度**：同一作用域内重复 `&mut` 同一变量会被编译期拒绝（`cannot borrow this variable as mutable more than once at the same time`）。**完整的 NLL / Polonius 借用检查未实装** —— 见附录 B。
+- ⚠️ **索引（`p[i]`）与解引用（`*p`）不是一回事** —— `p` 是引用时：
+  - `p[i]` 索引的是**引用所指向的那个东西**（自动解引用一次）：
+
+    ```jhyy
+    let mut arr: [i32; 3] = [1, 2, 3];
+    let r = &mut arr;
+    r[0] = 42;          // ⇒ arr[0] == 42(写穿透)
+    ```
+
+  - ⚠️ **引用指向的是「那个变量」，不是「变量的内容」** ⇒ 引用到**指针**时要多解一层：
+
+    ```jhyy
+    let mut pv: *i32 = some_addr as *i32;
+    let q = &mut pv;
+    q[0]                  // ⇒ (*q)[0] = pv 指向的值(不是 pv 变量自身的字节)
+    ```
+
+  - 内层必须**本身可索引**（数组 / 指针 / 切片）⇒ `&mut x`（x 是标量）不能索引。
 
 ---
 

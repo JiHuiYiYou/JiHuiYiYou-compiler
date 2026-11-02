@@ -3169,6 +3169,69 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     let saddr = *ir_new_tmp(ir, QBE_L());
                     ir_emit_binary(ir, saddr, "add" as *u8, sdata, soffset);
                     let _sstore = cg_store_enum_image(cg_raw, selem_type, val, saddr);
+                } else if (*at).kind == KIND_REF() {
+                    // W-180 (2026-11-02): `p[i] = v`(p: `&mut [i32; N]` / `&T`)。
+                    //
+                    // 运行时表示(实测 IL):`&mut arr` 的 ref 值**就是 arr[0] 的地址**
+                    // ⇒ base 已是首元素地址 ⇒ 与 KIND_POINTER 同形:
+                    //   addr = base + i*elem_sz ⇒ store。
+                    //
+                    // ⚠️ 内层是 **pointer / slice** 时不同(ref 指向的是那个**变量**
+                    //    而不是它的内容)⇒ 必须先 loadl 一次:
+                    //    · REF→POINTER → loadl 取指针值(与读路径对称)
+                    //    · REF→SLICE   → loadl 取 data 指针
+                    let ri = (*at).elem as *Type;
+                    if ri != (0 as *Type) {
+                        let rk = (*ri).kind;
+                        if rk == KIND_ARRAY() || rk == KIND_POINTER() || rk == KIND_SLICE() {
+                            let relem_type = (*ri).elem;
+                            let relem_sz = type_size(relem_type as *Type);
+                            let rbase = *cg_expr(cg_raw, idx_expr_node);
+                            // pointer / slice 内层 → loadl 一次
+                            let mut rbase_final = rbase;
+                            if rk == KIND_POINTER() {
+                                let rdata = *ir_new_tmp(ir, QBE_L());
+                                ir_emit_str(ir, "    %t" as *u8);
+                                ir_emit_int(ir, "%d" as *u8, rdata.id);
+                                ir_emit_str(ir, " =l loadl" as *u8);
+                                let _rb = ir_emit_arg(ir, rbase);
+                                ir_emit_str(ir, "\n" as *u8);
+                                rbase_final = rdata;
+                            }
+                            if rk == KIND_SLICE() {
+                                let rdata = *ir_new_tmp(ir, QBE_L());
+                                ir_emit_str(ir, "    %t" as *u8);
+                                ir_emit_int(ir, "%d" as *u8, rdata.id);
+                                ir_emit_str(ir, " =l loadl" as *u8);
+                                let _rb = ir_emit_arg(ir, rbase);
+                                ir_emit_str(ir, "\n" as *u8);
+                                rbase_final = rdata;
+                            }
+                            // offset = index * elem_sz
+                            let ridx_val = *cg_expr(cg_raw, idx_index_node);
+                            let roffset = *ir_new_tmp(ir, QBE_L());
+                            let ridx_kind = (*idx_index_node).kind;
+                            if ridx_kind == NODE_INT() {
+                                let rnd = node_int_data(idx_index_node);
+                                ir_emit_copy(ir, roffset, (*rnd).value * (relem_sz as i64));
+                            } else {
+                                if ridx_val.qbe_type == QBE_L() {
+                                    ir_emit_binary(ir, roffset, "mul" as *u8, ridx_val, ir_new_int(relem_sz));
+                                } else {
+                                    let ridx64 = *ir_new_tmp(ir, QBE_L());
+                                    ir_emit_str(ir, "    %t" as *u8);
+                                    ir_emit_int(ir, "%d" as *u8, ridx64.id);
+                                    ir_emit_str(ir, " =l extsw %t" as *u8);
+                                    ir_emit_int(ir, "%d" as *u8, ridx_val.id);
+                                    ir_emit_str(ir, "\n" as *u8);
+                                    ir_emit_binary(ir, roffset, "mul" as *u8, ridx64, ir_new_int(relem_sz));
+                                }
+                            }
+                            let raddr = *ir_new_tmp(ir, QBE_L());
+                            ir_emit_binary(ir, raddr, "add" as *u8, rbase_final, roffset);
+                            let _rstore = cg_store_enum_image(cg_raw, relem_type, val, raddr);
+                        }
+                    }
                 } else if (*at).kind == KIND_ARRAY() || (*at).kind == KIND_POINTER() {
                     let is_array = ((*at).kind == KIND_ARRAY());
                     let elem_type = (*at).elem;
@@ -3653,10 +3716,35 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         let base_t_raw = (*base_node).type_ptr;
         // 取 element type
         let mut elem_t_raw: *u8 = 0 as *u8;
+        // W-180 (2026-11-02):REF(`&T` / `&mut T`)的**内层**才是被索引的东西。
+        //
+        // base_needs_load:base 是不是「还要 loadl 一次才是首元素地址」。
+        //   · ARRAY          → base 已是首元素地址        ⇒ 0 次
+        //   · POINTER        → base 已是元素地址          ⇒ 0 次
+        //   · SLICE          → base 是 slice 槽地址      ⇒ 1 次(loadl 取 data 指针)
+        //   · REF → ARRAY   → ref 值 = &arr[0]           ⇒ 0 次
+        //   · REF → POINTER → ref 值 = &p(指针变量)      ⇒ 1 次(loadl 取指针值)
+        //   · REF → SLICE   → ref 值 = &s(slice 槽)      ⇒ 1 次(loadl 取 data 指针)
+        //
+        // ⚠️ REF→POINTER 与 REF→ARRAY **不一样**:前者 ref 指向的是**指针变量**
+        //    (不是 pointee)⇒ 必须先 loadl 一次。实测判据:ref 到 *i32 时
+        //    `p[0]` 应等于 `(*p)[0]`(指针的指向值),不是指针变量自身的字节。
+        let mut base_needs_load: i32 = 0 as i32;
         if base_t_raw != (0 as *u8) {
             let bt = base_t_raw as *Type;
             if (*bt).kind == KIND_ARRAY() || (*bt).kind == KIND_POINTER() || (*bt).kind == KIND_SLICE() {
                 elem_t_raw = (*bt).elem;
+                if (*bt).kind == KIND_SLICE() { base_needs_load = 1 as i32; }
+            } else if (*bt).kind == KIND_REF() {
+                let ri = (*bt).elem as *Type;
+                if ri != (0 as *Type) {
+                    let rk = (*ri).kind;
+                    if rk == KIND_ARRAY() || rk == KIND_POINTER() || rk == KIND_SLICE() {
+                        elem_t_raw = (*ri).elem;
+                        if rk == KIND_POINTER() { base_needs_load = 1 as i32; }
+                        if rk == KIND_SLICE() { base_needs_load = 1 as i32; }
+                    }
+                }
             }
         }
         let elem_sz = type_size(elem_t_raw as *Type);
@@ -3664,19 +3752,16 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
         // Sprint 4.1 IL_ONLY #1: slice → load ptr from struct (slice = { ptr: l, len: l })
         // working-tree slice index fix: base 是 slice struct 地址,byte-equal 要求 loadl offset 0
         //   拿 ptr 再做 index + offset
-        if base_t_raw != (0 as *u8) {
-            let bt_slice = base_t_raw as *Type;
-            if (*bt_slice).kind == KIND_SLICE() {
-                let slice_ptr = *ir_new_tmp(ir, QBE_L());
-                ir_emit_str(ir, "    %t" as *u8);
-                ir_emit_int(ir, "%d" as *u8, slice_ptr.id);
-                ir_emit_str(ir, " =l loadl" as *u8);
-                // Sprint 4.4 commit 2.36: base.kind dispatch (literal vs temp) —
-                //   防 `zero` IRVal (kind=IRVAL_INT) 误发 %t0 触发 QBE 错误
-                let _b = ir_emit_arg(ir, base);
-                ir_emit_str(ir, "\n" as *u8);
-                base = slice_ptr;
-            }
+        if base_needs_load != (0 as i32) {
+            let slice_ptr = *ir_new_tmp(ir, QBE_L());
+            ir_emit_str(ir, "    %t" as *u8);
+            ir_emit_int(ir, "%d" as *u8, slice_ptr.id);
+            ir_emit_str(ir, " =l loadl" as *u8);
+            // Sprint 4.4 commit 2.36: base.kind dispatch (literal vs temp) —
+            //   防 `zero` IRVal (kind=IRVAL_INT) 误发 %t0 触发 QBE 错误
+            let _b = ir_emit_arg(ir, base);
+            ir_emit_str(ir, "\n" as *u8);
+            base = slice_ptr;
         }
         // byte-equal v0 codegen.c:1007-1080 — 先 cg_expr(idx_node) emit 原 idx tmp (e.g. %t1 =w copy 25)
         //   再 *ir_new_tmp(byte_off) → const-fold 或 extsw+mul。const-fold 不复用 idx_val tmp (next_tmp 递增),
