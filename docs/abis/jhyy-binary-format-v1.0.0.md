@@ -240,16 +240,19 @@ struct StringTable {
 
 ```c
 struct CapInitEntry {                       // 放置 8-aligned;自然 alignof = 4
-    type_tag:       u32,                     // 0=endpoint, 1=page, 2=framebuffer,
+    type_tag:       u32,                     // 0=endpoint, 1=frame(原 1=page,per OS 侧 § 4.3 改名), 2=framebuffer,
                                                 // 3=console, 4=file, 5=shm,
                                                 // 6=compositor, 7=surface,
                                                 // 8=seat, 9=buffer, 10=endpoint_focus,
                                                 // 11-65535 = OS-specific,
                                                 // 65536+ = user-defined
     cnode_idx_hint:  u32,                     // kernel-assigned cnode slot; 0xFFFFFFFF = kernel 自由分配
-    rights:         u16,                     // bit 0 = read, 1 = write, 2 = grant, 3 = revoke
+    rights:         u16,                     // bit0=R(read), bit1=W(write), bit2=G(grant) —— 与 `Cap<T>`
+                                                //   wire 的 rights:u16 **同 3 位**(per D6);其余 13 位是
+                                                //   保留位,**必须为 0**
     depth:          u8,                      // CSpace 深度(per `v0.0.1-capability.md § 2.1`)
-    _pad0:          u8,                      // 显式 padding
+    flags:          u8,                      // bit0=revocable(该 cap 初始是否可撤销);其余 7 位保留,
+                                                //   必须为 0 —— 原 `_pad0`,per OS 侧 § 5.3「不要挤进 rights」
 
     name_idx:       u32,                     // string table 内偏移(符号名,如 "console"/"init_endpoint")
     init_call_off:  u32,                     // .text 内偏移 — binary 启动后调用的初始化函数
@@ -267,7 +270,7 @@ struct CapInitEntry {                       // 放置 8-aligned;自然 alignof =
 **为什么这样设计**:
 - `type_tag` 是 enum,不是 string — kernel 解析 O(1),不用解析字符串
 - `cnode_idx_hint` = 0xFFFFFFFF 时 kernel 自由分配;否则 kernel 尽量按 hint 分配(用于 init 进程持有 root endpoint 之类)
-- `rights` 直接对应 `Cap<T>` 8B 布局的 `rights: u16` 字段(per D6),kernel 分配 cap 时直接 copy
+- `rights` 直接对应 `Cap<T>` 8B 布局的 `rights: u16` 字段(per D6),kernel 分配 cap 时直接 copy —— ⚠️ **只 copy 定义的那 3 位**(R/W/G);cap_init 的其余 13 位是保留位,**必须为 0**(per OS 侧 § 5.3)
 - `init_call_off` 允许 per-Cap 初始化逻辑(jhyy-side `#[cap_constructor]` emit);loader 创建 cap 后跳此函数(若非零)
 - `provenance_seed_off` 是 jhyy 专属 — debug build 可塞 ProvenanceInfo 初始 snapshot,runtime 不用重建(per Q-OS-003)
 - `_phantom: *T` 字段**不进 binary**(per D23, codegen skip;Cap<T> jhyy-side phantom 不出现于任何 wire format)

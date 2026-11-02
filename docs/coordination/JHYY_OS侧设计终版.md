@@ -158,7 +158,7 @@ magic `JBE\x01`，header **120 B**（2026-10-31 按自然对齐重算订正，�
 **cap_init 表项（32 B）**：
 
 ```
-type_tag:u32 · cnode_idx_hint:u32 · rights:u16 · depth:u8 · _pad0:u8
+type_tag:u32 · cnode_idx_hint:u32 · rights:u16 · depth:u8 · flags:u8
 name_idx:u32 · init_call_off:u32 · _pad1:u32
 provenance_seed_off:u32 · _pad2:u32
 ```
@@ -170,6 +170,14 @@ provenance_seed_off:u32 · _pad2:u32
 ⚠️ **cap_init 的 `rights:u16` 字段与 `Cap<T>` wire 的 `rights:u16` 字段是两个不同的字段，
 但被设计成同源**（binary-format § 7「Cap Init Table」：「rights 直接对应 `Cap<T>` 8B 布局的 rights:u16 字段，
 kernel 分配 cap 时直接 copy」）⇒ 详见 binary-format § 7「Cap Init Table」。
+
+⚠️ **2026-11-02 订正**：binary-format § 7 的 cap_init `rights` 原文写「bit 3 = revoke」——
+但 `Cap<T>` wire 的 rights 只有 R/W/G **3 位**，kernel「直接 copy」会把一个 wire 里**未定义**的
+bit3 抄进 cap ⇒ **cap_init 的 rights 也必须是 3 位 + 13 位保留（必须为 0）**；
+「该 cap 初始是否可撤销」改走**独立的 `flags:u8`**（bit0 = revocable）——
+即本节 § 5.3 早就定下的「用独立表项字段，**不要挤进 rights**」。
+⇒ binary-format § 7 已按此修订（**表项 32 B / alignof 4 不变** —— `_pad0:u8` → `flags:u8` 是同偏移改名）。
+⇒ 新增一致性门断言「cap_init 的 rights 位集 == wire 的 rights 位集」（`check_spec_consistency.py`）。
 
 **IPC dispatch 表项（16 B）**：
 

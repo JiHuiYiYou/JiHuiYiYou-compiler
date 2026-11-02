@@ -11,11 +11,18 @@
 与本仓「无 `packed` / 显式 `_pad`」的布局契约冲突。
 **这个冲突活了三个月 —— 因为没有一道门。**
 
-本门做三件事：
+本门做四件事：
 1. 解析三处的 `Cap<T>` wire 布局 ⇒ 比对 `字段 → (offset, size, type)`
 2. 比对 rights 的**位宽**（R/W/G 三位 ⇒ 8 种 rights）
 3. 检查 lang-spec § 2.6 的**构造示例**在采用布局下能解出注释声称的值
    （示例是判定「哪一份对」的**独立证据**，不能只比字段名）
+4. **cap_init 表项的 rights 位集 == wire 的 rights 位集**（2026-11-02 加）
+
+第 4 条的由来：binary-format § 7 的 `CapInitEntry.rights` 原文写「bit 0 = read,
+1 = write, 2 = grant, **3 = revoke**」—— 但 `Cap<T>` wire 的 rights 只有 R/W/G **三位**，
+而 § 7 明写「kernel 分配 cap 时**直接 copy**」⇒ 多定义的那一位会被抄进一个
+wire 里**未定义**的位。「可撤销」语义已由 OS 侧 § 5.3 定为走独立表项字段
+（`flags:u8`），所以 cap_init 的 rights 必须与 wire **逐位相同**。
 
 **退出码**：0 = 一致；1 = 不一致（逐条列出）。
 """
@@ -72,6 +79,32 @@ def parse_inline(path: Path) -> dict[str, tuple[int, int, str]] | None:
                 rows[field] = (off, size, typ)
             if rows:
                 return rows
+    return None
+
+
+CAP_INIT_RE = re.compile(r"struct CapInitEntry\s*\{(.*?)\n\}", re.S)
+
+
+def parse_cap_init_rights_bits(path: Path) -> set[int] | None:
+    """binary-format § 7 `CapInitEntry` 的 `rights:` 注释里定义了哪几个位。
+
+    取 `rights:` 那一行**及其后连续的注释行**（位定义常换行写），
+    再从里面抓 `bitN=` 的 N。返回位号集合；解析不出返回 None。
+    """
+    text = read(path)
+    m = CAP_INIT_RE.search(text)
+    if not m:
+        return None
+    lines = m.group(1).splitlines()
+    for i, ln in enumerate(lines):
+        if not re.match(r"\s*rights:\s*u16", ln):
+            continue
+        chunk = [ln]
+        for nxt in lines[i + 1:]:
+            if not nxt.strip().startswith("//"):
+                break
+            chunk.append(nxt)
+        return {int(x) for x in re.findall(r"bit\s*(\d)\s*=", "\n".join(chunk))}
     return None
 
 
@@ -135,6 +168,24 @@ def main() -> int:
                          f"但注释声称 R|W（= 3）⇒ 布局或示例至少有一个是错的")
                 else:
                     print(f"  构造示例自洽 ✓（0x{m.group(1)} 按 rights@{off} 解出 R|W）")
+
+    # 4) cap_init 的 rights 位集必须与 wire 完全相同
+    #    (cap_init 的 rights 被 kernel「直接 copy」进 wire ⇒ 位集必须相同)
+    wire_bits: set[int] = set()
+    if ls.is_file():
+        wire_bits = {int(n) for n, _ in re.findall(r"bit(\d)=([RWG])", read(ls))}
+    ci_bits = parse_cap_init_rights_bits(bf) if bf.is_file() else None
+    if ci_bits is None:
+        fail("binary-format § 7: 解析不出 `CapInitEntry` 的 rights 位定义"
+             "（结构体名或字段写法变了？）")
+    elif not wire_bits:
+        fail("lang-spec § 2.6: 解析不出 wire 的 rights 位集（`bit0=R, bit1=W, bit2=G`）")
+    elif ci_bits != wire_bits:
+        fail(f"cap_init 的 rights 位集 {sorted(ci_bits)} != `Cap<T>` wire 的 {sorted(wire_bits)}"
+             f" —— cap_init 的 rights 是被 kernel「直接 copy」进 wire 的(per D6)⇒ 位集必须相同;"
+             f"「可撤销」语义请走独立表项字段(per OS 侧 § 5.3),不要挤进 rights")
+    else:
+        print(f"  cap_init rights 位集 == wire rights 位集 ✓（{sorted(ci_bits)}）")
 
     if problems:
         print(f"\n[check_spec_consistency] FAIL —— {len(problems)} 处不一致:")
