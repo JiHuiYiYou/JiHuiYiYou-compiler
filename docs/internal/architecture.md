@@ -179,9 +179,24 @@ emit 层消费寄存器），不是那个被注释掉的 XMM 分配器。
 （迭代到不动点），而不是 `.il`。
 
 ⇒ 改 `compiler/src0/*.jhyy` 的代价：**加局部变量会移位模块级 temp 编号** ⇒ 自举产物
-行为漂移 ⇒ 要走「刷新锚点 + D43 re-pin + 全量回归」一整套发版级流程。**纯注释改动是
-免费的**（lexer 在 codegen 前剥掉注释 ⇒ `jhyy.exe` 逐字节不变）—— 订正过期注释别夹带
-逻辑改动。
+行为漂移 ⇒ 要走一整套发版级流程。**纯注释改动是免费的**（lexer 在 codegen 前剥掉注释
+⇒ `jhyy.exe` 逐字节不变）—— 订正过期注释别夹带逻辑改动。
+
+**v4.x 的实际流程**（权威清单见
+[`docs/plans/v4/self-backend-perf-plan.md`](../plans/v4/self-backend-perf-plan.md) § 六）：
+1. 改 → 全量 regress → 自举闭环 → `artifact_checks` → perf 数字
+2. `make`（**就是「刷新锚点」那一步** —— 它内部迭代到不动点再 `mv` 新产物）
+3. `git add compiler/build/bin/jhyy.exe`（git 跟踪的产物；CI 的 `artifact-fresh` 门会
+   比对它 ⇒ 改了 src0 不提交新二进制会红）
+4. 往台账登记新发现的 workaround
+
+> ⚠️ **「D43 re-pin」是 v2.x 时代的说法，v4.x 已不适用** —— 不要去找一个 baseline
+> 文件来改：re-baseline 归档流程已退休（`Makefile` 的 `jhyy.exe` 规则注释）；
+> `docs/archive/logs/v2/d43-baseline-archive.md` 是 **v2.16.0 止的历史归档**，不是活文档；
+> CI 里 `JHY_FP_BASELINE_SHA` / `JHY_FP_BASELINE_S_SHA` **根本没设**
+> （`fixed_point.sh` 默认走自比 ⇒ 只验「同一二进制跑两遍产出一致」= 确定性）。
+> ⇒ **改 codegen 不会让任何 sha 基线变红** —— 所有门都是运行时算 sha 比两次运行。
+> 真正会红的是 `artifact_checks.sh` 的汇编文本断言，和「需要重新提交 `jhyy.exe`」这件事。
 
 ---
 

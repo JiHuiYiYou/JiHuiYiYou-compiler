@@ -109,7 +109,10 @@ don't restate those numbers anywhere else.
 Changing the compiler itself (`compiler/src0/*.jhyy`) costs considerably more than
 changing documentation: adding a local variable shifts the module-level temp
 numbering, which makes the self-hosted build drift, so it drags in a release-grade
-process (refresh the anchor → re-pin the D43 baseline → full regression run).
+process: run the full regression suite, refresh the self-hosting anchor (`make` —
+it iterates to a fixed point and installs the new binary), and commit the new
+`compiler/build/bin/jhyy.exe` (it is a tracked artifact; CI's `artifact-fresh`
+check compares it against a fresh build, so a stale one is caught).
 Comment-only edits are free — the lexer strips comments before codegen, so the
 compiler binary stays byte-identical.
 
