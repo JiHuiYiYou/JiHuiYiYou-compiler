@@ -826,7 +826,7 @@ FLAKY 分类机制」是同一条理由。
 | **v4.4.2** | 寄存器分配 ③:跨基本块 / phi(并行移动 + 环打破) | | [**../../../plans/v4/v4.4.2-plan.md**](../../../plans/v4/v4.4.2-plan.md) |
 | **v4.4.3** | 寄存器分配 ④:门 + perf 验证 + `artifact_checks.sh` 4 条汇编文本断言去耦合 | | [**../../../plans/v4/v4.4.3-plan.md**](../../../plans/v4/v4.4.3-plan.md) |
 | **v4.4.5+** | peephole 4096 限制真修 + IR 优化框架(降级下来的两版) | | [**../../../plans/v4/v4.4.5-plan.md**](../../../plans/v4/v4.4.5-plan.md) |
-| **v4.5** | **M5 Part 3(0-C 闭环)** —— 唯一剩余的 M5 项 | 前置 = v4.2 + v4.4 | [**../../../plans/v4/v4.5-plan.md**](../../../plans/v4/v4.5-plan.md) |
+| **v4.5** | **M5 Part 3(0-C 闭环)** —— 唯一剩余的 M5 项 · **阶段 0：std API 收口 + 缺口补齐**(2026-11-02 新增;**阶段 0 不依赖 v4.4** ⇒ 可与性能线并行) | 前置 = v4.2 + v4.4(阶段 0 无前置) | [**../../../plans/v4/v4.5-plan.md**](../../../plans/v4/v4.5-plan.md) |
 | **v4.6+** | 语言特性链(`lifetime → closure → dyn Trait → HKT`)+ async / const generic / 错误恢复 / 包管理器 / 并发 cap / `.jhyynb` | 与性能线正交,可并行 | ⇒ § 五.3 的 OS 线(OS-1..OS-16) |
 
 ### ⚠️ 2026-10-29 的重排理由(**测量驱动,不是判断**)
@@ -918,7 +918,7 @@ P2 的任务表里混着两件事:
 | **v4.8** | OS-3 | 反馈环 | P1 | UEFI entry 钩子 · 按 `--target` 分支链接 · 移除无条件 Windows 库 · `SetConsoleOutputCP(65001)` · 最小 `kernel.efi` | v4.6 | 最小镜像在 QEMU/OVMF 输出 UTF-8 后停机 · 8/16 KiB 栈链接期可选 · `#[no_std]` 不再自动加 Windows 库 | [**../../../plans/v4/v4.8-plan.md**](../../../plans/v4/v4.8-plan.md) |
 | **v4.8.5** | OS-4 | 栈与分配 | P2 | 栈槽 16B 对齐(ABI §12.6 / §12.12)· 全程序栈分析接进链接器 · **禁 XMM 溢出 + 禁 red zone 上下文属性** | v4.7 | max_frame ≤ 16 KiB(**按 341 KiB 基线重算**)· SysV SIMD 参数不产生 8B 对齐 fault · 内核上下文 XMM 溢出点 = 0 | [**../../../plans/v4/v4.8.5-plan.md**](../../../plans/v4/v4.8.5-plan.md) |
 | **v4.9** | OS-5 | ABI 收敛 | P2.5 | ABI §12 的 14 条偏离逐条收敛(§12.1 sret 阈值 / §12.2 alignof(enum) / §12.4 MEMORY 混排 / §12.11 eightbyte / §12.9 PE-ELF) | v4.8.5 | 偏离 ≤ 3 且均为显式兼容性例外 · abi-hash CI 不回归 · hosted + freestanding 两套 smoke 全绿 | [**../../../plans/v4/v4.9-plan.md**](../../../plans/v4/v4.9-plan.md) |
-| **v4.10** | OS-6 | 语言自洽 | P3 | 块表达式 · `fn` 类型位置 · 闭包捕获 · `()` 类型位置 · defer 覆盖末表达式 · **结构化内联汇编**(自审新增) | v4.9 | 100 个内核 helper 可写成 1–5 行闭包 · boot state 迁移可在块内完成 · 函数指针可跨模块传递 · asm 块未声明 clobber 即报错 | [**../../../plans/v4/v4.10-plan.md**](../../../plans/v4/v4.10-plan.md) |
+| **v4.10** | OS-6 | 语言自洽 | P3 | 块表达式 · `fn` 类型位置 · 闭包捕获 · `()` 类型位置 · defer 覆盖末表达式 · **结构化内联汇编**(自审新增)· **编译期格式化宏 `println!`**(2026-11-02 新增) | v4.9 | 100 个内核 helper 可写成 1–5 行闭包 · boot state 迁移可在块内完成 · 函数指针可跨模块传递 · asm 块未声明 clobber 即报错 · `println!("{}", x)` 打出正确的值 | [**../../../plans/v4/v4.10-plan.md**](../../../plans/v4/v4.10-plan.md) |
 | **v4.10.5** | OS-7 | 效果最小集 | P2.75 | `with { irq_ctx }` / `with { may_sleep }` + 调用点直接禁止 | v4.10 | `irq_ctx` 内调 `sleep()` / `alloc()` 编译失败 | [**../../../plans/v4/v4.10.5-plan.md**](../../../plans/v4/v4.10.5-plan.md) |
 | **v4.11** | OS-8 | lifetime | — | 完整 lifetime 标注 + 子类型 + **Polonius**(W-105 完整版)· reborrow | v4.10 | 3+ lifetime 用例 PASS · v3.1.0 stub 借用检查全部 case 仍过 | [**../../../plans/v4/v4.11-plan.md**](../../../plans/v4/v4.11-plan.md) |
 | **v4.12** | OS-9 | trait | — | trait 语法 + `impl Trait for Type` + vtable + `dyn Trait` + `Box<dyn Trait>` | v4.11 | 3+ trait/dyn 用例 PASS | [**../../../plans/v4/v4.12-plan.md**](../../../plans/v4/v4.12-plan.md) |
