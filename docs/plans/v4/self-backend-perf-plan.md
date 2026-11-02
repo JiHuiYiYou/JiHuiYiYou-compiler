@@ -173,7 +173,7 @@ alloc_pool_size = 8192 + per_fn_alloc
 | 门 | 结果 |
 |---|---|
 | `regress jhyy.exe` | ✅ 全绿(基线见 [FACTS § 2](../../internal/FACTS.md#2-回归与门)) |
-| `artifact_checks.sh` | ✅ **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**(14 → 16,多的两条是本版新增) |
+| `artifact_checks.sh` | ✅ **16 PASS / 0 KNOWN-FAIL / 0 FAIL / 0 SKIP**(14 → 16,多的两条是本版新增) —— ⚠️ **当时的快照**(本版新增这两条之前);现行门数见 [FACTS § 2](../../internal/FACTS.md#2-回归与门) |
 | `closure_check.sh` | ✅ PASS(v2.s == v3.s,sha `8f706fe76d5fc0b7`) |
 | `fixed_point.sh` | ✅ **17 PASS / 0 FAIL / 0 INFO**(N=10) |
 | `make`(自举闭环门) | ✅ 第 2 代收敛(**过渡期自动消化** —— W-147 的「迭代到不动点」) |

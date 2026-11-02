@@ -43,6 +43,7 @@
 | 自举闭环 | `make` **迭代到不动点** —— 生成的 `.s` 跨代逐字节相同 |
 | 版本零漂移 | `python scripts/dev/bump_version.py check` —— 覆盖 8 处（含两份 README 的徽章） |
 | 文档事实对拍 | `python scripts/dev/docs_facts_check.py` —— 事实/链接/反引号裸路径/`§ N.M` 章节引用/台账正文/`feedback_*` 代号索引 |
+| **文档门变异测试** | `python scripts/dev/test_docs_gate_mutations.py` —— 给上一道门注入 9 个**故意的错误**,逐个确认它会红 ⇒ **证明门看得见它声称看的东西**。⚠️ 2026-11-02 实测:原实现有 4 个盲区,把 `FACTS.md` + 两份 README 的回归数一起改成假数(自洽但假)能**全绿通过** ⇒ 门当时只强制「一致」,不强制「为真」 |
 | 三规范一致性 | `python scripts/dev/check_spec_consistency.py` —— 三份规范的 `Cap<T>` wire 布局一致 |
 | `.jhyynb` 布局算术 | `python scripts/dev/check_binary_format_layout.py` —— 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding |
 | 架构断言 | `python scripts/dev/check_arch_claims.py` —— `architecture.md` 的结构性断言与源码一致 |
@@ -130,9 +131,10 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 回归基线见 [`../internal/FACTS.md`](../internal/FACTS.md) § 2。
 ```
 
-**错误**（复述 = 下一个漂移源）：
+**错误**（复述 = 下一个漂移源）—— ⚠️ 下面这段是**故意写错**的示范,不要照抄：
 
 ```markdown
+（反面例子 —— 故意写错,不要照抄）
 回归 259 PASS + 0 XFAIL + 0 failed + 20 SKIP（279 total）。
 ```
 

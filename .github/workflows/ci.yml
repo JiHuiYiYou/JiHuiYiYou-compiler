@@ -576,6 +576,24 @@ jobs:
         run: |
           python scripts/dev/docs_facts_check.py
 
+      # 文档门的**变异测试**(2026-11-02 加)—— 证明上一道门真的看得见它声称看的东西。
+      #
+      # 为什么要有这道门:2026-11-02 审计实测出 `docs_facts_check.py` 有**四个叠加**的
+      # 盲区(剥代码块 / 上下文必须同行 / 词表窄 / 含日期的行被豁免)⇒ 把 `FACTS.md` +
+      # 两份 README 的回归数一起改成**自洽但假**的 999/1019,本门与其它 4 道门**全绿**。
+      # ⇒ 「事实单一真相源」当时只兑现了一半(只强制一致,不强制为真)。
+      #
+      # 本 step 往仓里注入 9 个**故意的错误**,逐个确认 docs_facts_check 会红;
+      # 跑完把每个文件**原样还原**(try/finally)。
+      #
+      # ⚠️ 它**不能**证明 FACTS.md 的数为真 —— 那要靠本 workflow 里真跑一遍 regress.py
+      # 再对拍(见上面的 regress step)。它证明的是「门能抓到这些已知的错误形态」。
+      - name: Docs gate mutation test (prove the docs gate can see)
+        if: always()
+        shell: msys2 {0}
+        run: |
+          python scripts/dev/test_docs_gate_mutations.py
+
       # 规范一致性门(2026-10-30 加)。
       #
       # 为什么要有这道门:`Cap<T>` 的 8 字节 wire 布局在**两份锁定规范**

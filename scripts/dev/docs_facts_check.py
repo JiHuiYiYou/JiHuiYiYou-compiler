@@ -145,6 +145,27 @@ def declared() -> dict:
     else:
         out["artifact_checks"] = int(m.group(1))
 
+    # 断言强度审计的三个数(2026-11-02 加)—— README 的「Assertion audit」那一行
+    # 用的是「N scanned / N runnable / N real assertions」这套词汇,
+    # 原 PASS_RE 完全看不见它 ⇒ 这里把它们解析出来,好让门能对拍。
+    m = re.search(r"扫描\s*(\d+)\s*·\s*可跑\s*(\d+)\s*·\s*真断言\s*(\d+)", ft)
+    if not m:
+        fail("FACTS.md: 找不到断言强度审计那一行（`扫描 N · 可跑 N · 真断言 N`）")
+    else:
+        out["scanned"] = int(m.group(1))
+        out["runnable"] = int(m.group(2))
+        out["real_assertions"] = int(m.group(3))
+
+    # 产物尺寸(FACTS § 1)—— 两份 README 各复述一遍,原先零门覆盖。
+    for key, pat in (("size_installer", r"jhyy-installer-[\d.]+\.exe`\s*\|\s*~([\d.]+)\s*MB"),
+                     ("size_msi", r"jhyy-compiler-[\d.]+\.msi`\s*\|\s*~([\d.]+)\s*MB"),
+                     ("size_exe", r"编译器二进制[^\n]*?~([\d.]+)\s*MB")):
+        m = re.search(pat, ft)
+        if not m:
+            fail(f"FACTS.md: 找不到 {key} 的尺寸声明")
+        else:
+            out[key] = m.group(1)
+
     if "fixed_point.sh" not in ft:
         fail("FACTS.md: 没有提到 fixed_point.sh")
 
@@ -240,32 +261,178 @@ def check_gates(d: dict) -> None:
 
 
 # --------------------------------------------------------------------------
-# D. 回归基线的一致性(只管「回归基线」这个语境)
+# D. FACTS.md 声明的每一个数,在 live 文档里被复述时必须一致
 # --------------------------------------------------------------------------
-PASS_RE = re.compile(r"\b(\d{2,4})\s*(?:/\s*(\d{2,4})\s*)?(?:PASS|passed)\b")
-CTX_RE = re.compile(r"regress|回归")
-HIST_RE = re.compile(r"v\d+\.\d+\.\d+|20\d\d-\d\d-\d\d|持平|baseline|历史|C-side|快照")
+# **为什么整个重写（2026-11-02 审计实测）**：原实现有**四个叠加**的盲区，
+# 实测每一个都能让**错的数字**绿灯通过：
+#
+#   (a) `re.sub(r"```.*?```", "")` 把围栏代码块整段剥掉 ⇒ README 的
+#       `265/265 passed`（在 ```bash 块里）**根本没进被检查的正文**
+#   (b) 上下文关键词 `regress|回归` 必须与数字**同一行** ⇒ README 把
+#       "regression" 放在**上一行的标题**里就免检
+#   (c) `PASS_RE` 只认 `N PASS`/`N passed` ⇒「N scanned / N runnable /
+#       N real assertions」这类写法完全在词表外
+#   (d) `HIST_RE` 豁免**任何含日期的行** ⇒ 行尾加个日期就免检
+#
+# 实测：把 FACTS.md + 两份 README 的回归数一起改成 999/1019（**自洽但假**）
+# ⇒ **5 道门全绿**。⇒ 门必须覆盖「数字出现的每一种语法形态」。
+#
+# **重写后的口径**：
+# - 上下文单元 = **表格行自成一体** + 其余情况取「最近的标题 + 后续连续正文」
+#   ⇒ 表格里一行不会借用同一张表别的行的上下文;而「### Run the regression
+#   suite」能管到它下面的代码块
+# - **不再剥代码块** —— 代码块里的数同样要查
+# - 词表覆盖 FACTS 声明的**每一个**数（回归三件套 + 断言审计三件套 + 门数）
+# - 「当时快照」只认**显式标记**（当时 / 快照 / 修前 / 修后 …）——
+#   **光有日期不算** ⇒ live 文档里 unmarked 的旧快照就是漂移
+
+# 每个事实数 ⇒ (复述时的正则, 同单元里必须出现的上下文关键词)
+FACT_NUMBERS = {
+    "pass": (
+        r"(?<![\w.])(\d{1,5})\s*(?:/\s*(\d{1,5})\s*)?(?:PASS|passed)\b",
+        r"regress|回归"),
+    "skip": (
+        r"(?<![\w.])(\d{1,5})\s*SKIP(?:ped)?\b",
+        r"regress|回归"),
+    "total": (
+        r"(?<![\w.])(\d{1,5})\s+total\b",
+        r"regress|回归"),
+    "scanned": (
+        r"(?<![\w.])(\d{1,5})\s*scanned\b|扫描\s*(\d{1,5})(?!\w)|扫\s*(\d{1,5})(?!\w)",
+        r"assertion|断言|audit"),
+    "runnable": (
+        r"(?<![\w.])(\d{1,5})\s*runnable\b|可跑\s*(\d{1,5})(?!\w)",
+        r"assertion|断言|audit"),
+    "real_assertions": (
+        r"(?<![\w.])(\d{1,5})\s*real assertions\b|真断言\s*(\d{1,5})(?!\w)",
+        r"assertion|断言|audit"),
+    "artifact_checks": (
+        r"(?<![\w.])(\d{1,3})\s*(?:条\s*)?(?:门|道|gates?|PASS\b)",
+        r"artifact_checks|bootstrap|产物级门"),
+}
+
+# 「这是当时的快照」—— 只认**显式标记**;**光有日期不算**
+# （原实现豁免任何含 `20\d\d-\d\d-\d\d` 的行 ⇒ 行尾加个日期就能免检,已修）
+HIST_RE = re.compile(r"当时|快照|历史|持平|baseline|已过时|修前|修后|C-side|反面例子")
+
+# 「其中 4 条门」是**子集**计数,不是「总门数」⇒ 不判
+SUBSET_RE = re.compile(r"(?:其中|里有|内有|这\s*)\s*$")
 
 
-def check_pass_consistency(d: dict) -> None:
+def fact_units(text: str) -> list[tuple[int, str]]:
+    """(行号, 上下文单元) —— 用来判断「这个数说的是哪件事」。
+
+    - **表格行(`|`)自成单元** ⇒ 一行里的数字不会借用**同一张表的别的行**的上下文
+      （否则 `artifact_checks.sh | 18 PASS` 会借用上一行 `regress.py` 的上下文）
+    - 其余情况：连续的正文行 + **最近的上级标题** 合成一个单元
+      ⇒ 「### Run the regression suite」能管到它下面的 ```bash 代码块
+    - ⚠️ **围栏代码块内的行一律当正文** —— 代码块里的 `# 注释` **不是标题**
+      （踩过一次：`# => 265/265 passed` 被当成标题 ⇒ 把上面的真标题顶掉了 ⇒
+      上下文关键词丢失 ⇒ 代码块里的数免检）
+    """
+    units: list[tuple[int, str]] = []
+    cur: list[str] = []
+    start = 0
+    heading = ""
+    in_fence = False
+
+    def flush() -> None:
+        nonlocal cur
+        if cur:
+            units.append((start, heading + "\n" + "\n".join(cur)))
+            cur = []
+
+    for i, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if s.startswith("```"):
+            in_fence = not in_fence
+            if not cur:
+                start = i
+            cur.append(line)
+            continue
+        if not in_fence and s.startswith("|"):
+            flush()
+            units.append((i, line))
+            continue
+        if not in_fence and not s:
+            flush()
+            continue
+        if not in_fence and s.startswith("#"):
+            flush()
+            heading = s
+            continue
+        if not cur:
+            start = i
+        cur.append(line)
+    flush()
+    return units
+
+
+def _first_int(m: re.Match) -> int:
+    """取第一个非空捕获组当数(词表里有的写法数字在前、有的在后)。"""
+    for g in m.groups():
+        if g is not None:
+            return int(g)
+    return -1
+
+
+def check_artifact_sizes(d: dict) -> None:
+    """产物尺寸在 FACTS.md 与两份 README 之间必须一致。
+
+    ⚠️ **这只保证「一致」,不保证「为真」** —— 真正的尺寸要靠实测产物
+    （installer 打包后才知道）。但**两份 README 各复述一遍**、中间没有任何门
+    ⇒ 至少要保证它们跟 FACTS 对得上。
+    """
+    rules = [
+        ("size_installer", r"jhyy-installer[-\d.]*\.exe"),
+        ("size_msi", r"jhyy-compiler[-\d.]*\.msi"),
+        ("size_exe", r"jhyy\.exe"),
+    ]
+    for key, art_re in rules:
+        want = d.get(key)
+        if not want:
+            continue
+        for rel in ("README.md", "README.zh-CN.md"):
+            p = ROOT / rel
+            if not p.is_file():
+                continue
+            for i, line in enumerate(read(p).splitlines(), 1):
+                if not re.search(art_re, line):
+                    continue
+                for m in re.finditer(r"~?\s*([\d.]+)\s*MB", line):
+                    if m.group(1) != want:
+                        fail(f"{rel}:{i}: 产物的尺寸写成 {m.group(1)} MB,"
+                             f"FACTS.md § 1 声明的是 {want} MB")
+
+
+def check_fact_numbers(d: dict) -> None:
+    """FACTS.md 声明的每个数,在 live 文档里被复述时必须一致。"""
     if "pass" not in d:
         return
-    want = d["pass"]
     for p in all_md():
         rel = p.relative_to(ROOT).as_posix()
         if rel.startswith("docs/archive/") or rel == "docs/internal/workarounds.md":
             continue          # 历史记录不追溯;台账每条 entry 的证据都是当时快照
-        body = re.sub(r"```.*?```", "", read(p), flags=re.S)
-        for line in body.splitlines():
-            if not CTX_RE.search(line) or not PASS_RE.search(line):
-                continue
-            if HIST_RE.search(line):
-                continue      # 当时快照,不是「当前基线」
-            for m in PASS_RE.finditer(line):
-                if int(m.group(1)) == want:
+        text = read(p)
+        for lineno, unit in fact_units(text):
+            for key, (pat, ctx) in FACT_NUMBERS.items():
+                if key not in d:
                     continue
-                fail(f"{rel}: 写了「{m.group(0).strip()}」,与 FACTS.md 的 {want} 不一致 —— "
-                     f"要么改 FACTS.md,要么改成**引用**它(不要复述数字)")
+                want = d[key]
+                if not re.search(ctx, unit, re.I):
+                    continue
+                if HIST_RE.search(unit):
+                    continue      # 明确标了「当时/快照」⇒ 是历史快照,不是当前基线
+                for m in re.finditer(pat, unit, re.I):
+                    pre = unit[max(0, m.start() - 8):m.start()]
+                    if SUBSET_RE.search(pre):
+                        continue      # 「其中 4 条门」= 子集计数,不是总数
+                    got = _first_int(m)
+                    if got == want:
+                        continue
+                    fail(f"{rel}:{lineno}: 写了「{m.group(0).strip()}」"
+                         f"（{key} 应为 {want}）—— 要么改 FACTS.md,要么改成**引用**它"
+                         f"（不要复述数字）")
 
 
 # --------------------------------------------------------------------------
@@ -394,6 +561,8 @@ def check_links() -> None:
 #   以及 **.gitignore 里的路径**（构建产物：自举 .s、installer/SHA256.txt 等 ——
 #   文档引用它们是在描述「产物在哪」，不是引用错路径）。
 BACKTICK = re.compile(r"`([^`\n]{2,160})`")
+# `path:123` / `path:12-34` —— 行号后缀
+LINE_SUFFIX = re.compile(r"^(.*?):(\d+(?:-\d+)?)$")
 PATHY = re.compile(
     r"\.(?:md|jhyy|c|h|py|sh|ps1|json|txt|rtf|wxs|yml|yaml|sha256|exe|msi|vsix|asm|s|il|o|ld|flag|buf|sym)$")
 PLACEHOLDER = re.compile(r"[<>{}\*…]|\.\.\.|X\.Y|xxx|\$[A-Za-z_]|\bNNN\b")
@@ -448,8 +617,19 @@ def check_backtick_paths() -> None:
             tok = m.group(1).strip()
             if " " in tok or "/" not in tok:
                 continue
-            if PLACEHOLDER.search(tok) or ":" in tok or tok.startswith("/"):
+            if PLACEHOLDER.search(tok) or tok.startswith("/"):
                 continue
+            # 盘符路径(`C:\...`)不是仓内路径 ⇒ 跳过
+            if re.match(r"^[A-Za-z]:[\\/]", tok):
+                continue
+            # ⚠️ `path:123` / `path:12-34` 形态的引用 —— **行号后缀不是路径的一部分**
+            #    (原实现 `":" in tok ⇒ continue` 把**整类** `file:line` 引用挡在门外
+            #     ⇒ `compiler/src0/emit_ctrl.jhyy:565` 这类引用**从来没被检查过**)
+            m_ln = LINE_SUFFIX.match(tok)
+            if m_ln:
+                tok = m_ln.group(1)
+                if " " in tok or "/" not in tok:
+                    continue
             if not PATHY.search(tok):
                 continue
             top = tok.split("/")[0]
@@ -711,7 +891,8 @@ def main() -> int:
         print("  FACTS.md 声明:", d)
     check_ledger(d)
     check_gates(d)
-    check_pass_consistency(d)
+    check_fact_numbers(d)
+    check_artifact_sizes(d)
     check_links()
     check_backtick_paths()
     check_code_index()
