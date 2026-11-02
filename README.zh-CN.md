@@ -15,7 +15,7 @@
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
 [![English](https://img.shields.io/badge/lang-English-red)](README.md)
 
-[快速开始](#快速开始) · [安装](#安装) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [状态](#状态-v412) · [路线图](#路线图) · [文档](#文档)
+[这是什么](#这是什么) · [一段代码看语法](#一段代码看语法) · [安装](#安装) · [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [架构](#架构) · [项目结构](#项目结构) · [状态](#状态-v412) · [路线图](#路线图) · [工具](#工具--集成) · [文档](#文档) · [协议](#协议)
 
 </div>
 
@@ -29,7 +29,12 @@ JHYY(机会翼游)是一门自研的、静态类型的、表达式导向的编�
 **迭代到不动点**(生成的 `.s` 逐字节相同)—— 不动点是**走到**的,不是假设的。
 
 后端是**自研的内存内 amd64 代码发射器**(`compiler/src0/codegen_amd64_*.jhyy`)——
-没有 vendored QBE、没有 LLVM、没有 GC、没有运行时。
+没有 vendored QBE、没有 LLVM、没有垃圾回收、没有托管式运行时(唯一的运行时是一小份 C
+支撑库,v4.5 会把它换成纯 jhyy 实现)。
+
+**它站在哪:** JHYY 在气质上最接近 **C** —— 显式指针、没有隐藏运行时、ABI 可预期;
+在抱负上最接近 **Zig** —— 一门自举、目标是能承载内核的系统语言。它**刻意不去**做 Rust:
+今天只有最小版借用检查,还没有 trait,也没有 GC。
 
 **设计目标**:
 
@@ -122,15 +127,57 @@ docker run -it gcc:12 bash
 
 ```rust
 // hello.jhyy
+extern fn puts(s: *u8) -> i32;
+
 fn main_jhyy() -> i32 {
-    42
+    puts("Hello, world!");
+    0
 }
 ```
 
 ```bash
 ./compiler/build/bin/jhyy.exe run hello.jhyy
-echo $?    # => 42
+# => Hello, world!
 ```
+
+> [!NOTE]
+> **入口是 `main_jhyy`,不是 `main`。** hosted 程序必须定义 `main_jhyy`;真实签名是
+> `main_jhyy(argc: i32, argv: *u8) -> i32`,`argc` / `argv` 可以不写。C 运行时的 `main`
+> 负责桥接过去 —— 见[规范 § 1.1](docs/abis/jhyy-lang-spec-v4.0.0.md)。
+
+### 标准库
+
+JHYY 自带一份小标准库。`import` 拉进来的是**模块** —— **不带 `std::` 前缀**
+(`import std::vec;` 是编译错误):
+
+```rust
+// stdio.jhyy
+import io;
+
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    io::std_io_print("hello from the JHYY stdlib
+" as *u8);
+    puts("and from libc, through extern fn");
+    0
+}
+```
+
+| 模块 | 提供什么 |
+|---|---|
+| `mem` | `mem_copy` / `mem_set` / `mem_zero` / `mem_compare` / `mem_find_byte` |
+| `fmt` | `fmt_i32` / `fmt_i64` / `fmt_str` / `fmt_hex_u32` —— 往字节缓冲区里格式化 |
+| `io` | 文件 I/O(`std_io_open` / `std_io_read` / `std_io_write` / `std_io_close`)+ `std_io_print` / `std_io_print_err` |
+| `math` | `std_math_sin` / `std_math_cos` / `std_math_sqrt` / `std_math_pow` |
+| `string` | 带长度前缀的字符串:`str_from_cstr` / `str_concat` / `str_find` / `str_len` |
+| `vec` | `std_vec_new` / `std_vec_push` / `std_vec_get` —— 字节向量,**还不是**泛型容器 |
+| `os` | 裸 POSIX / Win32 文件描述符 + `getenv` |
+| `arena` | bump 分配器:`arena_init` / `arena_alloc` / `arena_reset` |
+
+> [!WARNING]
+> **标准库还很小、很年轻**:没有浮点格式化,没有 `abs` / `min` / `max`,没有元素类型上的
+> `Vec<T>`,也还没有 `print` 宏。标准库的排期见 [FACTS.md § 4](docs/internal/FACTS.md)。
 
 ### 跑回归测试
 
@@ -261,6 +308,11 @@ JiHuiYiYou-compiler/
 
 ## 状态 (v4.1.2)
 
+说人话:**测试套件是全绿的** —— 每个用例都过、没有一个失败,而且每个用例都断言了
+**真的可能失败**的东西。编译器编译自己得到逐字节相同的结果,workaround 台账里
+**没有已知未修的编译器 bug**。下面的表是机器可读版本;这些数字的单一真相源是
+[FACTS.md § 2](docs/internal/FACTS.md)。
+
 | 指标 | 值 |
 |------|-----|
 | `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP**(285 total) |
@@ -277,6 +329,24 @@ JiHuiYiYou-compiler/
 **变更日志** —— [`CHANGELOG.md`](CHANGELOG.md) 每版一行;逐轴的详细记录是 v4 的
 umbrella:[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
 (按项目的 umbrella 约定,每个版本轴只有一份)。
+
+### 今天能做什么、不能做什么
+
+JHYY 是**1.0 之前的项目** —— 自举成立、回归全绿,但**还不是 C / Rust 的替代品**。
+
+| 你想做 | 今天 |
+|---|---|
+| 写一个自举的系统语言程序 | ✅ 可以 —— 编译器编译自己 |
+| 调 C 库 | ✅ `extern fn` 走 C ABI |
+| 写 freestanding / `no_std` 程序 | ⚠️ 可以,但 UEFI 入口那条路还没做完(abi § 12.8) |
+| 用带 trait 的泛型 | ❌ 还没有 —— 排在 v4.12 |
+| 用会捕获变量的闭包 | ❌ 还没有 —— 今天写就是编译错误 |
+| 打印一个浮点数 | ❌ `fmt` 还没有浮点格式化 |
+| 编译到 aarch64 / riscv64 | ❌ 只有 x86-64 |
+| 拿它上生产 | ⚠️ 暂不建议 —— 1.0 之前,规范还在演进 |
+
+排期的权威来源是 [FACTS.md § 4](docs/internal/FACTS.md);OS 线的设计记录在
+[`docs/coordination/`](docs/coordination/)。
 
 ---
 

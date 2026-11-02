@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[Quick Start](#quick-start) · [Install](#install) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Status](#status-v412) · [Roadmap](#roadmap) · [Docs](#docs)
+[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v412) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
 
 </div>
 
@@ -30,7 +30,14 @@ produces compiles it again, and the closure gate **iterates until the emitted `.
 byte-identical** (the fixed point is reached, not assumed).
 
 The backend is a **self-written in-memory amd64 code emitter**
-(`compiler/src0/codegen_amd64_*.jhyy`) — no vendored QBE, no LLVM, no GC, no runtime.
+(`compiler/src0/codegen_amd64_*.jhyy`) — no vendored QBE, no LLVM, no garbage
+collector, and no managed runtime (the only runtime is a small C support library
+that v4.5 replaces with pure JHYY).
+
+**Where it sits:** JHYY is closest to **C** in spirit — explicit pointers, no
+hidden runtime, a predictable ABI — and to **Zig** in ambition: a self-hosted
+systems language meant to be good enough to host a kernel. It is deliberately
+**not** trying to be Rust: only a minimal borrow check today, no traits yet, no GC.
 
 **Design goals**:
 
@@ -125,15 +132,59 @@ docker run -it gcc:12 bash
 
 ```rust
 // hello.jhyy
+extern fn puts(s: *u8) -> i32;
+
 fn main_jhyy() -> i32 {
-    42
+    puts("Hello, world!");
+    0
 }
 ```
 
 ```bash
 ./compiler/build/bin/jhyy.exe run hello.jhyy
-echo $?    # => 42
+# => Hello, world!
 ```
+
+> [!NOTE]
+> **The entry point is `main_jhyy`, not `main`.** A hosted program must define
+> `main_jhyy`; its real signature is `main_jhyy(argc: i32, argv: *u8) -> i32`,
+> and `argc` / `argv` may be omitted. The C runtime's `main` bridges to it —
+> see [spec § 1.1](docs/abis/jhyy-lang-spec-v4.0.0.md).
+
+### The standard library
+
+JHYY ships a small standard library. `import` pulls in a module — there is **no
+`std::` prefix** (`import std::vec;` is a compile error):
+
+```rust
+// stdio.jhyy
+import io;
+
+extern fn puts(s: *u8) -> i32;
+
+fn main_jhyy() -> i32 {
+    io::std_io_print("hello from the JHYY stdlib
+" as *u8);
+    puts("and from libc, through extern fn");
+    0
+}
+```
+
+| Module | What it gives you |
+|---|---|
+| `mem` | `mem_copy` / `mem_set` / `mem_zero` / `mem_compare` / `mem_find_byte` |
+| `fmt` | `fmt_i32` / `fmt_i64` / `fmt_str` / `fmt_hex_u32` — format into a byte buffer |
+| `io` | file I/O (`std_io_open` / `std_io_read` / `std_io_write` / `std_io_close`) + `std_io_print` / `std_io_print_err` |
+| `math` | `std_math_sin` / `std_math_cos` / `std_math_sqrt` / `std_math_pow` |
+| `string` | length-prefixed strings: `str_from_cstr` / `str_concat` / `str_find` / `str_len` |
+| `vec` | `std_vec_new` / `std_vec_push` / `std_vec_get` — byte vectors, **not** generic yet |
+| `os` | raw POSIX / Win32 file descriptors + `getenv` |
+| `arena` | bump allocator: `arena_init` / `arena_alloc` / `arena_reset` |
+
+> [!WARNING]
+> **The stdlib is small and young**: no float formatter, no `abs` / `min` / `max`,
+> no `Vec<T>` over element types, and no `print` macro yet. The planned stdlib
+> work is tracked in [FACTS.md § 4](docs/internal/FACTS.md).
 
 ### Run the regression suite
 
@@ -268,6 +319,13 @@ JiHuiYiYou-compiler/
 
 ## Status (v4.1.2)
 
+In plain terms: **the test suite is green** — every case passes, none fails, and
+every test asserts something that could actually fail. The compiler compiles
+itself to a byte-identical result, and the workaround ledger has **no known
+unfixed compiler bug**. The table below is the machine-readable version;
+[FACTS.md § 2](docs/internal/FACTS.md) is the single source of truth for these
+numbers.
+
 | Metric | Value |
 |--------|-------|
 | `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) |
@@ -284,6 +342,25 @@ JiHuiYiYou-compiler/
 **Changelog** — [`CHANGELOG.md`](CHANGELOG.md) has one line per release; the detailed
 per-axis record is the v4 umbrella,
 [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md).
+
+### What works today, and what doesn't
+
+JHYY is a **pre-1.0 project**: self-hosting works, the regression suite is green,
+but it is **not** a drop-in replacement for C or Rust yet.
+
+| You want to… | Today |
+|---|---|
+| Compile a self-hosting systems program | ✅ works — the compiler compiles itself |
+| Call C libraries | ✅ `extern fn` on the C ABI |
+| Write a freestanding / `no_std` program | ⚠️ works, but the UEFI entry path is not finished (ABI § 12.8) |
+| Use generics with traits | ❌ not yet — planned for v4.12 |
+| Use closures that capture variables | ❌ not yet — it is a compile error today |
+| Print a float | ❌ `fmt` has no float formatter yet |
+| Target aarch64 / riscv64 | ❌ x86-64 only |
+| Rely on it in production | ⚠️ not yet — pre-1.0, the spec is still moving |
+
+The authoritative roadmap is [FACTS.md § 4](docs/internal/FACTS.md); the design
+record for the OS line lives in [`docs/coordination/`](docs/coordination/).
 
 ---
 
