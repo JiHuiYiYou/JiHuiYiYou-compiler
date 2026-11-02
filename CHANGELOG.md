@@ -46,6 +46,7 @@
 
 | Slot | Change |
 |---|---|
+| v4.1.3 | The 2026-11-01/02 batch: `jhyy build` now honours `#[link_section]` and `-o`, its fallback path no longer exits 0 without an `.s`, the emitter covers the `cu*` opcodes and unsigned condition codes, slice writes and `mut` bindings are fixed, a compile-time constant folder landed, `&mut [i32; N]` / `&T` are indexable, `jhyy --help` finally describes `dump` honestly — plus a full-repository documentation audit and a serious hardening of the docs gate |
 | v4.4.0 (stage 1) | Register allocator + safety net (byte-identical output); stage 2 is the emit layer consuming registers |
 | v4.2.1 | Frame size computed from what the function actually needs (the hard-coded 8192-byte reserve is gone) ⇒ ~41% runtime |
 | v4.2.0 | Runtime performance gate lands in CI (hard gate on static metrics, wall-clock only reported) + `bench.sh` timer really fixed |

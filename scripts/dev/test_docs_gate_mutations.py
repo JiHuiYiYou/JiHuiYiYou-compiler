@@ -70,6 +70,14 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     ("artifact_checks 门数（中文门面）", "README.zh-CN.md",
      "| `artifact_checks.sh` | **18 PASS / 0 FAIL** |",
      "| `artifact_checks.sh` | **16 PASS / 0 FAIL** |"),
+    # (e) 产物尺寸:FACTS § 1 声明 vs 两份 README
+    ("产物尺寸（安装器）", "README.md",
+     "| ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |",
+     "| ~42 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |"),
+    # (f) 台账的前向版本标签:指向一个不存在的版本
+    ("台账标签指向不存在的版本", "docs/internal/workarounds.md",
+     "closed 2026-11-02 (v4.1.3) — build 路径缺",
+     "closed 2026-11-02 (v4.1.9) — build 路径缺"),
 ]
 
 

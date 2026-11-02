@@ -12707,7 +12707,7 @@ alloc_pool_size = 8192 + per_fn_alloc
 <a id="w-168"></a>
 ## W-168: `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI 在说谎
 
-**状态:** RESOLVED closed 2026-10-30 (v4.1.2) — build 子命令实装 -o 解析并把退出码归一;新增常驻门 build_o_flag
+**状态:** RESOLVED closed 2026-10-30 (v4.1.3) — build 子命令实装 -o 解析并把退出码归一;新增常驻门 build_o_flag
 **Filed-by:** 2026-10-30 (仓库清理 —— 查「bench 为何往 compiler/src0/ 写产物」时撞上)
 **日期:** 2026-10-30
 
@@ -12793,7 +12793,7 @@ usage 串抄的是 `compile` 的写法。
 <a id="w-169"></a>
 ## W-169: 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem 后端已退役
 
-**状态:** SUPERSEDED closed 2026-10-30 (v4.1.2) — 约束对象(QBE IL 的 nested phi)已不存在;门改为行为回归
+**状态:** SUPERSEDED closed 2026-10-30 (v4.1.3) — 约束对象(QBE IL 的 nested phi)已不存在;门改为行为回归
 **Filed-by:** 2026-10-30 (仓库清理 —— 查「W-082 约定门形同虚设」时撞上)
 **日期:** 2026-10-30
 

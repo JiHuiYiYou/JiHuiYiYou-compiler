@@ -3307,6 +3307,61 @@ formula pool」—— 那是**公式 temp 池最深到 -32792 的 4096-temp 时�
 
 ---
 
+## v4.1.3 — 2026-11-01/02 的 16 条真修 + 一次全仓文档审核
+
+**日期:** 2026-11-01 / 2026-11-02 · **台账:** W-168 … W-184
+**性质:** **change slot(无 tag)** —— 内容会随**下一个**打 tag 的版本一起发布
+(`VERSION` 仍是 4.1.2,因为 4.1.2 是当前**已发布**的版本)。
+
+### 用户可见的行为修正
+
+| # | 改了什么 | 台账 |
+|---|---|---|
+| 1 | **`jhyy build` 现在也处理 `#[link_section]`** —— 以前只有 `compile` 路径调 `apply_link_section_directives` ⇒ `build` 产出的 `.s` **缺 `.section` 指令** ⇒ 自定义段的代码落不到指定的段里 | W-170 |
+| 2 | **`jhyy build` 的 fallback 路径以前 exit 0 但磁盘上没有 `.s`** —— `build_il` 返回 0(in-mem 后端 emit 失败)时 `cmd_build` **直接 return 0**,没补调 `run_backend` ⇒ 退出码 0 却找不到产物 ⇒ 用户 / CI 以为编译成功了 | W-183 |
+| 3 | **`jhyy build` 解析 `-o <output>`** —— 以前 `build` 子命令**不认** `-o`,且成功时退出码是 2 ⇒ CLI 在说谎 | W-168 |
+| 4 | **`jhyy --help` 里 `dump` 的说明与实现对齐** —— help 写「print parsed AST / typed IR for debugging」,而 `cmd_dump` 至今是 stub(stderr 打一行 + **exit 1**) ⇒ 用户照着 help 跑只会拿到一句「not implemented」 | — |
+| 5 | **emitter 补齐 `cu*` 8 个 opcode + 无符号条件码** | W-171 |
+| 6 | **切片写路径补齐 + mut 绑定走 16 字节拷贝** | W-172 |
+| 7 | **加编译期常量折叠器(整数常量表达式)** | W-173 |
+| 8 | **`&mut [i32; N]` / `&T` 能索引了** —— sema 接受 `KIND_REF` + codegen 按「ref 指向什么」分派 ⇒ 以前只能 `p[i]`,不能 `(&mut arr)[i]` ⇒「通过引用改数组元素」这条最自然的写法不可用 | W-180 / W-181 |
+| 9 | **CLI 的 `-o` 已有 `.exe` 后缀就不追加** | W-178 |
+
+### 规范 / 文档订正
+
+| # | 改了什么 | 台账 |
+|---|---|---|
+| 10 | spec § 5.1 补规则 + 报错文案补指引 | W-175 |
+| 11 | 四条**判为 SUPERSEDED**(不是待修的 bug —— 矛盾在规范的措辞,或语义本就符合规范)⇒ 对应措辞已订正 | W-174 / W-176 / W-179 / W-181 / W-182 |
+| 12 | 注释订正(纯注释改动 ⇒ 产物逐字节不变) | W-177 |
+| 13 | **一次全仓文档审核** ⇒ 几十处**与源码 / 规范直接矛盾**的事实订正(控制台 UTF-8 实际早已实装却写成「未设」;`std/` 是 8 个模块不是 6 个;幽灵版本槽 `v4.3.1`;`cap_init` 的 rights 位数与 wire 对不上;…)⇒ 并给 `cap_init` 的 rights 加了一道一致性门 | — |
+| 14 | **peephole 的 workaround 补登台账(W-184)** —— 「`.s` > 4096 字节就整段跳过 fold」这个 workaround 一直在源码里,台账里**没有条目**;根因(`peephole_concat_loop` 静默崩)至今未定位 ⇒ 归 v4.4.5 任务 1 | W-184 |
+
+### 门本身也被加固了
+
+`docs_facts_check.py` 以前有**四个叠加**的盲区(剥代码块 / 上下文必须同行 / 词表窄 /
+**含日期的行被豁免**)⇒ 把 `FACTS.md` + 两份 README 的回归数一起改成**自洽但假**的
+999/1019,**5 道门全绿**。⇒ 现在:代码块里的数也查、上下文按段落算、词表覆盖 FACTS
+声明的每一个数、光有日期**不再**免检(要显式标「当时 / 快照」)。
+⇒ 新增 `scripts/dev/test_docs_gate_mutations.py`:**往仓里注入 9 个故意的错误,逐个
+确认门会红**,已进 CI。
+
+### 验证门
+
+- `python regress.py` —— **265 PASS / 0 XFAIL / 0 failed / 20 SKIP**(285 total)
+- `python scripts/dev/audit_test_assertions.py --strict` —— 285 扫描 / 265 可跑 / 205 真断言 / **零信号 0**
+- `make` —— 自举闭环**第 1 代收敛**(不动点)
+- `compiler/tests/bootstrap/closure_check.sh` —— PASS(v2.s == v3.s,byte-identical)
+- `compiler/tests/bootstrap/fixed_point.sh` —— N=10 跨代 byte-equal
+- `compiler/tests/bootstrap/artifact_checks.sh` —— 18 PASS / 0 FAIL
+- `python scripts/dev/docs_facts_check.py` —— 事实 / 链接 / 裸路径 / `§ N.M` / 台账正文 / `feedback_*` 代号索引
+- `python scripts/dev/test_docs_gate_mutations.py` —— **9 个变异全部被门抓到**(新)
+- `python scripts/dev/check_spec_consistency.py` —— 三份规范的 `Cap<T>` wire 一致 **+ cap_init rights 位集 == wire 位集**(新)
+- `python scripts/dev/check_binary_format_layout.py` —— `.jhyynb` 每个 struct 的尺寸算术
+- `python scripts/dev/check_arch_claims.py` —— 架构文档的结构性断言与源码一致
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

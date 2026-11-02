@@ -405,6 +405,62 @@ def check_artifact_sizes(d: dict) -> None:
                              f"FACTS.md § 1 声明的是 {want} MB")
 
 
+def check_ledger_version_labels() -> None:
+    """台账里**前向引用**的 `(vX.Y.Z)` 标签必须指向真实存在的版本记录。
+
+    **为什么需要这道检查（2026-11-02 实测）**：台账的 `**状态:**` 行带一个
+    `(vX.Y.Z)` 标签表示「这一版闭合」⇒ 它应该指向一个**已发布**的版本
+    (CHANGELOG.md 的 Releases 表)或一个**change slot**
+    (umbrella changelog 里的 `## vX.Y.Z` 段)。
+    实测:W-170 … W-183 等 14 条标着 `(v4.1.3)`,而 **v4.1.3 在任何 changelog 里
+    都不存在** ⇒ 标签指向了一个虚空 ⇒ 而台账的「不删不改」约定让这种漂移永远不会被
+    肉眼发现。⇒ 这道检查把它变成响亮的。
+
+    ⚠️ **只查前向引用**（标签的版本 > 当前 `VERSION`）—— 历史版本(v3.2.3 / v4.0.9
+    这种)有的在旧轴的 changelog 里、有的压根没单独立段,要求它们全部可解析是不合理的。
+    """
+    wm = ROOT / "docs" / "internal" / "workarounds.md"
+    if not wm.is_file():
+        return
+    ver_file = ROOT / "VERSION"
+    if not ver_file.is_file():
+        return
+    latest = ver_file.read_text(encoding="utf-8").strip()
+
+    def vt(v: str) -> tuple[int, ...]:
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return ()
+
+    latest_t = vt(latest)
+    if not latest_t:
+        return
+    known: set[str] = set()
+    rcl = ROOT / "CHANGELOG.md"
+    if rcl.is_file():
+        known |= set(re.findall(r"\|\s*\*\*v(\d+\.\d+\.\d+)\*\*\s*\|", read(rcl)))
+    for umb in (ROOT / "docs" / "archive" / "logs").rglob("changelog-v*.md"):
+        known |= set(re.findall(r"^##\s+v(\d+\.\d+\.\d+)\b", read(umb), re.M))
+    if not known:
+        return
+    text = read(wm)
+    for m in re.finditer(r"\*\*状态:\*\*\s*([^\n]*)", text):
+        line = m.group(1)
+        for v in re.findall(r"\((v\d+\.\d+\.\d+)\)", line):
+            ver = v[1:]
+            if ver in known:
+                continue
+            vt_ver = vt(ver)
+            if not vt_ver or vt_ver <= latest_t:
+                continue          # 历史版本 —— 不要求它有独立 changelog 段
+            head = text.rfind("\n## ", 0, m.start())
+            title = text[head + 1:text.find("\n", head + 1)].strip()
+            fail(f"台账条目「{title[:60]}」的标签 ({v}) 指向一个**不存在**的版本 —— "
+                 f"它比当前 VERSION({latest}) 还新 ⇒ 要么在 CHANGELOG.md / umbrella "
+                 f"changelog 里补上 `{v}` 的记录(已发布或 change slot),要么这个标签写错了")
+
+
 def check_fact_numbers(d: dict) -> None:
     """FACTS.md 声明的每个数,在 live 文档里被复述时必须一致。"""
     if "pass" not in d:
@@ -890,6 +946,7 @@ def main() -> int:
     if d:
         print("  FACTS.md 声明:", d)
     check_ledger(d)
+    check_ledger_version_labels()
     check_gates(d)
     check_fact_numbers(d)
     check_artifact_sizes(d)

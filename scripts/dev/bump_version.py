@@ -68,6 +68,7 @@ python scripts/dev/bump_version.py check
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import re
@@ -96,6 +97,23 @@ RELEASE_NOTES_DIR = Path("installer/release-notes")
 README_BADGES = [
     (Path("README.md"), "version"),
     (Path("README.zh-CN.md"), "版本"),
+]
+
+# 两份 README 里**除徽章以外**还提到版本号的地方(2026-11-02 补)。
+#
+# 为什么补:实测 `fingerprints()` 只盯徽章那一处 ⇒ 一次 `set` 之后,
+# 安装表里的 `jhyy-installer-4.1.2.exe`、Status 标题的 `v4.1.2`、
+# 页脚的 `<sub>v4.1.2 — …</sub>` **全都留在旧版本号** ⇒
+# 门面会**一边挂 v4.1.3 的徽章、一边让人下 v4.1.2 的安装包**。
+#
+# 形态 ⇒ (正则, 替换模板);`{v}` = 新版本号,`{d}` = 今天。
+README_VERSION_SPANS = [
+    (r"jhyy-installer-(\d+\.\d+\.\d+)\.exe", "jhyy-installer-{v}.exe"),
+    (r"jhyy-compiler-(\d+\.\d+\.\d+)\.msi", "jhyy-compiler-{v}.msi"),
+    (r"jhyy-lang-(\d+\.\d+\.\d+)\.vsix", "jhyy-lang-{v}.vsix"),
+    (r"releases/download/v(\d+\.\d+\.\d+)/", "releases/download/v{v}/"),
+    (r"(## (?:Status|状态) \(v)\d+\.\d+\.\d+(\))", r"\g<1>{v}\g<2>"),
+    (r"(<sub>v)\d+\.\d+\.\d+( — )\d{4}-\d{2}-\d{2}", r"\g<1>{v}\g<2>{d}"),
 ]
 
 # changelog 里新版本段要插在它前面(该文件是**升序**的:最老在前)
@@ -223,12 +241,15 @@ def fingerprints(version: str) -> dict[str, list[str]]:
     """返回 {位置: [该处读到的版本串, ...]} —— 全部应等于 version。"""
     out: dict[str, list[str]] = {}
 
-    def scan(path: Path, pattern: str, label: str) -> None:
+    def scan(path: Path, pattern: str, label: str, *, optional: bool = False) -> None:
         if not path.is_file():
             out[label] = ["<文件缺失>"]
             return
         text = read_text(path)
-        out[label] = re.findall(pattern, text) or ["<未找到>"]
+        found = re.findall(pattern, text)
+        if optional and not found:
+            return                      # 可选的段落:没有就没事
+        out[label] = found or ["<未找到>"]
 
     scan(MAIN_JHYY, r"jhyy compiler v(\d+\.\d+\.\d+) \(self-hosted\)", rel(MAIN_JHYY))
     scan(LICENSE_RTF, r"Version (\d+\.\d+\.\d+)", rel(LICENSE_RTF))
@@ -237,6 +258,17 @@ def fingerprints(version: str) -> dict[str, list[str]]:
     # 两份 README 的版本徽章(见 README_BADGES 的注释:徽章漂了 = 门面在骗人)
     for path, blabel in README_BADGES:
         scan(path, r"badge/" + blabel + r"-v(\d+\.\d+\.\d+)-", rel(path) + " 徽章")
+        # 徽章以外 README 里提到版本号的地方(安装表 / Status 标题 / 页脚)
+        # —— 2026-11-02 补:实测 `set` 只刷徽章 ⇒ 其余 8 处留在旧版本号,
+        #    门面会「挂着新徽章却让人下旧安装包」。
+        for pat, label in (
+            (r"jhyy-installer-(\d+\.\d+\.\d+)\.exe", "安装器名"),
+            (r"jhyy-compiler-(\d+\.\d+\.\d+)\.msi", "MSI 名"),
+            (r"jhyy-lang-(\d+\.\d+\.\d+)\.vsix", "扩展名"),
+            (r"## (?:Status|状态) \(v(\d+\.\d+\.\d+)\)", "Status 标题"),
+            (r"<sub>v(\d+\.\d+\.\d+) — ", "页脚"),
+        ):
+            scan(path, pat, rel(path) + " " + label, optional=True)
 
     wdir = ROOT / WINGET_BASE / version
     if not wdir.is_dir():
@@ -379,6 +411,16 @@ def cmd_set(new: str, *, dry_run: bool = False) -> int:
             ],
         )
         print(f"[bump_version] {rel(path)}: {n} 处")
+
+        # 徽章以外的版本串(安装表 / Status 标题 / 页脚)—— 2026-11-02 补
+        today = datetime.date.today().isoformat()
+        for pat, tmpl in README_VERSION_SPANS:
+            n = replace_in_file(
+                ROOT / path,
+                [(pat, tmpl.replace("{v}", new).replace("{d}", today))],
+            )
+            if n:
+                print(f"[bump_version] {rel(path)}: {n} 处（{pat}）")
 
     # scoop manifest
     n = replace_in_file(
