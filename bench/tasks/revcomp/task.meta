@@ -1,0 +1,15 @@
+# revcomp — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+#
+# 输出两个数：「字节总和 FNV-1a 哈希」。checksum 字段记的是第一个（总和）。
+# ⚠️ 随机数是**自带的 xorshift32** —— 不用 libc 的 rand()，
+#    否则两边的序列依赖各自 libc 的实现 ⇒ 输出不可比。
+
+name = revcomp
+desc = 字节流反转 + 按位取反 + 双校验和（xorshift32 确定性填充）
+scale = 4000000 bytes
+libc = none
+checksum = 510350108
+axes = int, byte, loop

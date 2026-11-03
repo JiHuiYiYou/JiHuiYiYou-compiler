@@ -28,6 +28,15 @@
     "frame_max": 1824,
     "chkstk": 0
   },
+  "nbody": {
+    "insn": 1235,
+    "mem": 1092,
+    "frames": 3,
+    "frame_min": 304,
+    "frame_med": 624,
+    "frame_max": 6624,
+    "chkstk": 1
+  },
   "partial_sums": {
     "insn": 132,
     "mem": 109,
@@ -37,12 +46,33 @@
     "frame_max": 944,
     "chkstk": 0
   },
+  "revcomp": {
+    "insn": 659,
+    "mem": 557,
+    "frames": 3,
+    "frame_min": 304,
+    "frame_med": 624,
+    "frame_max": 2848,
+    "chkstk": 0
+  },
+  "spectral": {
+    "insn": 1001,
+    "mem": 835,
+    "frames": 3,
+    "frame_min": 304,
+    "frame_med": 624,
+    "frame_max": 4752,
+    "chkstk": 1
+  },
   "_size": {
     "ack": 192303,
     "binary_trees": 192861,
     "fib": 192303,
     "mandelbrot": 193821,
+    "nbody": 200686,
     "nq": 193345,
-    "partial_sums": 192797
+    "partial_sums": 192797,
+    "revcomp": 195905,
+    "spectral": 197953
   }
 }

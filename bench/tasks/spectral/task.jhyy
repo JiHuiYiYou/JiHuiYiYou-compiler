@@ -1,0 +1,123 @@
+// spectral — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/spectral/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:500×500 稠密矩阵,反复做 y = A·v;t = Aᵀ·y;v = t,20 轮,
+// 最后算 ‖v‖₁。输出**结果的 IEEE-754 位模式**(16 位小写 hex)。
+//
+// ⚠️ 矩阵用**纯算术的确定性公式**填((i*7 + j*13) % 1000) / 7.0,
+//   不用 sin ⇒ 两边建出完全相同的矩阵,且不引入 libm 依赖。
+// ⚠️ 浮点求值顺序必须与 C 侧**逐句一致**(浮点加法不可交换)。
+// ⚠️ 矩阵 500×500 个 f64 = 2 MB ⇒ 必须**堆上**(栈放不下)。
+//
+// CHECKSUM: 664e7b5b18a2fddb
+extern fn printf(fmt: *u8, val: i64) -> i32;
+extern fn malloc(size: i64) -> *u8;
+
+fn hexdig(d: i32) -> i32 {
+    if d < (10 as i32) { return (48 as i32) + d; }
+    return (97 as i32) + (d - (10 as i32));
+}
+
+fn hex64(buf: *u8, v: u64) -> i32 {
+    let mut i: i32 = 0;
+    while i < (16 as i32) {
+        let sh: u64 = ((15 - i) as u64) * (4 as u64);
+        let nib: i32 = ((v >> sh) & (15 as u64)) as i32;
+        let p = (buf as i64 + (i as i64)) as *u8;
+        *(p as *u8) = hexdig(nib) as u8;
+        i = i + (1 as i32);
+    }
+    let np = (buf as i64 + (16 as i64)) as *u8;
+    *(np as *u8) = 0 as u8;
+    return 16;
+}
+
+fn main_jhyy() -> i32 {
+    let n: i64 = 500;
+    let rounds: i64 = 20;
+    let total: i64 = n * n;
+
+    let a = malloc(total * (8 as i64));
+    let v = malloc(n * (8 as i64));
+    let y = malloc(n * (8 as i64));
+    let t = malloc(n * (8 as i64));
+    if a == (0 as *u8) { return 1; }
+    // ⚠️ malloc 返回 *u8,而 *u8 的指针算术是**按字节**的 ⇒
+    //   取 f64 元素必须先转成 *f64(元素大小 8)。
+    let ap: *f64 = a as *f64;
+    let vp: *f64 = v as *f64;
+    let yp: *f64 = y as *f64;
+    let tp: *f64 = t as *f64;
+
+    // ── 确定性填充 ──
+    let mut i: i64 = 0;
+    while i < n {
+        let mut j: i64 = 0;
+        while j < n {
+            let val: f64 = (((i * (7 as i64) + j * (13 as i64)) % (1000 as i64)) as f64) / 7.0;
+            *(ap + i * n + j) = val;
+            j = j + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+
+    let mut k: i64 = 0;
+    while k < n {
+        *(vp + k) = 1.0;
+        k = k + (1 as i64);
+    }
+
+    let mut r: i64 = 0;
+    while r < rounds {
+        // y = A · v
+        let mut p: i64 = 0;
+        while p < n {
+            let mut s: f64 = 0.0;
+            let mut q: i64 = 0;
+            while q < n {
+                s = s + *(ap + p * n + q) * *(vp + q);
+                q = q + (1 as i64);
+            }
+            *(yp + p) = s;
+            p = p + (1 as i64);
+        }
+        // t = Aᵀ · y
+        let mut q2: i64 = 0;
+        while q2 < n {
+            let mut s: f64 = 0.0;
+            let mut p2: i64 = 0;
+            while p2 < n {
+                s = s + *(ap + p2 * n + q2) * *(yp + p2);
+                p2 = p2 + (1 as i64);
+            }
+            *(tp + q2) = s;
+            q2 = q2 + (1 as i64);
+        }
+        // v = t
+        let mut m: i64 = 0;
+        while m < n {
+            *(vp + m) = *(tp + m);
+            m = m + (1 as i64);
+        }
+        r = r + (1 as i64);
+    }
+
+    // ‖v‖₁
+    let mut sum: f64 = 0.0;
+    let mut p3: i64 = 0;
+    while p3 < n {
+        let x: f64 = *(vp + p3);
+        if x < (0.0) { sum = sum + (0.0 - x); } else { sum = sum + x; }
+        p3 = p3 + (1 as i64);
+    }
+
+    let q3: *u64 = &sum as *u64;
+    let bits: u64 = *q3;
+    let mut buf: [u8; 17] = [0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8];
+    hex64(&buf[0] as *u8, bits);
+    printf("%s\n" as *u8, &buf[0] as *u8);
+    return 0;
+}

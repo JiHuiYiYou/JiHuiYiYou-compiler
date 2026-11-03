@@ -1,0 +1,80 @@
+// revcomp — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/revcomp/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:1 000 000 字节的确定性序列 → **反转** → **按位取反** → 两个校验和。
+//
+// ⚠️ 随机数是**自带的 xorshift32** —— 不用 libc 的 rand(),
+//   否则两边的序列依赖各自 libc 的实现 ⇒ 输出不可比。
+// ⚠️ 无符号溢出是**定义行为**(回绕)⇒ u32/u64 与 C 的 uint32_t/uint64_t 一致。
+//
+// CHECKSUM: 510350108
+extern fn printf(fmt: *u8, sum: u64, h: u64) -> i32;
+extern fn malloc(size: i64) -> *u8;
+
+fn hexdig(d: i32) -> i32 {
+    if d < (10 as i32) { return (48 as i32) + d; }
+    return (97 as i32) + (d - (10 as i32));
+}
+
+// hex64 — 16 位小写 hex(高位在前)+ NUL。零 nibble 也要写成 '0'
+//        ⇒ 与 C 的 %016llx 的零填充一致。
+fn hex64(buf: *u8, v: u64) -> i32 {
+    let mut i: i32 = 0;
+    while i < (16 as i32) {
+        let sh: u64 = ((15 - i) as u64) * (4 as u64);
+        let nib: i32 = ((v >> sh) & (15 as u64)) as i32;
+        let p = (buf as i64 + (i as i64)) as *u8;
+        *(p as *u8) = hexdig(nib) as u8;
+        i = i + (1 as i32);
+    }
+    let np = (buf as i64 + (16 as i64)) as *u8;
+    *(np as *u8) = 0 as u8;
+    return 16;
+}
+
+fn main_jhyy() -> i32 {
+    let n: i64 = 4000000;
+    let buf = malloc(n);
+    if buf == (0 as *u8) { return 1; }
+
+    // ── xorshift32 填充 ──
+    let mut s: u32 = 123456789u32;
+    let mut i: i64 = 0;
+    while i < n {
+        s = s ^ (s << (13 as u32));
+        s = s ^ (s >> (17 as u32));
+        s = s ^ (s << (5 as u32));
+        *(buf + i) = (s & (255 as u32)) as u8;
+        i = i + (1 as i64);
+    }
+
+    // ── 反转 ──
+    let mut k: i64 = 0;
+    while k < (n / (2 as i64)) {
+        let t = *(buf + k);
+        *(buf + k) = *(buf + (n - (1 as i64) - k));
+        *(buf + (n - (1 as i64) - k)) = t;
+        k = k + (1 as i64);
+    }
+
+    // ── 取反 + 两个校验和 ──
+    let mut sum: u64 = 0u64;
+    let mut h: u64 = 1469598103934665603u64;
+    let mut m: i64 = 0;
+    while m < n {
+        let b: u8 = (255u8 - *(buf + m));
+        *(buf + m) = b;
+        sum = sum + (b as u64);
+        h = h ^ (b as u64);
+        h = h * 1099511628211u64;
+        m = m + (1 as i64);
+    }
+
+    let mut buf2: [u8; 17] = [0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8];
+    hex64(&buf2[0] as *u8, h);
+    printf("%llu %s\n" as *u8, sum, &buf2[0] as *u8);
+    return 0;
+}

@@ -1,0 +1,104 @@
+// nbody — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/nbody/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:5 个天体、500 000 步的引力推进,最后算总能量。
+// 输出**总能量的 IEEE-754 位模式**(16 位小写 hex)。
+//
+// ⚠️ 为什么输出位模式而不是十进制:
+//   std::fmt **没有浮点格式化器** ⇒ 比不了十进制渲染。
+//   ⇒ 把 f64 的 8 个字节当成 u64 打出来 ⇒ 逐字节可比。
+//   (`&v as *u64` 指针别名取位模式 —— 实测与 C 的 memcpy+uint64_t 一致。)
+//
+// ⚠️ 浮点求值顺序必须与 C 侧**逐句一致**(浮点加法不可交换)。
+//
+// ⚠️ 二元运算的两个操作数必须同类型 ⇒ 指针算术里的偏移量一律 i64。
+//
+// CHECKSUM: 41306624fe0878d3
+extern fn printf(fmt: *u8, val: i64) -> i32;
+extern fn sqrt(x: f64) -> f64;
+
+fn hexdig(d: i32) -> i32 {
+    if d < (10 as i32) { return (48 as i32) + d; }
+    return (97 as i32) + (d - (10 as i32));
+}
+
+// hex64 — 把一个 u64 打成 16 位小写 hex(高位在前)+ NUL。
+// ⚠️ nibble 顺序:buf[0] 必须是**最高** nibble ⇒ 移位量用 (15 - i) * 4。
+fn hex64(buf: *u8, v: u64) -> i32 {
+    let mut i: i32 = 0;
+    while i < (16 as i32) {
+        let sh: u64 = ((15 - i) as u64) * (4 as u64);
+        let nib: i32 = ((v >> sh) & (15 as u64)) as i32;
+        let p = (buf as i64 + (i as i64)) as *u8;
+        *(p as *u8) = hexdig(nib) as u8;
+        i = i + (1 as i32);
+    }
+    let np = (buf as i64 + (16 as i64)) as *u8;
+    *(np as *u8) = 0 as u8;
+    return 16;
+}
+
+fn main_jhyy() -> i32 {
+    // 5 个天体 × 3 个坐标 = 15 个 f64,平铺成一个数组
+    let mut b: [f64; 15] = [
+        0.0, 0.0, 0.0,
+        4.84143144246472090, -1.16032004402742839, -0.103622044471123109,
+        8.34336671824457995, 4.12479856412430479, -0.403523417114321381,
+        13.0893263579460364, -10.0577350393348644, -0.301768379276131318,
+        16.9153415756894381, -8.79858571390527485, 0.651424232260967689
+    ];
+    let bp: *f64 = &b[0] as *f64;
+
+    let mut it: i64 = 0;
+    while it < (500000 as i64) {
+        let mut i: i64 = 0;
+        while i < (5 as i64) {
+            let mut j: i64 = i + (1 as i64);
+            while j < (5 as i64) {
+                let ia: i64 = i * (3 as i64);
+                let ja: i64 = j * (3 as i64);
+                let dx: f64 = *(bp + ia) - *(bp + ja);
+                let dy: f64 = *(bp + ia + (1 as i64)) - *(bp + ja + (1 as i64));
+                let dz: f64 = *(bp + ia + (2 as i64)) - *(bp + ja + (2 as i64));
+                let d2: f64 = dx * dx + dy * dy + dz * dz;
+                let mag: f64 = 0.01 / (d2 * sqrt(d2));
+                *(bp + ia) = *(bp + ia) - dx * mag;
+                *(bp + ia + (1 as i64)) = *(bp + ia + (1 as i64)) - dy * mag;
+                *(bp + ia + (2 as i64)) = *(bp + ia + (2 as i64)) - dz * mag;
+                *(bp + ja) = *(bp + ja) + dx * mag;
+                *(bp + ja + (1 as i64)) = *(bp + ja + (1 as i64)) + dy * mag;
+                *(bp + ja + (2 as i64)) = *(bp + ja + (2 as i64)) + dz * mag;
+                j = j + (1 as i64);
+            }
+            i = i + (1 as i64);
+        }
+        it = it + (1 as i64);
+    }
+
+    let mut e: f64 = 0.0;
+    let mut i: i64 = 0;
+    while i < (5 as i64) {
+        let mut j: i64 = i + (1 as i64);
+        while j < (5 as i64) {
+            let ia: i64 = i * (3 as i64);
+            let ja: i64 = j * (3 as i64);
+            let dx: f64 = *(bp + ia) - *(bp + ja);
+            let dy: f64 = *(bp + ia + (1 as i64)) - *(bp + ja + (1 as i64));
+            let dz: f64 = *(bp + ia + (2 as i64)) - *(bp + ja + (2 as i64));
+            e = e + (dx * dx + dy * dy + dz * dz);
+            j = j + (1 as i64);
+        }
+        i = i + (1 as i64);
+    }
+    e = e * 0.5;
+
+    let q: *u64 = &e as *u64;
+    let bits: u64 = *q;
+    let mut buf: [u8; 17] = [0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8];
+    hex64(&buf[0] as *u8, bits);
+    printf("%s\n" as *u8, &buf[0] as *u8);
+    return 0;
+}

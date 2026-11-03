@@ -1,0 +1,17 @@
+# nbody — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+#
+# ⚠️ libc = libm —— sqrt 走的是 libm ⇒ 这道题**部分在测 libc**，
+#    不是 jhyy 的代码生成。对外发布时必须逐题标注。
+#
+# 输出是**总能量的 IEEE-754 位模式**（16 位小写 hex），不是十进制 ——
+# jhyy 没有浮点格式化器 ⇒ 无法比十进制渲染。
+
+name = nbody
+desc = N 体引力：5 个天体 × 500 000 步推进，输出总能量的位模式
+scale = 5 bodies x 500000 steps
+libc = libm
+checksum = 41306624fe0878d3
+axes = float, libm

@@ -1,0 +1,15 @@
+# spectral — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+#
+# 输出是**结果的 IEEE-754 位模式**（16 位小写 hex），不是十进制 ——
+# jhyy 没有浮点格式化器 ⇒ 无法比十进制渲染。
+# ⚠️ 矩阵用纯算术的确定性公式填（不用 sin）⇒ 不引入 libm 依赖。
+
+name = spectral
+desc = 稠密矩阵乘向量：500×500 × 20 轮，输出 ‖v‖₁ 的位模式
+scale = 500x500x20
+libc = none
+checksum = 664e7b5b18a2fddb
+axes = float, matrix
