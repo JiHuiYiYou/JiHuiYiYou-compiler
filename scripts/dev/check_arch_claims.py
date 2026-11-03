@@ -134,9 +134,18 @@ def main() -> int:
     if (ROOT / "compiler" / "src").exists():
         fail("`compiler/src/` 又出现了 —— architecture.md 说它已于 v4.0.21 删除")
 
-    # ── 10. 对拍工具存在？ ───────────────────────────────────────────────
+    # ── 10. 对拍工具**且对拍门**存在？ ──────────────────────────────────
+    # ⚠️ 2026-11-03 升级:此前这里只查「参考实现文件在不在」——
+    #    而**没有任何门跑它** ⇒ 它自己烂掉了也没人知道。
+    #    实测:第一次真跑它就发现它**漏了「整数类型」这一维**(它自己的
+    #    docstring 都写着有),两侧的「实际分配到寄存器」差 6。
+    # ⇒ 现在 architecture.md 那句「阶段一已有独立实现可对拍」要成立,
+    #    **对拍门也得在**(它才是让「可对拍」从口号变成事实的东西)。
     if not (ROOT / "scripts" / "dev" / "regalloc_reference.py").is_file():
         fail("architecture.md 提到 `scripts/dev/regalloc_reference.py`，但文件不存在")
+    if not (ROOT / "scripts" / "dev" / "check_regalloc_parity.py").is_file():
+        fail("architecture.md 说寄存器分配「有独立实现可对拍」，但对拍门 "
+             "`scripts/dev/check_regalloc_parity.py` 不存在 ⇒ 参考实现会烂掉没人知道")
 
     if problems:
         print(f"[check_arch_claims] FAIL —— {len(problems)} 处漂移:")

@@ -63,6 +63,7 @@ def analyse(path):
 
     total_defs = 0
     total_elig = 0
+    total_allocable = 0
     total_alloc = 0
     total_pool_full = 0
     max_live = 0
@@ -155,6 +156,27 @@ def analyse(path):
             cand[t] = di
         total_elig += len(cand)
 
+        # ③b **类型这一维**(2026-11-03 补 —— 本参考实现自己漏了它):
+        #   寄存器池是 5 个 **GPR** ⇒ 浮点 temp(`s`/`d`)**不能**进池。
+        #   jhyy 侧在分配那一步用 `rc_is_int_type()` 拒掉它们(计数器 `rej_flt`),
+        #   而本参考实现**从来没实现这一维**(尽管它的 docstring 写着
+        #   「合格候选 = … + 整数类型」)⇒ 6 个浮点 temp 被它算成了「分配到寄存器」。
+        #   实测(2026-11-03):两侧「实际分配到寄存器」差 **6**(58495 vs 58489),
+        #   差的正好是这些浮点 temp —— 也就是说**这个 bug 在参考实现这一侧**,
+        #   编译器侧是对的。⇒ 参考实现必须补上这一维,否则对拍永远是红的。
+        #
+        #   ⚠️ 口径与 jhyy 侧对齐:候选表**仍然收下**浮点 temp(所以「候选」数不变),
+        #   类型这一维在**分配**那一步才生效 —— 与 jhyy 的两遍扫描一致。
+        #   所以本参考实现报三个数:
+        #     · 候选          = jhyy 的 `candidates`   (含浮点)
+        #     · 其中可分配    = jhyy 的 `ok_pass`       (整数类型)
+        #     · 实际分配到寄存器 = jhyy 的 `allocated temps`
+        int_type = {}
+        for t, di in defidx.items():
+            int_type[t] = instrs[di][2] in ('w', 'l')
+        allocable = {t for t in cand if int_type.get(t, False)}
+        total_allocable += len(allocable)
+
         # ④ 线性扫描(5 个寄存器池,lowest reg wins)
         free = list(range(POOL))
         reg = {}
@@ -167,7 +189,7 @@ def analyse(path):
                     free.append(reg.pop(t))
                 ri += 1
             op, dst, qt, blk, cl, isdef = e
-            if isdef and dst is not None and dst in cand and cand[dst] == i:
+            if isdef and dst is not None and dst in allocable and cand[dst] == i:
                 if free:
                     r = min(free)
                     free.remove(r)
@@ -189,6 +211,7 @@ def analyse(path):
     return {
         'defs': total_defs,
         'eligible': total_elig,
+        'allocable': total_allocable,
         'allocated': total_alloc,
         'pool_full': total_pool_full,
         'max_live': max_live,
@@ -200,7 +223,8 @@ def main():
     r = analyse(path)
     print(f"参考实现(POOL={POOL})  {path}")
     print(f"  def 总数            : {r['defs']}")
-    print(f"  ★ 合格候选         : {r['eligible']}")
+    print(f"  ★ 候选             : {r['eligible']}   (含浮点 —— 对 jhyy 的 `candidates`)")
+    print(f"  ★ 其中可分配(整数) : {r['allocable']}   (对 jhyy 的 `ok_pass`)")
     print(f"  ★ 实际分配到寄存器 : {r['allocated']}")
     print(f"  池满(退化成栈槽)  : {r['pool_full']}")
     print(f"  ★ 最大同时活跃数   : {r['max_live']}")

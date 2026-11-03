@@ -61,7 +61,7 @@ _GATED_DEFAULTS = {
 }
 
 # Default `--all` 跑的 binary 列表 (gated, 影响 exit code)。
-# 不 glob `jhyy*.exe*` — v2/v3/v4.exe 是 make selfhost 产物, 不是 regress 语义。
+# 不 glob `jhyy*.exe*` — v2/v3/v4.exe 是自举闭环比对产物, 不是 regress 语义。
 #
 # v4.0.21 (2026-10-25):**C 端编译器已删除**(M5 Part 1)—— `compiler/src/` 与
 # `jhyy_stage0.exe` 一起删掉,stage0 这个 informational 项随之消失。

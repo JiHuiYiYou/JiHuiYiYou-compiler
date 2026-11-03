@@ -170,6 +170,12 @@ emit 层消费寄存器），不是那个被注释掉的 XMM 分配器。
 对拍工具：`scripts/dev/regalloc_reference.py` —— **独立写的第二套实现**，
 用来验证主实现（合格候选 / 池满计数逐项相同）。
 
+⚠️ 它**有门盯着**：`scripts/dev/check_regalloc_parity.py`（CI 门
+`regalloc-parity`，见 [`FACTS.md` § 2.2](FACTS.md#22-ci-门完整清单)）——
+2026-11-03 第一次真跑它就抓到参考实现**漏了「整数类型」这一维**
+（它自己的 docstring 都写着有）⇒ 两侧「实际分配到寄存器」差 6。
+⇒ 「有独立实现」这句话，从那天起有机制兜着了。
+
 ---
 
 ## 自举机制
