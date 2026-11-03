@@ -77,17 +77,16 @@ def all_md() -> list[Path]:
 # A. 版本号
 # --------------------------------------------------------------------------
 def check_version() -> None:
+    """`VERSION` 与 FACTS.md 的一致性。
+
+    ⚠️ **两份 README 的版本徽章不在这里查**(2026-11-03 审计删):
+    `bump_version.py check` 已经查了同一断言(`fingerprints()` 扫徽章 +
+    README 里其余 5 处版本串),而且查得更全 ⇒ 两道门查同一件事 = 重复,
+    改一处漏一处的风险不变、覆盖面却没增加。
+
+    这里只留**`bump_version` 不管的那一条**:FACTS.md 必须提到当前版本。
+    """
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    for rel, label in (("README.md", "version"), ("README.zh-CN.md", "版本")):
-        p = ROOT / rel
-        if not p.is_file():
-            fail(f"{rel}: 文件不存在")
-            continue
-        m = re.search(r"badge/" + label + r"-v(\d+\.\d+\.\d+)-", read(p))
-        if not m:
-            fail(f"{rel}: 找不到版本徽章(badge/{label}-vX.Y.Z-)")
-        elif m.group(1) != version:
-            fail(f"{rel}: 徽章版本 {m.group(1)} != VERSION {version}")
     if not FACTS.is_file():
         fail("docs/internal/FACTS.md 不存在 —— 事实单一真相源必须在")
     elif version not in read(FACTS):

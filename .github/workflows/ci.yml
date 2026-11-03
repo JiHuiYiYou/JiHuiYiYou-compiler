@@ -734,9 +734,15 @@ jobs:
   # 现在 release.yml 改成 reusable workflow(`on: workflow_call`),由本 job
   # 以 `needs: build-and-test` 调用 —— 这是 `needs:` 能跨文件生效的唯一途径,
   # 且零代码重复。
+  # ⚠️ `sysv` **必须**在 needs 里(2026-11-03 审计补):
+  # 那 6 个 SysV ABI 测试 + W-104 跨实现对拍在 windows-latest 上永远 SKIP
+  # (`--cross=auto → resolved=none`)⇒ **唯一能跑它们的 job 是 sysv**。
+  # 而此前 release 只 needs build-and-test + vscode-ext ⇒ SysV ABI 门红了
+  # 照发不误 ⇒ 那道门对「能不能发版」毫无约束力(与「恒红且被忽略的步骤
+  # 比没有门更糟」是同一类失效:门存在,但不影响结论)。
   release:
     name: Release installer
-    needs: [build-and-test, vscode-ext]
+    needs: [build-and-test, vscode-ext, sysv]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write   # 创建 GitHub Release

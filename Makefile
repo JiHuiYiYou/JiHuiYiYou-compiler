@@ -67,7 +67,7 @@ JHY_HELPERS_O = $(OBJ_DIR)/_jhyy_helpers.o
 # 归档流程随之退休 —— 没有"跨版本差异"可比了,只有"自身是否确定"。
 # 它不再是 source artifact,改由 .gitignore 排除。
 
-.PHONY: all clean test selfhost
+.PHONY: all clean selfhost
 
 all: $(JHY_RUNTIME_O) $(JHY_HELPERS_O) $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 
@@ -264,9 +264,12 @@ selfhost: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 	done
 	@echo "PASS — 自举闭环达成 (v2..v5 逐字节相同)"
 
-test:
-	@echo "Running tests..."
-	@echo "TODO: test runner"
+# ⚠️ 这里**没有** `test` target(2026-11-03 删)。
+# 它此前只有两行 `@echo "TODO: test runner"` ⇒ 恒退出 0 的空门。
+# 跑测试的真入口是仓库根的 `python regress.py`(全量回归门)——
+# `make test` 的存在只会让人以为「跑过了」。
+#
+# 删掉它不是「少一个命令」:是把一个**恒绿的空壳**换成一条会指错人的假路径。
 
 clean:
 	rm -rf $(OBJ_DIR)
