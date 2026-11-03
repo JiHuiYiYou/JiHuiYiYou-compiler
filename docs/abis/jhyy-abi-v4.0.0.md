@@ -461,4 +461,4 @@ epilogue:
 - 二进制格式（设计稿，未实装）：[`docs/abis/jhyy-binary-format-v1.0.0.md`](jhyy-binary-format-v1.0.0.md)
 - 历史档案（已归档至 git 历史）：`jhyy-abi-v1.0.0.md`、`jhyy-abi-v0.0.1.md`
 - 已知限制台账：[`docs/internal/workarounds.md`](../internal/workarounds.md)
-- 验证门：`compiler/tests/bootstrap/`（`closure_check.sh`、`fixed_point.sh`、`artifact_checks.sh`、`sysv_abi_cross.sh`、`sysv_full_regress.sh`）
+- 验证门：见 [`docs/internal/FACTS.md` § 2](../internal/FACTS.md#2-回归与门)（**那里是唯一的门清单** —— CI 门与本地门分开列）。脚本都在 `compiler/tests/bootstrap/`：`closure_check.sh`、`fixed_point.sh`、`artifact_checks.sh`、`sysv_abi_cross.sh`、`sysv_full_regress.sh`

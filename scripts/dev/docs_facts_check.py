@@ -138,7 +138,10 @@ def declared() -> dict:
         out["superseded"] = int(m.group(2))
         out["invalid"] = int(m.group(3))
 
-    m = re.search(r"artifact_checks\.sh` \| \*\*(\d+)", ft)
+    # 产物级门数(2026-11-03:§ 2 改成「事实 / CI 门 / 本地门」三节后,
+    # 门数改记在 § 2.1 的「产物级门数」一行里 —— id 用连字符(`artifact-checks`),
+    # 脚本名里是下划线 ⇒ 正则要认两种写法)
+    m = re.search(r"`?artifact[-_]checks`?[^\d\n]{0,12}\*\*(\d+)", ft)
     if not m:
         fail("FACTS.md: 找不到 artifact_checks 门数")
     else:
@@ -919,22 +922,254 @@ def check_facts_links() -> None:
 # 2026-11-01 实测:CI 跑 6 个 `scripts/dev/*.py` 门,FACTS.md 只点名了 2 个
 # (`bump_version` / `docs_facts_check`) ⇒ **另外 4 个是「有门但清单里没有」**。
 #
-# 口径:**以 CI 为准** —— CI 调用的 `scripts/dev/*.py` 就是门;
+# 口径(2026-11-03 重写):**以 CI 为准**,但「以 CI 为准」这句话本身必须有机制兜着。
 # 非门脚本(`regalloc_reference.py` 对拍工具、一次性重建脚本、bench/build/install/test 目录)
 # 不在 CI 里 ⇒ 不要求登记。
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOWS = [CI, ROOT / ".github" / "workflows" / "release.yml"]
+
+# 门在 workflow 里的标记:`# gate: <id>`
+GATE_MARK_RE = re.compile(r"#\s*gate:\s*([a-z0-9][a-z0-9-]*)")
+
+# ── 非门步骤的**显式白名单** ──────────────────────────────────────────
+# CI 里每个**带 run 块**的 step 要么是门(带 `# gate: <id>` 标记),
+# 要么在这里显式登记为「不是门」。
+# ⇒ 新加一个 step 会被迫分类 —— 这正是「清单自维护」的实现方式:
+#   忘了登记 ⇒ 门红;想登记成门 ⇒ 必须在 FACTS § 2.2 里加一行 + 在
+#   workflow 里打标记。
+#
+# ⚠️ 改 workflow 的 step **名字**时,这里也要跟着改(否则门会红)。
+NON_GATE_STEPS = {
+    ("ci.yml", "Set bash as default shell"),          # 只是把 bash 设成默认 shell
+    ("release.yml", "Compute VERSION + IS_RC + JHY_TAG_NAME"),   # 只是算环境变量
+    ("release.yml", "Install WiX 4/7 toolchain"),     # 只是装工具
+    ("release.yml", "Install vsce (VSCode Extension CLI)"),  # 只是装工具
+    ("release.yml", "Create GitHub Release"),         # 发布动作本身(不是判据)
+    ("release.yml", "Dry-run summary"),               # 只是打印摘要
+}
+
+
+def _workflow_steps(path: Path) -> list[tuple[str, list[str]]]:
+    """把一个 workflow 切成 [(step 名, run 块的行)]。
+
+    不依赖 PyYAML(MSYS2 的 python 没有 pip 装不上)⇒ 按缩进做行级解析:
+    `- name:` 开一个 step,`run:` 开一个块,块到缩进回落为止。
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    steps: list[dict] = []
+    name = ""
+    workdir = ""
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^(\s*)- name:\s*(.+?)\s*$", line)
+        if m:
+            name = m.group(2).strip().strip("\"'")
+            workdir = ""
+            i += 1
+            continue
+        m = re.match(r"^(\s*)working-directory:\s*(.+?)\s*$", line)
+        if m:
+            workdir = m.group(2).strip().strip("\"'")
+            i += 1
+            continue
+        m = re.match(r"^(\s*)run:\s*(.*)$", line)
+        if m:
+            indent = len(m.group(1))
+            inline = m.group(2).strip()
+            body: list[str] = []
+            if inline and inline not in ("|", ">", "|-", ">-", "|+", ">+"):
+                body = [inline]
+            else:
+                j = i + 1
+                while j < len(lines):
+                    l2 = lines[j]
+                    if not l2.strip():
+                        body.append("")
+                        j += 1
+                        continue
+                    if len(l2) - len(l2.lstrip()) <= indent:
+                        break
+                    body.append(l2)
+                    j += 1
+                i = j - 1
+            if body:
+                steps.append({"name": name, "workdir": workdir, "body": body})
+        i += 1
+    return steps
+
+
+def _facts_gate_rows(section_header: str) -> list[tuple[str, str]]:
+    """从 FACTS.md 的某个小节里取门表的 (id, 整行文本)。
+
+    门表的列约定:| 门 | `id` | 查什么 | 在哪跑 · 跑什么 |
+    ⇒ id 是**第二格**、反引号包着的 slug。
+    """
+    if not FACTS.is_file():
+        return []
+    text = read(FACTS)
+    lines = text.splitlines()
+    out: list[tuple[str, str]] = []
+    inside = False
+    for line in lines:
+        if re.match(r"^#{2,3}\s", line):
+            inside = line.startswith(section_header)
+            continue
+        if not inside:
+            continue
+        if not line.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        m = re.fullmatch(r"`([a-z0-9][a-z0-9-]*)`", cells[1])
+        if m:
+            out.append((m.group(1), line))
+    return out
+
+
+# ── 「一道门跑哪些脚本」的提取 ─────────────────────────────────────────
+# 门不只是「有没有跑」,还有「跑的是**哪个**脚本」——
+# 否则「在别的门的 step 里偷偷加一道新门」这种注册是看不见的。
+SCRIPT_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:py|sh|ps1|mjs)\b")
+# `pytest <路径>` —— 路径必须含 "tests"(否则 `pip install pytest pytest-asyncio`
+# 里的 "pytest pytest-asyncio" 会被误当成一个测试目录)
+PYTEST_RE = re.compile(r"\bpytest\s+((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]*tests[A-Za-z0-9_./-]*)")
+# 引号里的东西**不是命令** —— 报错消息里提到一个脚本名,不代表它被调用了
+QUOTED_RE = re.compile(r"\"[^\"]*\"|'[^']*'")
+MAKE_CMD_RE = re.compile(r"(?m)^\s*make\b")
+
+
+def _scripts_in_ci(cmds: str, workdir: str = "") -> set[str]:
+    """CI 步骤的命令里**真正调用了**哪些门脚本 / 门入口。
+
+    - 引号里的片段先剥掉(报错消息里的脚本名不算调用);
+    - `make` 只在**行首**才算(免得 echo 的提示语里那个 "make" 被算进去);
+    - `workdir` = 该 step 的 `working-directory:` ⇒ 相对路径要拼上,
+      否则「在 vscode-ext/ 下跑的 scripts/check-grammar.mjs」和 FACTS 里写的
+      「vscode-ext/scripts/check-grammar.mjs」对不上。
+    """
+    text = QUOTED_RE.sub(" ", cmds)
+    out: set[str] = set()
+    for p in SCRIPT_RE.findall(text):
+        if workdir and not p.startswith(workdir.rstrip("/") + "/"):
+            p = f"{workdir.rstrip('/')}/{p}"
+        out.add(p)
+    for m in PYTEST_RE.finditer(text):
+        out.add(m.group(1))
+    if MAKE_CMD_RE.search(text):
+        out.add("make")
+    return out
+
+
+def _scripts_in_facts(row: str) -> set[str]:
+    """FACTS 门表那一行里写了哪些门脚本 / 门入口。
+
+    只认**反引号里**的命令(那是这一列约定的写法)⇒ 行文里顺带提到的
+    脚本名不会被算成「这道门跑的东西」。
+    """
+    out: set[str] = set()
+    for token in re.findall(r"`([^`]+)`", row):
+        text = QUOTED_RE.sub(" ", token)
+        out.update(SCRIPT_RE.findall(text))
+        for m in PYTEST_RE.finditer(text):
+            out.add(m.group(1))
+        if re.fullmatch(r"make\b", token.strip()):
+            out.add("make")
+    return out
 
 
 def check_gate_registry() -> None:
-    if not CI.is_file() or not FACTS.is_file():
+    """门清单(FACTS § 2.2) ⇄ CI 实况,**双向**对拍。
+
+    **为什么必须双向**(2026-11-03 门审计实测):原实现只做单向 ——
+      `gates = set(re.findall(r"scripts/dev/([a-z_0-9]+\\.py)", ci))`
+      ① 正则**扫全文**(含注释)⇒ 删掉门的调用行、注释里还留着路径,它照样判「已登记」;
+      ② 只认 `scripts/dev/*.py` ⇒ 新增一道 `.sh`/`.ps1`/`.mjs` 门,它**看不见**;
+      ③ 判据是「名字在 FACTS.md **全文**出现过」,不是「在 § 2 门表里」。
+    ⇒ 「FACTS § 2 是门的完整清单」这句话当时**没有任何机制兜着**。
+
+    **现在的口径**:
+      · CI 里每个带 run 块的 step 要么是门(带 `# gate: <id>` 标记),
+        要么在 `NON_GATE_STEPS` 里显式登记 ⇒ **新加 step 会被迫分类**;
+      · workflow 里的标记 id ⇄ FACTS § 2.2 的 id **双向相等**;
+      · 每道门**跑的是哪些脚本**也要对得上(FACTS 行里写的命令 vs step 里
+        真正调用的脚本)—— 否则「在别的门的 step 里偷偷加一道新门」是看不见的;
+      · § 2.3(本地门)的 id **不得**出现在 workflow 里(要接 CI 先移到 § 2.2)。
+    """
+    if not FACTS.is_file():
         return
-    ci = read(CI)
-    facts = read(FACTS)
-    gates = set(re.findall(r"scripts/dev/([a-z_0-9]+\.py)", ci))
-    for g in sorted(gates):
-        if g not in facts:
-            fail(f"CI 跑了 `scripts/dev/{g}`，但 FACTS.md § 2 的门清单里没有它 "
+    ci_ids: list[str] = []
+    ci_scripts: dict[str, set[str]] = {}
+    for wf in WORKFLOWS:
+        if not wf.is_file():
+            fail(f"workflow 不存在: {wf}")
+            continue
+        for st in _workflow_steps(wf):
+            step_name = st["name"]
+            body = st["body"]
+            marks = []
+            for line in body:
+                for m in GATE_MARK_RE.finditer(line):
+                    marks.append(m.group(1))
+            uniq = sorted(set(marks))
+            if len(uniq) > 1:
+                fail(f"{wf.name} 的步骤「{step_name}」有多个门标记 {uniq} —— "
+                     f"一个步骤只能是一道门")
+            if uniq:
+                ci_ids.extend(uniq)
+                # 只看**非注释行** —— 注释里提到别的脚本不算「跑了它」
+                cmds = "\n".join(l for l in body if not l.strip().startswith("#"))
+                ci_scripts.setdefault(uniq[0], set()).update(
+                    _scripts_in_ci(cmds, st["workdir"]))
+                continue
+            if (wf.name, step_name) not in NON_GATE_STEPS:
+                fail(f"{wf.name} 的步骤「{step_name}」既没有 `# gate: <id>` 标记,"
+                     f"也没登记为非门步骤 ⇒ 门清单与实况对不上。"
+                     f"(是门就加标记 + 在 FACTS § 2.2 加一行;不是门就在 "
+                     f"docs_facts_check.py 的 NON_GATE_STEPS 里登记)")
+
+    facts_rows = _facts_gate_rows("### 2.2")
+    facts_local = [gid for gid, _ in _facts_gate_rows("### 2.3")]
+    facts_ci = [gid for gid, _ in facts_rows]
+    if not facts_ci:
+        fail("FACTS.md 里找不到 § 2.2「CI 门」小节(表头必须是小节标题 `### 2.2 …`)")
+
+    for gid in sorted(set(ci_ids)):
+        if gid not in facts_ci:
+            fail(f"CI 里跑了门 `{gid}`,但 FACTS.md § 2.2 的门清单里没有它 "
                  f"—— CONTRIBUTING.md 让读者去 FACTS.md 找门的完整清单")
+    for gid in facts_ci:
+        if gid not in ci_ids:
+            fail(f"FACTS.md § 2.2 登记了门 `{gid}`,但 CI 里没有对应的 `# gate: {gid}` 标记 "
+                 f"⇒ 它要么没接上 CI,要么已经没人跑了")
+    for gid in facts_local:
+        if gid in ci_ids:
+            fail(f"门 `{gid}` 在 FACTS.md § 2.3 里登记为**本地门**,却出现在 CI 里 "
+                 f"⇒ 把它移到 § 2.2(CI 门)并说明为什么")
+    dup = [g for g in set(facts_ci) if facts_ci.count(g) > 1]
+    if dup:
+        fail(f"FACTS.md § 2.2 里有重复的 id: {sorted(dup)}")
+
+    # 每一道门**跑的是哪些脚本**也要对得上
+    for gid, row in facts_rows:
+        if gid not in ci_scripts:
+            continue
+        want = _scripts_in_facts(row)
+        got = ci_scripts[gid]
+        if want != got:
+            only_ci = sorted(got - want)
+            only_facts = sorted(want - got)
+            detail = []
+            if only_ci:
+                detail.append(f"CI 里多跑了 {only_ci}")
+            if only_facts:
+                detail.append(f"清单里写了但 CI 没跑 {only_facts}")
+            fail(f"门 `{gid}` 跑的命令与 FACTS.md § 2.2 那一行对不上 —— "
+                 f"{'; '.join(detail)}")
 
 
 # --------------------------------------------------------------------------

@@ -30,6 +30,7 @@ Sprint v1.4.7 (2026-08-14): 加 --all / --include-informational / _GATED_DEFAULT
                             删 regress_v1.py + regress_stage0.py 两个 shim。
 """
 import argparse
+import json
 import os
 import re
 import shutil
@@ -662,6 +663,33 @@ def _print_matrix_row(idx, total, binary, label, result, is_informational):
     print()
 
 
+def _write_summary(path, payload) -> None:
+    """把本轮计数落成 JSON —— 「事实为真」链路的产物。
+
+    ⚠️ **为什么要有它**(2026-11-03 门审计实测):
+    `docs_facts_check.py` 强制的是「这个数在所有文档里**一致**」,
+    变异测试(2026-11-02)也明说它「不强制 FACTS.md 的数为真」。
+    ⇒ 加一个测试 → 真实总数变了 → FACTS.md 还写旧数 → **没有任何一道门会红**
+    (实测:docs 门 / 变异测试 / bump_version 全绿)。
+    ⇒ 这份 JSON 是那条缺失的链的**唯一接口**:regress 负责「跑出来」,
+    `check_regress_facts.py` 负责「跟 FACTS 对拍」。
+
+    写失败**不**让 regress 失败(它是报告附件,不是判据)—— 但会打 stderr,
+    免得「摘要没落盘」被当成「对拍通过」。
+    """
+    try:
+        p = Path(path)
+        if p.parent and str(p.parent) not in ("", "."):
+            p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        print(f"[summary] 计数已写入 {p}")
+    except OSError as e:
+        print(f"[summary] WARN: 写不出 {path} —— 对拍门会因「摘要缺失」而红({e})",
+              file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="JHYY regress runner (single canonical entry, v1.4.7)",
@@ -711,6 +739,10 @@ def main():
                     help="Cross-env mode for sysv tests (v2.7.0 Phase 2b). "
                          "auto=probe wsl.exe/docker on PATH; none=SKIP. "
                          "Real wire deferred to v2.7.1.")
+    ap.add_argument("--summary-json", metavar="PATH", default=None,
+                    help="把本轮的计数写成 JSON(供 scripts/dev/check_regress_facts.py "
+                         "与 FACTS.md 对拍)。**这是「事实为真」的那条链**:"
+                         "docs 门只强制「跨文档一致」,没有它,回归数会静默漂。")
     args = ap.parse_args()
 
     # Parse --tests (comma-separated → list)
@@ -763,11 +795,22 @@ def main():
 
         gated_failures = 0
         informational_count = 0
+        matrix_rows = []          # 2026-11-03:给 --summary-json 用
         for idx, (binary, label) in enumerate(binaries, 1):
             is_informational = (idx > len(_GATED_BINARIES))
             enforce = _resolve_default_enforce(binary, args.no_baseline_check)
             result = _run_one(binary, label, tests, args.timeout, enforce, args.jobs)
             _print_matrix_row(idx, total, binary, label, result, is_informational)
+            matrix_rows.append({
+                "binary": binary,
+                "label": label,
+                "gated": not is_informational,
+                "passed": result["passed"],
+                "failed": result["failed"],
+                "skipped": result["skipped"],
+                "total": result["total"],
+                "ok": bool(result["ok"]),
+            })
             if is_informational:
                 informational_count += 1
                 # informational fail 不影响 exit code
@@ -787,6 +830,7 @@ def main():
         cross_mode = _resolve_cross_mode(args.cross)
         print(f"cross: --cross={args.cross} → resolved={cross_mode}")
         only_sysv = tests  # may filter to specific sysv tests
+        _sysv_passed = _sysv_failed = _sysv_skipped = 0
         for idx, (binary, label) in enumerate(binaries, 1):
             is_informational = (idx > len(_GATED_BINARIES))
             if is_informational:
@@ -800,6 +844,26 @@ def main():
             if _sysv_failed > 0:
                 print(f"Summary: {gated_failures}/... gated binary FAIL "
                       f"(sysv_cross={cross_mode}, sysv_failures={_sysv_failed})")
+        if args.summary_json:
+            gated_rows = [r for r in matrix_rows if r["gated"]]
+            _write_summary(args.summary_json, {
+                "generated_by": "regress.py",
+                "mode": "all",
+                "cross_mode": cross_mode,
+                "binaries": matrix_rows,
+                "gated": {
+                    "passed": sum(r["passed"] for r in gated_rows),
+                    "failed": sum(r["failed"] for r in gated_rows),
+                    "skipped": sum(r["skipped"] for r in gated_rows),
+                    "total": sum(r["total"] for r in gated_rows),
+                },
+                "sysv_cross": {
+                    "mode": cross_mode,
+                    "passed": _sysv_passed,
+                    "failed": _sysv_failed,
+                    "skipped": _sysv_skipped,
+                },
+            })
         sys.exit(0 if gated_failures == 0 else 1)
     else:
         # Single-binary mode: explicit --binary (or default jhyy.exe)
@@ -828,6 +892,34 @@ def main():
             cross_mode, binary, args.timeout, only_sysv)
         # overall ok = Win run_all ok AND no sysv FAIL (sysv SKIP is OK)
         sysv_ok = _sysv_failed == 0
+        if args.summary_json:
+            _write_summary(args.summary_json, {
+                "generated_by": "regress.py",
+                "mode": "single",
+                "cross_mode": cross_mode,
+                "binaries": [{
+                    "binary": binary,
+                    "label": "single",
+                    "gated": True,
+                    "passed": result["passed"],
+                    "failed": result["failed"],
+                    "skipped": result["skipped"],
+                    "total": result["total"],
+                    "ok": bool(result["ok"]),
+                }],
+                "gated": {
+                    "passed": result["passed"],
+                    "failed": result["failed"],
+                    "skipped": result["skipped"],
+                    "total": result["total"],
+                },
+                "sysv_cross": {
+                    "mode": cross_mode,
+                    "passed": _sysv_passed,
+                    "failed": _sysv_failed,
+                    "skipped": _sysv_skipped,
+                },
+            })
         sys.exit(0 if result["ok"] and sysv_ok else 1)
 
 

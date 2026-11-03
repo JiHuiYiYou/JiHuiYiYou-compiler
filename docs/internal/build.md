@@ -34,7 +34,6 @@ emit，在 Linux 上 link + run。四个 target 见 [`docs/internal/FACTS.md`](F
 
 ```bash
 make            # = 编 jhyy_helpers.o / runtime.o + 自举闭环检查，产 jhyy.exe
-make selfhost   # 跨代 .s 逐字节 byte-equal 闭环检查
 ```
 
 `make` 的 `jhyy.exe` 规则做三件事：
@@ -44,6 +43,13 @@ make selfhost   # 跨代 .s 逐字节 byte-equal 闭环检查
    `_boot_new2`（+`.s`）；
 3. **闭环检查**：`cmp -s _boot_new.s _boot_new2.s` ⇒ 新编译器编 src0 的产物必须与
    它自己编的逐字节相同（任何 emit 层的非确定性都会当场炸）。
+   ⚠️ 2026-11-03 补了**非空守卫**：此前 `cmp` 比两个**空文件**也判「相同」⇒
+   编译器「静默 exit 0 但不产 `.s`」时会假绿。
+
+> ⚠️ **没有 `make selfhost` 了**(2026-11-03 删)：它跑的「v2..v5 逐字节相同」
+> 就是上面第 3 步保证的东西 ⇒ 在 CI 里(先 `make` 后 `make selfhost`)**恒绿**。
+> 想要一份**可移植**的跨代闭环判据 ⇒ `bash compiler/tests/bootstrap/closure_check.sh`
+> (本地门,见 [`FACTS.md` § 2.3](FACTS.md#23-本地门opt-in需手工跑))。
 
 第 3 步之后还有一道**漂移检查**：新产物还要与**提交进仓的那份**逐字节相同 ——
 但**只在 src0/runtime 与 HEAD 一致时**才生效（src0 一改，新产物本就该不同）。
@@ -207,29 +213,21 @@ temp 编号 ⇒ 自举产物行为漂移**。字符串字面量改动是安全�
 
 ## 门
 
-| 门 | 查什么 |
-|---|---|
-| `python regress.py` | 全量回归 |
-| `python scripts/dev/audit_test_assertions.py --strict` | 每个测试的断言强度（零信号即红） |
-| `compiler/tests/bootstrap/artifact_checks.sh` | 产物级断言（图标 / 帧 / 旁路文件 / 版本 …） |
-| `compiler/tests/bootstrap/fixed_point.sh` | 跨代 byte-equal |
-| `compiler/tests/bootstrap/closure_check.sh` | v2.s == v3.s |
-| `python scripts/dev/bump_version.py check` | 版本零漂移（覆盖 8 处，含两份 README 徽章） |
-| `python scripts/dev/docs_facts_check.py` | 文档里的事实与现实对拍（链接 / 反引号裸路径 / `§ N.M` 章节引用 / 台账正文 / `feedback_*` 代号索引） |
-| `python scripts/dev/check_spec_consistency.py` | 三份规范的 `Cap<T>` wire 布局一致（含 lang-spec 自带构造示例的独立佐证） |
-| `python scripts/dev/check_binary_format_layout.py` | `.jhyynb` 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding |
-| `python scripts/dev/check_arch_claims.py` | `architecture.md` 的结构性断言（模块清单 / NodeKind 个数 / 「被注释掉」/「默认关」/ 4096 上限）与源码一致 |
-
-工具链侧的门：
+> **门的完整清单在 [`FACTS.md` § 2](FACTS.md#2-回归与门)** —— 一处定义，
+> CI 与本地分开列（§ 2.2 CI 门 / § 2.3 本地门）。
+> 本文件**不再复述**那份清单（复述 = 下一个漂移源；门清单门会双向对拍
+> 「清单 ⇄ CI 实况」，两份表各写各的必然对不上）。
+>
+> 工具链侧的门（CI 用 `-AllowVersionDrift`；release 严格 —— 版本不符响亮失败）：
 
 ```bash
-# 采集（CI 用 -AllowVersionDrift；release 严格 —— 版本不符响亮失败）
 powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1
-# 验（可重定位 / 头闭包 / poisoned PATH / 无 PATH / windres / 预编 .o 字节一致）
 powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
 ```
 
 ⚠️ **门必须能抓到真失败**：新增或改动工具链组成后，**先跑门，再改代码**。
+⚠️ **新加一道门要改两处**：workflow 里给它一个 `# gate: <id>` 标记，
+并在 `FACTS.md` § 2.2 加一行 —— 少任何一边，门 `docs-facts` 会红。
 
 ---
 

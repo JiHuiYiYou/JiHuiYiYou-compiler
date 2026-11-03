@@ -318,9 +318,9 @@ JiHuiYiYou-compiler/
 | `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP**(285 total) |
 | 断言强度审计 | 扫 285 / 可跑 265 / 真断言 205 / 零信号 0 |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
-| `fixed_point.sh` | PASS(N=10 —— `.il` 与 `.s` 跨代 byte-equal) |
+| `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |
-| `closure_check.sh` | PASS(v2.s == v3.s,逐字节相同) |
+| `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
 | ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.2.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.2.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |

@@ -1,29 +1,27 @@
 # GH Actions CI — JHYY compiler
 #
-# 2026-10-18 重构:本文件的门表此前长期与实际脱节(列着已删的步骤、把一个
-# 从不判定的 `make selfhost` 算成门)。下面这张表是**逐 step 对照实际配置**
-# 写出来的,改动本文件时必须同步改它。
+# **门的完整清单在 [`docs/internal/FACTS.md` § 2](../../docs/internal/FACTS.md#2-回归与门)**
+# —— 一处定义,CI 门(§ 2.2)与本地门(§ 2.3)分开列。
+# ⚠️ 本文件**不再自带门表**:2026-11-03 审计实测,这里的表长期与实际脱节
+# (列着已删的步骤、漏着十几道真在跑的门),而**没有任何门盯着它** ⇒
+# 一份没有门守着的清单 = 下一个漂移源。
 #
-# | step                                   | 阻断?  | 验的是                                    |
-# |----------------------------------------|--------|-------------------------------------------|
-# | regress.py --all                       | ✅ 是  | 261 个测试的退出码/stdout 断言            |
-# | vscode-ext:check-grammar(独立 job)     | ✅ 是  | VSCode 语法高亮 grammar 与真实语言规则一致 |
-# | 提交产物与当前源码同步(artifact-fresh)| ✅ 是  | 提交版与现编版编 src0 的 `.s` 逐字节相同  |
-# | make selfhost                          | ✅ 是  | v2..v5 的 `.s` 逐字节相同(确定性+自洽)   |
-# | closure_check.sh                       | ✅ 是  | Stage2 `.s` == Stage3 `.s`(自举闭环)      |
-# | audit_test_assertions.py --strict      | ✅ 是  | 每个测试都有能失败的断言                   |
-# | artifact_checks.sh                     | ✅ 是  | 产物字节布局(expected-FAIL 模型,见 step)  |
-# | check_binary_format_layout.py          | ✅ 是  | `.jhyynb` 每个 struct 的尺寸算术可算、无隐式 padding |
-# | ~~jhyy_v1.exe.exe cmp 副本约定~~       | —     | 2026-10-18 删除,理由见下方 [已删 step]    |
+# **现在清单与实况由门 `docs-facts` 双向对拍**:
+#   · workflow 里每个**带 run 块**的步骤要么带 `# gate: <id>` 标记(是门),
+#     要么在 `docs_facts_check.py` 的 `NON_GATE_STEPS` 里登记(不是门)
+#     ⇒ 新加一个步骤会被迫分类;
+#   · 标记的 id ⇄ FACTS § 2.2 的 id **双向相等**;
+#   · 每道门**跑的是哪些脚本**也要与 FACTS 那一行对得上
+#     ⇒ 「在别的门的步骤里偷偷加一道新门」是看不见的。
 #
 # **每道门验的是什么边界,别互相误读:**
-#   - regress / audit          = 正确性 + 断言强度
+#   - regress / assert-strength = 正确性 + 断言强度
 #   - artifact-fresh           = **提交产物对当前源码的行为一致性**。
 #                                比 `.s` 不比 `.exe`(后者跨 toolchain 必假阳性)。
 #                                ⚠️ 它看不见 codegen 中性的源码改动 —— 见该 step 注释
-#   - make selfhost / closure  = 确定性 + 自洽。**不验正确性** —— 一个确定性的
+#   - make(自举闭环)            = 确定性 + 自洽。**不验正确性** —— 一个确定性的
 #                                错误编译器照样闭环通过
-#   - artifact_checks          = 那两条验不到的失效模式(症状在产物字节布局里,
+#   - artifact-checks          = 那两条验不到的失效模式(症状在产物字节布局里,
 #                                任何 .jhyy 测试都验不到)
 #
 # **所有门测的都是同一个二进制:本 job `make` 刚编出来的那份。** 这一条在
@@ -31,7 +29,7 @@
 # 产物,于是「改 src0 引入语义回归」这件事 201 个测试一个都不会红。挡着这层的
 # 理由(W-117:CI 编出的编译器行为不同)已于同日闭合,理由不再成立。
 #
-# **「不验正确性」这句对 artifact_checks 同样适用**:它验的是「某个已知缺陷是否
+# **「不验正确性」这句对 artifact-checks 同样适用**:它验的是「某个已知缺陷是否
 #   仍以登记的方式存在」,不是「编译器是否正确」。
 #
 # **[已删 step] 2026-10-18**:`cmp jhyy.exe jhyy_v1.exe.exe` 那一步删掉了,两条理由:
@@ -41,8 +39,11 @@
 #      恒红且被忽略的步骤 = 训练人忽略红色。
 #   2. 就算不换回,它也**恒真**:`Makefile` 里那条规则字面就是 `cp -f $< $@`,
 #      同一次 make 内不可能不同步。被保护者自己保证的不变量不需要门。
-#   真正需要 v1 的是 fixed_point.sh / byte_equal.sh,那两个脚本内部本来就在
-#   用它跑比对 —— 那里才是判据该在的地方。
+#
+# **[已删 step] 2026-11-03**:`make selfhost` 与 `closure_check.sh` 两步删掉了 ——
+#   `make` 自己的不动点迭代已经把「装出去的那个产物在不动点上」证过一遍,
+#   这两步在 CI 里**恒绿**(恒真的断言不是断言,是噪音)。可移植的跨代闭环判据
+#   仍在 `compiler/tests/bootstrap/closure_check.sh`(现在是**本地门**)。
 #
 # 触发面:
 #   - push to main (含 v1.x ‖ v2.x ‖ v3.x 任何 commit)
@@ -130,6 +131,7 @@ jobs:
       - name: Build jhyy.exe (self-bootstrap) — 回归门就测这个产物
         shell: msys2 {0}
         run: |
+          # gate: selfhost
           # ── 工具链版本上报(刻意**不**钉版本)────────────────────────────
           # 为什么不上 `setup-msys2` 的 `update: false`:
           # **它换不来可复现性**。GitHub 的 `windows-latest` 本身是滚动镜像,
@@ -210,6 +212,7 @@ jobs:
         # 对这一类,下面那条 git 层的 annotation 会点出来。
         shell: msys2 {0}
         run: |
+          # gate: artifact-fresh
           set -e
           AF=tmp/artifact_fresh
           rm -rf "$AF"; mkdir -p "$AF"
@@ -265,6 +268,7 @@ jobs:
       - name: "Run regress.py --all (gated: jhyy.exe)"
         shell: msys2 {0}
         run: |
+          # gate: regress
           # v4.0.8:stage0 已从 gated 降为 informational —— 它是 C 端 bootstrap,
           # 语言子集早于 v3.x(闭包是 v3.2.1、char literal / Cap<T> 是 v3.x),
           # 实测有 39 个**预期内**的失败。让它 gate 等于派一个注定失败的活,
@@ -283,33 +287,36 @@ jobs:
           # `git checkout` 换回来的提交产物 —— 那意味着改 src0 的语义回归
           # 一个测试都不会红)。`--jobs` 此前**完全没传**,实际在跑
           # `max(2, cpu//2)`;显式传,让并发度成为配置而不是隐式默认。
-          python -u regress.py --all --jobs=2 --timeout=300
+          python -u regress.py --all --jobs=2 --timeout=300 --summary-json tmp/regress-summary.json
 
-      - name: Build Stage 2 closure chain (v1→v2→v3→v4)
-        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
-        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
-        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
+      # ── 「事实为真」对拍门(2026-11-03 加)─────────────────────────────
+      #
+      # 为什么需要这道门:docs 门(`docs_facts_check.py`)强制的是「这个数在
+      # **所有文档里一致**」,而它自己的变异测试写得很明白 ——「它不证明
+      # FACTS.md 的数为真」。⇒ 那句「真跑一遍 regress 再对拍」从来没落地。
+      # ⇒ 实测:加一个测试文件 → 真实总数从 285 变 286 ⇒ FACTS.md 还写 285
+      # ⇒ **docs 门 / 变异测试 / bump_version 全绿**。
+      # ⇒ 全仓被复述最多的数字(曾出现在 31 份文档里)恰恰没有真相源校验。
+      #
+      # 这道门拿**上一步的实测计数**(regress 自己落的 JSON)与 FACTS 对拍,
+      # 外加断言审计的**静态数**(扫了多少 .jhyy / 多少可跑 / 多少真断言)——
+      # 后者与机器无关,谁都能复现同一个数。
+      #
+      # ⚠️ 摘要缺失 ⇒ 这道门**红**(不是跳过):「拿不到实测数」正是它要抓的
+      # 那种状态(数字无从验证)。
+      - name: Regression facts gate (FACTS.md == 实测计数)
         if: always()
         shell: msys2 {0}
         run: |
-          make selfhost
+          # gate: regress-facts
+          python scripts/dev/check_regress_facts.py tmp/regress-summary.json
 
-      - name: Stage 2 vs Stage 3 .s byte-equal (closure gate)
-        # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
-        #   加它是因为 job 原本在第一个失败 step 就中止 —— 一次 CI 周期只能拿到一个
-        #   结论,排查要等好几轮。step 7 仍是唯一的硬门,其余是补充信息。
-        if: always()
-        shell: msys2 {0}
-        run: |
-          # 真门是 compiler/tests/bootstrap/closure_check.sh:它比 Stage2 vs Stage3
-          # 的 .s(约 11 MB),带 `! -s` 非空守卫,已实测能翻红于「编译器静默 exit 0
-          # 但不产 .s」——也就是 W-086 那一类假阳性。
-          #
-          # v4.0.8:本 step 原先内联了 v1→v4 四代的 .il sha 比对,但既没设
-          # JHY_WRITE_IL=1(jhyy-side in-mem 路径默认不落 .il),也没检查 sha256sum
-          # 的退出码 —— 四个 SHA 全是空串,`"$SHA_V1" != "$SHA_V2"` 对空串恒假,
-          # 于是闭环与否都打印 `PASS (sha=)`。比没有门更糟,现在直接调真门。
-          bash compiler/tests/bootstrap/closure_check.sh
+      # ⚠️ 2026-11-03:这里曾经有的两道闭环门(`make selfhost` + `closure_check.sh`)
+      # **删掉了** —— 它们在 CI 里**恒绿**:上面的 `make` 已经把锚点迭代到不动点,
+      # 「装出去的那个产物 = 不动点」当场被证过一遍,再跑一次只是复述结论。
+      # 仓里的规矩:**被保护者自己保证的不变量不需要门**。
+      # 可移植的跨代闭环判据仍在 `compiler/tests/bootstrap/closure_check.sh`
+      # (现在是**本地门**,见 docs/internal/FACTS.md § 2.3)。
 
       - name: Assert every test has a real assertion (zero-signal gate)
         # 2026-10-15:`always()` 只控制「是否执行」,不影响「失败是否计入 job 结论」。
@@ -318,6 +325,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: assert-strength
           # v4.0.8:每个 .jhyy 都必须有能失败的断言。
           #
           # 背景:regress 的 `163/163 PASS` 曾长期不携带信息 —— 166 个可跑测试里
@@ -329,15 +337,12 @@ jobs:
           # `// XFAIL:` 标记的测试不算违规 —— 它声明为「预期失败」,标记是否
           # 撒谎由运行时的 XPASS 负责(XFAIL 测试转绿 = XPASS = regress 失败)。
           python scripts/dev/audit_test_assertions.py --strict
-          # 顺带跑 artifact_checks 的**分类逻辑自检**(纯字符串运算,不碰编译器,
-          # 亚秒级)。它证明「四种红 + 两种绿」都能正确触发 —— 一道从没被见过
-          # 红的门不算门(feedback_ci_gate_must_exercise_path)。
-          bash compiler/tests/bootstrap/artifact_checks.sh --selftest
 
       - name: Emit SysV .s for the Linux-side gate
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: sysv-emit
           # 这 6 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
           # 要验 SysV ABI 得用 `runtime/linux_elf/crt0.S` + `link.ld` 链成 ELF。
           # 而 regress.py 的 `--cross=auto` 在 CI 上探测不到能用的环境
@@ -411,6 +416,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: artifact-checks
           # v4.0.8:验那些**不在程序返回值里**的失效模式 —— 它们的症状在编译
           # 产物的字节布局里,任何 .jhyy 测试都验不到(写出来会 PASS)。
           #
@@ -432,6 +438,13 @@ jobs:
           #
           # ⚠️ 不要为了让 CI 变绿去放宽 KNOWN_FAIL 里的签名。那正是本项目栽过的坑。
           bash compiler/tests/bootstrap/artifact_checks.sh
+          # 顺带跑 artifact_checks 的**分类逻辑自检**(纯字符串运算,不碰编译器,
+          # 亚秒级)。它证明「四种红 + 两种绿」都能正确触发 —— 一道从没被见过
+          # 红的门不算门(feedback_ci_gate_must_exercise_path)。
+          # ⚠️ 2026-11-03 从「断言强度」那个 step 挪到这里:自检的是**这个脚本**的
+          # 分类逻辑 ⇒ 它跟这道门是同一件事,不该挂在别的门底下
+          # (一个 step 只承载一道门 ⇒ 门清单里的 id 才查得出它是什么)。
+          bash compiler/tests/bootstrap/artifact_checks.sh --selftest
 
       # ── 运行时性能门(v4.2.0)────────────────────────────────────────────
       #
@@ -454,6 +467,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: perf
           set +e
           # python 在 PATH 上可能是 runner 镜像自带的旧 mingw64 那份,也可能是
           # setup-msys2 装的 ucrt64 那份 —— 两者都是 CPython 且本脚本只用标准库,
@@ -500,6 +514,7 @@ jobs:
       - name: Bundled toolchain gates (relocatable / header closure / poisoned PATH)
         shell: msys2 {0}
         run: |
+          # gate: toolchain
           # The MSYS2 root is NOT C:\msys64 on GitHub Actions (setup-msys2
           # installs into D:\a\_temp\setup-msys2\msys64). Ask the shell where
           # it is and pass it explicitly; the collector also auto-discovers
@@ -508,6 +523,15 @@ jobs:
           echo "MSYS2 root: $MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
+
+      # ⚠️ 2026-11-03:这一条**从上面那个 step 里拆出来**。
+      # 拆的理由不是「好看」:一个 step 只能承载**一道门**(门清单里 id 一一对应),
+      # 而这里跑的是**另一个判据**(扩展的 terminal profile 指向的 bash 必须真的存在)
+      # —— 它挂在工具链门下面,清单里却查不出它独立是什么。
+      - name: VSCode bash detection (扩展的 terminal profile 指向的 bash 必须真实存在)
+        shell: msys2 {0}
+        run: |
+          # gate: vscode-bash
           # The VSCode terminal profile points at a bash we DETECT. If the
           # detection breaks, the user silently gets "the terminal profile is
           # not available" in VSCode - so it gets its own gate.
@@ -540,6 +564,7 @@ jobs:
       - name: MCP server test suite (pytest)
         shell: bash
         run: |
+          # gate: mcp-pytest
           python -m pip install --disable-pip-version-check -q fastmcp pytest pytest-asyncio
           python -m pytest mcp-jhyy/tests -q
 
@@ -558,6 +583,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: version
           python scripts/dev/bump_version.py check
 
       # 文档事实对拍门(2026-10-30 加)。
@@ -574,6 +600,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: docs-facts
           python scripts/dev/docs_facts_check.py
 
       # 文档门的**变异测试**(2026-11-02 加)—— 证明上一道门真的看得见它声称看的东西。
@@ -583,16 +610,23 @@ jobs:
       # 两份 README 的回归数一起改成**自洽但假**的 999/1019,本门与其它 4 道门**全绿**。
       # ⇒ 「事实单一真相源」当时只兑现了一半(只强制一致,不强制为真)。
       #
-      # 本 step 往仓里注入 9 个**故意的错误**,逐个确认 docs_facts_check 会红;
+      # 本 step 往仓里注入 11 个**故意的错误**,逐个确认 docs_facts_check 会红;
       # 跑完把每个文件**原样还原**(try/finally)。
       #
-      # ⚠️ 它**不能**证明 FACTS.md 的数为真 —— 那要靠本 workflow 里真跑一遍 regress.py
-      # 再对拍(见上面的 regress step)。它证明的是「门能抓到这些已知的错误形态」。
+      # 另有 2 个**「自洽但假」**的整链变异(FACTS + 两份 README 一起改成同一个
+      # 假数)⇒ 这类变异 docs 门**本来就该绿**(它只管一致性)⇒ 断言它红的是
+      # `check_regress_facts.py`(拿 regress 的实测计数对拍)。这一步需要上一步
+      # 落的 `tmp/regress-summary.json`。
+      #
+      # ⚠️ 它**不能**证明 FACTS.md 的数为真 —— 那要靠本 workflow 里真跑一遍
+      # regress.py 再对拍(见上面的 regress step + Regression facts gate)。
+      # 它证明的是「门能抓到这些已知的错误形态」。
       - name: Docs gate mutation test (prove the docs gate can see)
         if: always()
         shell: msys2 {0}
         run: |
-          python scripts/dev/test_docs_gate_mutations.py
+          # gate: docs-mutation
+          python scripts/dev/test_docs_gate_mutations.py --regress-summary tmp/regress-summary.json
 
       # 规范一致性门(2026-10-30 加)。
       #
@@ -606,6 +640,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: spec-consistency
           python scripts/dev/check_spec_consistency.py
 
       - name: Binary format layout gate (.jhyynb struct sizes must be computable)
@@ -616,6 +651,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: binary-layout
           python scripts/dev/check_binary_format_layout.py
 
       - name: Architecture claims gate (architecture.md's structural claims vs source)
@@ -627,6 +663,7 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
+          # gate: arch-claims
           python scripts/dev/check_arch_claims.py
 
   # ══════════════════════════════════════════════════════════════════════
@@ -667,6 +704,7 @@ jobs:
 
       - name: SysV ABI gate (link + run + compare // EXPECT:)
         run: |
+          # gate: sysv-abi
           set -x
           uname -a
           gcc --version | head -1
@@ -680,7 +718,14 @@ jobs:
             echo "收到 $m 份 ABI 对拍用 .s(期望 3:small caller / MEMORY caller / MEMORY callee)"
             [ "$m" -eq 3 ] || { echo "::error::ABI 对拍 .s 缺失,拒绝报绿"; exit 1; }
             bash compiler/tests/bootstrap/sysv_link_run.sh tmp/sysv_il
-          echo ""
+
+      # ⚠️ 2026-11-03:从上面那个 step 里**拆出来**。
+      # 拆的理由同「工具链门 vs VSCode bash 门」:一个 step 只能承载**一道门**
+      # (门清单里 id 一一对应)。W-104 跨实现对拍与 SysV ABI 用例是**两个判据**,
+      # 挂在一起时清单里查不出它独立是什么。
+      - name: SysV 跨实现 ABI 对拍 (jhyy ↔ gcc,W-104)
+        run: |
+          # gate: sysv-cross
           echo "### W-104 跨实现 ABI 对拍(jhyy ↔ gcc)"
           bash compiler/tests/bootstrap/sysv_abi_cross.sh tmp/sysv_abi
 
@@ -719,7 +764,9 @@ jobs:
 
       - name: Grammar self-check (语言真实规则 → grammar 必须命中)
         working-directory: vscode-ext
-        run: node scripts/check-grammar.mjs
+        run: |
+          # gate: vscode-grammar
+          node scripts/check-grammar.mjs
 
   # ══════════════════════════════════════════════════════════════════════
   # 发布 —— 门不绿就发不出去

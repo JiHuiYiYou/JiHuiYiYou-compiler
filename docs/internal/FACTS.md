@@ -33,23 +33,76 @@
 
 ## 2. 回归与门
 
-| 门 | 值 |
+### 2.1 事实（会变的数字）
+
+> **本节是这些数字的唯一定义处** —— 下面两节只列「门」,不复述数字。
+> 「跨文档一致」由门 `docs-facts` 管;「**为真**」由门 `regress-facts` 管
+> （它拿 `regress.py` 的实测计数对拍本节）⇒ 两者合起来才是「事实单一真相源」。
+
+| 项 | 值 |
 |---|---|
 | `python regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP**（285 total） |
 | 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 285 · 可跑 265 · 真断言 205 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
-| `compiler/tests/bootstrap/artifact_checks.sh` | **18 道**（`check_*` 函数数）· 0 FAIL |
-| `compiler/tests/bootstrap/fixed_point.sh` | N=10 跨代 byte-equal 全绿（`.il` 与 `.s`；门数由脚本内部计数，不在此声明） |
-| `compiler/tests/bootstrap/closure_check.sh` | PASS（v2.s == v3.s，逐字节相同） |
-| 自举闭环 | `make` **迭代到不动点** —— 生成的 `.s` 跨代逐字节相同 |
-| 版本零漂移 | `python scripts/dev/bump_version.py check` —— 覆盖 8 处（含两份 README 的徽章） |
-| 文档事实对拍 | `python scripts/dev/docs_facts_check.py` —— 事实/链接/反引号裸路径/`§ N.M` 章节引用/台账正文/`feedback_*` 代号索引 |
-| **文档门变异测试** | `python scripts/dev/test_docs_gate_mutations.py` —— 给上一道门注入 9 个**故意的错误**,逐个确认它会红 ⇒ **证明门看得见它声称看的东西**。⚠️ 2026-11-02 实测:原实现有 4 个盲区,把 `FACTS.md` + 两份 README 的回归数一起改成假数(自洽但假)能**全绿通过** ⇒ 门当时只强制「一致」,不强制「为真」 |
-| 三规范一致性 | `python scripts/dev/check_spec_consistency.py` —— 三份规范的 `Cap<T>` wire 布局一致 |
-| `.jhyynb` 布局算术 | `python scripts/dev/check_binary_format_layout.py` —— 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding |
-| 架构断言 | `python scripts/dev/check_arch_claims.py` —— `architecture.md` 的结构性断言与源码一致 |
+| 产物级门数 | `artifact-checks` —— **18 道**（`check_*` 函数数） |
 
-> **本表是「门」的完整清单** —— `CONTRIBUTING.md` 让读者来这里找。
-> **接进 CI 的门必须在这里登记**（门 `docs_facts_check.py` 的第 J 项查这条）。
+### 2.2 CI 门（完整清单）
+
+> **本表是仓内「门」的完整清单** —— [`CONTRIBUTING.md`](../../CONTRIBUTING.md) 让读者来这里找。
+>
+> **每道 CI 门在 workflow 里都带一个 `# gate: <id>` 标记** —— 门 `docs-facts` 的第 J 项
+> 按它**双向**对拍:workflow 里跑了却没登记 ⇒ 红;登记了却没在 workflow 里跑 ⇒ 红;
+> workflow 里新加一个带 run 块的步骤却没分类（既不是门也没登记为非门）⇒ 红。
+>
+> ⚠️ **改 workflow 或这张表时,两边一起改** —— 否则 J 项会红。
+
+| 门 | id | 查什么 | 在哪跑 · 跑什么 |
+|---|---|---|---|
+| 自举闭环（构建期） | `selfhost` | jhyy.exe 能把自己编成同一个东西（迭代到不动点）；产物与提交进仓的那份逐字节对照（发布者视角） | ci.yml · build-and-test · `make` |
+| 提交产物同步 | `artifact-fresh` | 提交进仓的那份 jhyy.exe 对当前源码的**行为** == 现编产物（比 `.s`，不比 `.exe`） | ci.yml · build-and-test · 内联 shell |
+| 全量回归 | `regress` | 每个用例的退出码 / stdout 断言 | ci.yml · build-and-test · `python regress.py --all` |
+| 回归事实对拍 | `regress-facts` | § 2.1 的数 == 本轮**实测**数（缺摘要即红） | ci.yml · build-and-test · `python scripts/dev/check_regress_facts.py tmp/regress-summary.json` |
+| 断言强度 | `assert-strength` | 每个用例都有能失败的断言（零信号即红） | ci.yml · build-and-test · `python scripts/dev/audit_test_assertions.py --strict` |
+| 产物级门 | `artifact-checks` | **18 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
+| 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
+| 运行时性能 | `perf` | 静态指标硬门（指令数 / 访存 / 帧大小 / chkstk；墙钟只报告） | ci.yml · build-and-test · `python scripts/dev/bench/runtime_perf.py --ci` |
+| 内置工具链 | `toolchain` | 可重定位 / 头闭包 / poisoned PATH / windres | ci.yml · build-and-test · `powershell -File installer/scripts/collect-toolchain.ps1` + `powershell -File installer/scripts/verify-toolchain.ps1` |
+| VSCode bash 探测 | `vscode-bash` | 扩展的 terminal profile 指向一个真实存在的 bash | ci.yml · build-and-test · `powershell -File installer/scripts/verify-vscode-bash-detect.ps1` |
+| MCP 套件 | `mcp-pytest` | MCP 工具坏了 ⇒ CI 红 | ci.yml · build-and-test · `python -m pytest mcp-jhyy/tests` |
+| 版本零漂移 | `version` | `VERSION` == 全仓每一处版本串（含两份 README 的徽章） | ci.yml · build-and-test · `python scripts/dev/bump_version.py check` |
+| 文档事实 | `docs-facts` | 事实 / 链接 / 反引号裸路径 / `§ N.M` 章节引用 / 台账正文 / `feedback_*` 代号索引 / **门清单 ⇄ CI 实况** | ci.yml · build-and-test · `python scripts/dev/docs_facts_check.py` |
+| 事实链变异测试 | `docs-mutation` | 给事实链注入**故意的错误**，逐个确认它会红 ⇒ 证明门看得见 | ci.yml · build-and-test · `python scripts/dev/test_docs_gate_mutations.py` |
+| 三规范一致性 | `spec-consistency` | 三份规范的 `Cap<T>` wire 布局一致 | ci.yml · build-and-test · `python scripts/dev/check_spec_consistency.py` |
+| `.jhyynb` 布局算术 | `binary-layout` | 每个 struct 的声明尺寸 == 自然对齐算出来的尺寸，无隐式 padding | ci.yml · build-and-test · `python scripts/dev/check_binary_format_layout.py` |
+| 架构断言 | `arch-claims` | `architecture.md` 的结构性断言与源码一致 | ci.yml · build-and-test · `python scripts/dev/check_arch_claims.py` |
+| VSCode grammar | `vscode-grammar` | grammar == 语言真实规则 | ci.yml · vscode-ext · `node vscode-ext/scripts/check-grammar.mjs` |
+| SysV ABI | `sysv-abi` | 链 + 跑 + 比 `// EXPECT:` | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_link_run.sh` |
+| SysV 跨实现对拍 | `sysv-cross` | jhyy ↔ gcc 能否互调（W-104） | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_abi_cross.sh` |
+| 发布：版本 == tag | `release-version` | `VERSION` 文件与 tag 不符 ⇒ 拒发 | release.yml · 内联 pwsh |
+| 发布：构建产物 | `release-build` | Burn bundle + MSI + `.vsix` 构建成功 | release.yml · `pwsh -File installer/build.ps1 bundle` |
+| 发布：SHA256 | `release-sha256` | `SHA256.txt` 与产物逐一对得上 | release.yml · 内联 pwsh |
+| 发布：release notes | `release-notes` | 没填的占位符 ⇒ 拒发 | release.yml · 内联 pwsh |
+| 发布：MSI 校验 | `release-msi` | `wix msi validate` | release.yml · 内联 pwsh |
+| 发布：产物齐全 | `release-artifacts` | 该有的产物一个不能少（dry-run 门） | release.yml · 内联 pwsh |
+
+### 2.3 本地门（opt-in，需手工跑）
+
+> 这些门**不接 CI** —— 要么太慢、要么需要特定环境。
+> 触发时机写在最后一列。**接进 CI 前先把它移到 § 2.2**（门会查）。
+
+| 门 | id | 查什么 | 怎么跑 / 何时跑 |
+|---|---|---|---|
+| 跨代闭环 | `closure-check` | Stage2 的 `.s` == Stage3 的 `.s`（`compiler/tests/bootstrap/closure_check.sh`，带非空守卫） | `bash compiler/tests/bootstrap/closure_check.sh` · 改 `src0` 之后 |
+| 跨代 fixed-point | `fixed-point` | N=10 跨代 `.il` + `.s` byte-equal（`compiler/tests/bootstrap/fixed_point.sh`） | `python regress.py --fixed-point` · 改 `src0` 之后（发版级流程） |
+| 字节三件套 | `byte-equal` | `.il` / `.s` / `.exe` 三层 byte-equal | `python regress.py --byte-equal` · 跨版本对拍时 |
+
+> **为什么「跨代闭环」是本地门而不是 CI 门**(2026-11-03 审计):
+> CI 里那道闭环由 `make` 自己兜 —— `$(BIN_DIR)/jhyy.exe` 规则**迭代到不动点**,
+> 收敛的那一代就是装出去的那一代 ⇒ 「装出去的那个产物在不动点上」当场被证过。
+> 再单独跑一遍 `closure_check.sh` 只是**复述同一个结论**(恒绿 ⇒ 是噪音不是门)。
+> ⚠️ 2026-11-03 同时给 `make` 的那段循环**补了非空守卫** ——
+> 此前 `cmp -s` 比两个**空文件**也判「相同」⇒ 编译器「静默 exit 0 但不产 .s」
+> 时会假绿(`closure_check.sh` 一直有守卫,只有构建期那段没有)。
+
 
 ---
 

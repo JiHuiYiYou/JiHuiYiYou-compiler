@@ -331,9 +331,9 @@ numbers.
 | `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) |
 | Assertion audit | 285 scanned / 265 runnable / 205 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
-| `fixed_point.sh` | PASS (N=10 — `.il` and `.s` byte-equal across generations) |
+| `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |
-| `closure_check.sh` | PASS (v2.s == v3.s, byte-identical) |
+| `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
 | ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |

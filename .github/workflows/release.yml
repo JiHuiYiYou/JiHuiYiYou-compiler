@@ -157,6 +157,7 @@ jobs:
       - name: Assert VERSION file matches the tag (blow up before building)
         shell: pwsh
         run: |
+          # gate: release-version
           # v4.1.2:`VERSION` 文件是仓内版本号的**真相源**(见
           # scripts/dev/bump_version.py)。tag 是"发布"这个动作。
           # 两者必须一致 —— 否则会出现「tag v4.1.3,装出来的编译器自报 v4.1.2」。
@@ -253,6 +254,7 @@ jobs:
       - name: Build jhyy.exe (self-bootstrap, jhyy compiles src0)
         shell: msys2 {0}
         run: |
+          # gate: selfhost
           # v4.1.0: 把「本 job 用的 MSYS2 根目录」显式传给后面的 pwsh 步。
           # 起因:GitHub runner 镜像自带一套**旧** MSYS2 在 C:\mingw64(gcc 15.2.0),
           # 而 setup-msys2 装的是**新**的(gcc 16.2.0,在临时目录)。两者都在
@@ -268,6 +270,7 @@ jobs:
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}
         run: |
+          # gate: regress
           # v1.5.6: W-027 RESOLVED — jhyy.exe 自己探测 gcc 路径 (4-tier via
           # jh_gcc_path()), regress.py 不再需要 prepend MSYS2 bin 到 PATH.
           # 之前 "Propagate MSYS2 paths" step 已删 (W-029 superseder).
@@ -308,6 +311,7 @@ jobs:
         env:
           JHY_VERSION: ${{ env.VERSION }}
         run: |
+          # gate: release-build
           pwsh -NoProfile -ExecutionPolicy Bypass -File installer/build.ps1 bundle
           # Use pwsh (PowerShell 7+) to match step shell — Windows PowerShell 5.1
           # in some runner images mis-parses switch ($Target) { "bundle" { ... } }
@@ -318,6 +322,7 @@ jobs:
       - name: Verify SHA256.txt content
         shell: pwsh
         run: |
+          # gate: release-sha256
           Get-Content installer/SHA256.txt
           Write-Host ""
           Write-Host "Expected files:"
@@ -337,6 +342,7 @@ jobs:
       - name: Generate release notes from template
         shell: pwsh
         run: |
+          # gate: release-notes
           $template = Get-Content installer/changelog-template.md -Raw -Encoding utf8
           $isoDate = (Get-Date -Format "yyyy-MM-dd")
           # Tag path uses VERSION (e.g. v1.8.3.3); filename uses JHY_VERSION_DISPLAY
@@ -403,6 +409,7 @@ jobs:
       - name: Validate MSI (wix msi validate)
         shell: pwsh
         run: |
+          # gate: release-msi
           wix msi validate installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION_DISPLAY).msi
           if ($LASTEXITCODE -ne 0) {
             Write-Host "[ERROR] MSI validation failed (ICE errors found)"
@@ -418,6 +425,7 @@ jobs:
         if: inputs.dry_run && github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
+          # gate: release-artifacts
           foreach ($f in @(
             "installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION_DISPLAY).exe",
             "installer/build-artifacts/jhyy-compiler-$($env:JHY_VERSION_DISPLAY).msi",

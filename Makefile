@@ -67,7 +67,7 @@ JHY_HELPERS_O = $(OBJ_DIR)/_jhyy_helpers.o
 # 归档流程随之退休 —— 没有"跨版本差异"可比了,只有"自身是否确定"。
 # 它不再是 source artifact,改由 .gitignore 排除。
 
-.PHONY: all clean selfhost
+.PHONY: all clean
 
 all: $(JHY_RUNTIME_O) $(JHY_HELPERS_O) $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
 
@@ -124,6 +124,15 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@#
 	@# 3 轮仍不收敛 ⇒ 硬失败(真正的非确定性照样被抓,见 W-121 那类)。
 	@# 锚点 = 当前这个(已提交的)jhyy.exe —— 每轮开始前都重铺一遍
+	@#
+	@# ⚠️ **非空守卫**(2026-11-03 补):下面那个 `cmp -s` 比两个**空文件**也判
+	@# 「相同」⇒ 编译器「静默 exit 0 但不产 .s」(W-086 那一类)时,这一步会**假绿**。
+	@# `closure_check.sh` 一直有 `[ ! -s ... ]` 守卫,只有这里的构建期循环没有
+	@# ⇒ 补上,让两处判据一致(门不许有后门:恒真的断言不是断言,是噪音)。
+	@#
+	@# ⚠️ **写法上的坑**:下面那个 `while` 是**一条**用 `\` 接起来的命令行 ⇒
+	@# 中间**不能插注释**(`#` 会把后面全吃掉;`@#` 更糟 —— make 只剥第一行的
+	@# `@`,续行里的 `@` 会原样进 shell ⇒ 语法错)。所以注释只能写在**外面**。
 	@rm -f $(BIN_DIR)/_boot_anchor.exe   # 删陈旧锚点:缺 cp 时要响亮失败,不能拿旧的顶
 	@cp -f $@ $(BIN_DIR)/_boot_anchor.exe
 	@i=0; converged=0; \
@@ -133,6 +142,11 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	  fi; \
 	  if ! $(BIN_DIR)/_boot_new.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/_boot_new2 >$(BIN_DIR)/_boot_new2.log 2>&1; then \
 	    echo "SELFFAIL: 第 $$((i+2)) 代编译失败:"; cat $(BIN_DIR)/_boot_new2.log; exit 1; \
+	  fi; \
+	  if [ ! -s $(BIN_DIR)/_boot_new.s ] || [ ! -s $(BIN_DIR)/_boot_new2.s ]; then \
+	    echo "SELFFAIL: 第 $$((i+1))/$$((i+2)) 代的 .s 缺失或为空 —— 编译器静默 exit 0 但没产 .s(W-086 那一类)"; \
+	    echo "          $(BIN_DIR)/_boot_new.s  $(BIN_DIR)/_boot_new2.s"; \
+	    exit 1; \
 	  fi; \
 	  if cmp -s $(BIN_DIR)/_boot_new.s $(BIN_DIR)/_boot_new2.s; then converged=1; break; fi; \
 	  echo "  (自举过渡:第 $$((i+1)) 代与第 $$((i+2)) 代产物不同 ⇒ 推进锚点一代)"; \
@@ -239,30 +253,18 @@ $(BIN_DIR)/jhyy_v1.exe.exe: $(BIN_DIR)/jhyy.exe
 #
 # 语义边界(重要,别误读):本 target 与 closure_check.sh 验的都是**确定性与自洽**,
 # 不是**正确性**。一个确定性的错误编译器照样闭环通过。正确性只有 regress 门管。
-selfhost: $(BIN_DIR)/jhyy.exe $(BIN_DIR)/jhyy_v1.exe.exe
-	@echo "Stage 2 closure chain: v1 → v2 → v3 → v4 → v5 .s byte-equal check"
-	$(BIN_DIR)/jhyy.exe  compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v2
-	$(BIN_DIR)/jhyy_v2.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v3
-	$(BIN_DIR)/jhyy_v3.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v4
-	$(BIN_DIR)/jhyy_v4.exe compile $(SRC0_DIR)/main.jhyy -o $(BIN_DIR)/jhyy_v5
-	@for n in 2 3 4 5; do \
-	    if [ ! -s "$(BIN_DIR)/jhyy_v$$n.s" ]; then \
-	        echo "SELFFAIL: jhyy_v$$n.s 缺失或为空 —— 编译器静默 exit 0 但没产 .s(W-086 那类)"; \
-	        exit 1; \
-	    fi; \
-	done
-	@for pair in "2 3" "3 4" "4 5"; do \
-	    set -- $$pair; \
-	    if cmp -s "$(BIN_DIR)/jhyy_v$$1.s" "$(BIN_DIR)/jhyy_v$$2.s"; then \
-	        echo "  v$$1.s == v$$2.s  ✓"; \
-	    else \
-	        echo "SELFFAIL: v$$1.s != v$$2.s —— 自举未闭环"; \
-	        echo "  $(BIN_DIR)/jhyy_v$$1.s vs $(BIN_DIR)/jhyy_v$$2.s"; \
-	        diff "$(BIN_DIR)/jhyy_v$$1.s" "$(BIN_DIR)/jhyy_v$$2.s" 2>/dev/null | head -10 | sed 's/^/    /'; \
-	        exit 1; \
-	    fi; \
-	done
-	@echo "PASS — 自举闭环达成 (v2..v5 逐字节相同)"
+#
+# ⚠️ 这里**没有** `selfhost` target(2026-11-03 删)。
+#
+# 它此前做的是「v1→v2→v3→v4→v5 四代 `.s` 逐字节相同」—— 但那正是
+# `$(BIN_DIR)/jhyy.exe` 规则里那段**迭代到不动点**的循环所保证的东西。
+# ⇒ 在 CI 里(先 `make` 后 `make selfhost`)**恒绿**:make 收敛时已经把
+# 「装出去的那个产物 = 不动点」证过了,再跑一遍只是复述结论。
+# ⇒ 仓里的规矩本来就写着:**被保护者自己保证的不变量不需要门**
+#   (与 ci.yml 2026-10-18 删 `cmp jhyy.exe jhyy_v1.exe.exe` 那条同理由)。
+#
+# 想要一份**可移植**的跨代闭环判据 ⇒ 用 `compiler/tests/bootstrap/closure_check.sh`
+# (本地门,见 docs/internal/FACTS.md § 2.3);CI 里那道闭环由 `make` 自己兜。
 
 # ⚠️ 这里**没有** `test` target(2026-11-03 删)。
 # 它此前只有两行 `@echo "TODO: test runner"` ⇒ 恒退出 0 的空门。
