@@ -1,0 +1,40 @@
+// nq — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/nq/task.c 语义等价,stdout 必须逐字相同。
+// CHECKSUM: 40
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn ok(row: i32, c: i32, cols: *i32) -> i32 {
+    let mut r2: i32 = 0;
+    while r2 < row {
+        let prev = cols[r2];
+        if prev == c { return 0; }
+        if prev - c == r2 - row { return 0; }
+        if c - prev == r2 - row { return 0; }
+        r2 = r2 + 1;
+    }
+    return 1;
+}
+
+fn solve(cols: *i32, N: i32, row: i32, sols: *i32) {
+    if row == N {
+        *sols = *sols + 1;
+        return;
+    }
+    let mut c: i32 = 0;
+    while c < N {
+        if ok(row, c, cols) == 1 {
+            cols[row] = c;
+            solve(cols, N, row + 1, sols);
+        }
+        c = c + 1;
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let cols: [i32; 7] = [0, 0, 0, 0, 0, 0, 0];
+    let mut sols: i32 = 0;
+    solve(&cols as *i32, 7, 0, &sols as *i32);
+    printf("nqueens(7) = %d (expect 40)\n" as *u8, sols);
+    return sols;
+}

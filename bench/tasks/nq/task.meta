@@ -1,0 +1,11 @@
+# nq — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+
+name = nq
+desc = N 皇后：7×7 棋盘解的个数
+scale = 7x7
+libc = none
+checksum = 40
+axes = int, array, recursion

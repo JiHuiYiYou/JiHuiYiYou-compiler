@@ -1,0 +1,66 @@
+// binary_trees — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/binary_trees/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:建一棵深度 14 的满二叉树(2^15 - 1 = 32 767 个节点),
+// 算校验和(所有节点的 count 之和),再整棵释放掉。
+//
+// ⚠️ **节点布局必须与 C 侧逐字节一致**:
+//   C:    struct { ptr, ptr, int }  ⇒ 偏移 0 / 8 / 16,sizeof = 24
+//   jhyy: type Node = struct { left: *u8, right: *u8, count: i32 }
+//         ⇒ 这里用 sizeof(Node) 分配、按硬编码偏移 0/8/16 写字段。
+//   ⇒ 若两边布局不一致,校验和就会不同 ⇒ stdout 比对当场抓住。
+//
+// ⚠️ **store 宽度跟 cast 后的 pointee 类型走** —— 所以:
+//   写指针(8 字节)⇒ `*(p as **u8) = v`
+//   写 i32(4 字节) ⇒ `*(p as *i32) = v`
+//   ⚠️ 写字节(1 字节)必须走 `*u8`;走 `*i32` 会写 4 字节。
+//
+// ⚠️ 这道题**部分在测 libc**:malloc / free 是 ucrt64 的。
+//
+// CHECKSUM: 1048575
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn malloc(size: i64) -> *u8;
+extern fn free(p: *u8) -> i32;
+
+type Node = struct { left: *u8, right: *u8, count: i32 }
+
+fn build(depth: i32) -> *u8 {
+    if depth == (0 as i32) { return 0 as *u8; }
+    let raw = malloc(sizeof(Node));
+    if raw == (0 as *u8) { return 0 as *u8; }
+    let cnt = (raw as i64 + (16 as i64)) as *i32;
+    *cnt = 1;
+    let lp = raw as **u8;
+    let rp = (raw as i64 + (8 as i64)) as **u8;
+    *lp = build(depth - (1 as i32));
+    *rp = build(depth - (1 as i32));
+    return raw;
+}
+
+fn check(n: *u8) -> i32 {
+    if n == (0 as *u8) { return 0; }
+    let cnt = (n as i64 + (16 as i64)) as *i32;
+    let lp = n as **u8;
+    let rp = (n as i64 + (8 as i64)) as **u8;
+    let l = check(*lp);
+    let r = check(*rp);
+    return *cnt + l + r;
+}
+
+fn free_tree(n: *u8) {
+    if n == (0 as *u8) { return; }
+    let lp = n as **u8;
+    let rp = (n as i64 + (8 as i64)) as **u8;
+    free_tree(*lp);
+    free_tree(*rp);
+    free(n);
+}
+
+fn main_jhyy() -> i32 {
+    let root = build((20 as i32));
+    let sum = check(root);
+    free_tree(root);
+    printf("%d\n" as *u8, sum);
+    return sum & (255 as i32);
+}

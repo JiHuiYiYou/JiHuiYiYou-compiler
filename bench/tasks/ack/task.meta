@@ -1,0 +1,11 @@
+# ack — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+
+name = ack
+desc = Ackermann 函数 A(3, 8)
+scale = A(3, 8)
+libc = none
+checksum = 2045
+axes = int, recursion

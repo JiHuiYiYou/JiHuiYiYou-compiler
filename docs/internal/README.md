@@ -28,6 +28,7 @@
 
 | 目录 | 职责 | 什么时候读 |
 |---|---|---|
+| [`bench/`](../../bench/README.md) | **基准套件** —— 题目（`bench/tasks/`）+ 驱动（`bench/bench.py`）+ **口径**（`bench/METHODOLOGY.md`）+ 可发布快照；门 `bench-perf` | 做性能相关改动前；**发布前要对外报数字时** |
 | [`installer/`](../../installer/README.md) | Windows 装机（WiX MSI/EXE + 内置工具链）—— **装机用户唯一入口文档**；`installer/release-notes/` 存每版 release note 正文，`installer/toolchain/` 讲内置工具链 | 装机 / 装机后找不到工具链时 |
 | [`mcp-jhyy/`](../../mcp-jhyy/README.md) | Claude Code 的 MCP 服务（编译 / 运行 / 看 IL / 查台账 / 跑回归） | 让 agent 直接操作 JHYY 时 |
 | [`runtime/linux_elf/`](../../runtime/linux_elf/README.md) | `amd64_sysv_freestanding` 目标的静态无 libc Linux ELF64 运行时（`crt0.S` + `link.ld`） | 做 Linux 侧目标时 |

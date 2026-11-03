@@ -1,0 +1,16 @@
+// fib — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/fib/task.c 语义等价,stdout 必须逐字相同。
+// CHECKSUM: 227465
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn fib(n: i32) -> i32 {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main_jhyy() -> i32 {
+    let r = fib(35) % 1000000;
+    printf("fib(35) %% 1000000 = %d\n" as *u8, r);
+    return r;
+}

@@ -1,0 +1,48 @@
+// mandelbrot — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/mandelbrot/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:200×200 网格上跑曼德博集合迭代,输出**迭代计数**的
+// (总和, 异或) —— 而不是经典的 ASCII 图。
+//
+// ⚠️ 为什么输出校验和而不是 ASCII 图:
+//   jhyy 产物的 stdout 是**无缓冲**的 ⇒ 大量输出会退化成 syscall 瓶颈。
+//   ⇒ 本套件所有题目一律"内部算完,只打印一个 checksum"。
+//
+// ⚠️ 浮点求值顺序必须与 C 侧**逐句一致**(浮点加法不可交换)。
+//
+// CHECKSUM: 14466402
+extern fn printf(fmt: *u8, sum: i64, xacc: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    let w: i32 = 600;
+    let h: i32 = 600;
+    let max_iter: i32 = 100;
+    let mut sum: i64 = 0;
+    let mut xacc: i32 = 0;
+    let mut y: i32 = 0;
+    while y < h {
+        let ci: f64 = ((y as f64) - ((h as f64) / 2.0)) * 2.0 / (h as f64);
+        let mut x: i32 = 0;
+        while x < w {
+            let cr: f64 = ((x as f64) - ((w as f64) / 2.0)) * 2.0 / (h as f64);
+            let mut zr: f64 = 0.0;
+            let mut zi: f64 = 0.0;
+            let mut i: i32 = 0;
+            while i < max_iter {
+                let x2: f64 = zr * zr;
+                let y2: f64 = zi * zi;
+                if x2 + y2 > 4.0 { break; }
+                zi = 2.0 * zr * zi + ci;
+                zr = x2 - y2 + cr;
+                i = i + 1;
+            }
+            sum = sum + (i as i64);
+            xacc = xacc ^ i;
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    printf("%lld %d\n" as *u8, sum, xacc);
+    return (sum & (255 as i64)) as i32;
+}

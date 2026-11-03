@@ -1,0 +1,17 @@
+// ack — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/ack/task.c 语义等价,stdout 必须逐字相同。
+// CHECKSUM: 2045
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn A(m: i32, n: i32) -> i32 {
+    if m == 0 { return n + 1; }
+    if n == 0 { return A(m - 1, 1); }
+    return A(m - 1, A(m, n - 1));
+}
+
+fn main_jhyy() -> i32 {
+    let r = A(3, 8);
+    printf("A(3, 8) = %d\n" as *u8, r);
+    return r;
+}

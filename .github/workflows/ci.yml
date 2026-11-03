@@ -496,6 +496,60 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $RC
 
+      # ── 基准门(v4.3.0)──────────────────────────────────────────────────
+      #
+      # 这道门守的是「**对外发布的那张表**」—— 基准套件的正确性与回归。
+      #
+      # 与 `perf` 门的分工(两份基线**管的任务不重叠** ⇒ 没有"改了 A 忘了改 B"
+      # 的漂移):
+      #   · `perf` 门     —— fib/ack/nq 的**静态指标**基线(v4.2.0 起就有)
+      #   · `bench-perf` 门 —— 全部题目的**正确性** + **二进制体积**
+      #                      + 其余题目的静态指标
+      #
+      # ⚠️ **墙钟不在这道门里** —— 同 `perf` 门:共享 runner 的宿主负载不可控
+      # (同一个程序在不同 step 里能差 3 倍)⇒ 拿它当硬门只会制造假红。
+      # ⚠️ **二进制体积**是这道门带来的**新**约束:此前体积没有任何门在管,
+      # 而它是确定性的(同一份源码 × 同一个编译器 ⇒ 逐字节相同)。
+      - name: Benchmark gate (correctness + binary size + static metrics)
+        if: always()
+        shell: msys2 {0}
+        run: |
+          # gate: bench-perf
+          set +e
+          PY=""
+          for c in python python3; do
+            if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+          done
+          if [ -z "$PY" ]; then
+            echo "ERROR: python not found on PATH" >&2
+            exit 2
+          fi
+          echo "using python: $PY ($($PY --version 2>&1))"
+          OUT=$("$PY" bench/bench.py --ci 2>&1)
+          RC=$?
+          echo "$OUT"
+          {
+            echo "### 基准套件"
+            echo ""
+            echo '```'
+            echo "$OUT"
+            echo '```'
+            echo ""
+            echo "**墙钟只报告不拦** —— 共享 runner 的宿主负载不可控。"
+            echo "**硬门是正确性 / 静态指标 / 二进制体积** —— 确定性 ⇒ 跨机器不漂。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 顺带跑本脚本的**自检**(纯判定逻辑,不碰编译器,亚秒级)——
+          # 它证明「静态指标回归 / 体积回归 / stdout 不一致」都能触发,
+          # 且「地板占比过高 ⇒ 报 n/a 而不是垃圾数」这条也真的在跑 ——
+          # 一道从没被见过红的门不算门(feedback_ci_gate_must_exercise_path)。
+          # ⚠️ 自检的是**这个脚本**的判定逻辑 ⇒ 跟这道门是同一件事,
+          # 不该挂在别的门底下(一个 step 只承载一道门 ⇒ 门清单里的 id 才查得出
+          # 它是什么)。同 artifact-checks 的做法。
+          "$PY" bench/bench.py --selftest
+          RC2=$?
+          if [ "$RC2" -ne 0 ]; then RC=$RC2; fi
+          exit $RC
+
       # ── 内置工具链门(v4.1.0)──────────────────────────────────────────
       # installer 从 v4.1.0 起自带一份最小原生 ucrt64 工具链
       # (gcc + binutils + CRT + 头文件闭包),装机用户**不需要 MSYS2**。

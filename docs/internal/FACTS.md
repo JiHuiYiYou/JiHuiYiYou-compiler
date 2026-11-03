@@ -67,6 +67,7 @@
 | 产物级门 | `artifact-checks` | **18 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
 | 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
 | 运行时性能 | `perf` | 静态指标硬门（指令数 / 访存 / 帧大小 / chkstk；墙钟只报告） | ci.yml · build-and-test · `python scripts/dev/bench/runtime_perf.py --ci` |
+| 基准套件 | `bench-perf` | 每道基准题的 stdout 与 gcc 逐字相同 + 二进制体积不回归 + 静态指标不回归（墙钟只报告） | ci.yml · build-and-test · `python bench/bench.py --ci` |
 | 内置工具链 | `toolchain` | 可重定位 / 头闭包 / poisoned PATH / windres | ci.yml · build-and-test · `powershell -File installer/scripts/collect-toolchain.ps1` + `powershell -File installer/scripts/verify-toolchain.ps1` |
 | VSCode bash 探测 | `vscode-bash` | 扩展的 terminal profile 指向一个真实存在的 bash | ci.yml · build-and-test · `powershell -File installer/scripts/verify-vscode-bash-detect.ps1` |
 | MCP 套件 | `mcp-pytest` | MCP 工具坏了 ⇒ CI 红 | ci.yml · build-and-test · `python -m pytest mcp-jhyy/tests` |
@@ -140,7 +141,23 @@
 > v4.4.0 **阶段一**（寄存器分配器 + 安全网，产物逐字节不变）已于 2026-10-30 完成。
 > 已 ship 的 v4.0.x / v4.1.x / v4.2.x sprint 计划见 `docs/archive/plans/v4/`。
 
-### 4.2 OS 线（v4.6 → v4.15）
+### 4.2 测评线（v4.3.x —— 发版前）
+
+| 版本 | 内容 | 状态 |
+|---|---|---|
+| **v4.3.0** | **测评套件地基**：`bench/` 目录 + 基准门 + 口径（METHODOLOGY.md） | 🔄 进行中 |
+| v4.3.1 | 3 道新题（partial_sums / mandelbrot / binary_trees）+ 测量地板口径 + 附录 B 剩余覆盖缺口 | 🔄 进行中 |
+| v4.3.2 | 3 道浮点 / 字节变换新题 + 浮点位模式探针 | 🔴 预留号 |
+| v4.3.3 | 随机程序差分测试器 + 差分门（先 report-only 一个版本） | 🔴 预留号 |
+| v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | 🔴 预留号 |
+| v4.3.5 | `fmt_i64` 的 i64::MIN 缺陷（动 src0 ⇒ 走发版级流程） | 🔴 预留号 |
+
+> **为什么排在 v4.4 之前**：测评线要在**发版前**完成 ⇒ 编号在 v4.4 之前。
+> v4.3.0 原本是「IR 优化框架 + `-O` 开关」，2026-10-29 因实测价值 ≈ 1.8% 而
+> **降级到 v4.4 之后**（IR 优化框架已并入 v4.4.5）⇒ 号码空出。
+> ⚠️ **静态指标基线绑定编译器版本** ⇒ v4.4.x 的寄存器分配落地后必须重取一次。
+
+### 4.3 OS 线（v4.6 → v4.15）
 
 | 版本 | OS-N | 内容 |
 |---|---|---|
@@ -161,7 +178,7 @@
 | v4.14.5 | OS-15 | 内核数据结构（RCU / PerCpu） |
 | v4.15 | OS-16 | 可信工具链（KASAN / KCFI） |
 
-### 4.3 未排期（v4.16 起）
+### 4.4 未排期（v4.16 起）
 
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 —— **不预先落文档**，启动时再领版本号。

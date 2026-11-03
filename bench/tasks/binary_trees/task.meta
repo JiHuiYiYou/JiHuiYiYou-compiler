@@ -1,0 +1,14 @@
+# binary_trees — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+#
+# ⚠️ libc = malloc —— 这道题的部分时间花在 ucrt64 的 malloc/free 上，
+#    不是 jhyy 的代码生成。对外发布时必须逐题标注。
+
+name = binary_trees
+desc = 满二叉树：深度 20（1 048 575 个节点）建树 + 校验和 + 整棵释放
+scale = depth 20
+libc = malloc
+checksum = 1048575
+axes = heap, recursion, pointer

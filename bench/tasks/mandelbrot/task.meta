@@ -1,0 +1,14 @@
+# mandelbrot — 任务元数据
+#
+# 格式:key = value（# 开头是注释）。由 bench/bench.py 读取。
+# libc 字段说明这道题的测量里有多少落在 libc 上（对外发布时逐题标注）。
+#
+# 输出两行？不 —— **一行两个数**：「迭代计数总和 异或和」。
+# checksum 字段记的是第一个数（总和）。
+
+name = mandelbrot
+desc = 曼德博集合：600×600 网格 × ≤100 次迭代，输出迭代计数的（总和, 异或）
+scale = 600x600x100
+libc = none
+checksum = 14466402
+axes = float, int, loop

@@ -295,6 +295,7 @@ JiHuiYiYou-compiler/
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
+├── bench/                      基准套件(题目 + 驱动 + 口径 + 可发布快照)
 ├── regress.py                  回归测试套件(仓库根)
 ├── docs/                       规范 / 内部文档 / 计划 / changelog
 ├── installer/                  WiX 安装器 + 内置 ucrt64 工具链

@@ -1,0 +1,48 @@
+{
+  "_note": "静态指标基线 —— 由 bench/bench.py --update-baseline 生成。更新基线必须写明理由(见 bench/METHODOLOGY.md)。⚠️ 静态指标只管**非历史**题目(fib/ack/nq 的静态指标基线归 `perf` 门,在 scripts/dev/bench/runtime_perf.baseline.json);`_size` 管**全部**题目 —— 二进制体积此前没有任何门在管。",
+  "_metrics": [
+    "insn",
+    "mem",
+    "frames",
+    "frame_min",
+    "frame_med",
+    "frame_max",
+    "chkstk"
+  ],
+  "_rule": "任一指标超过基线的 (1+TOL) 倍即判回归;chkstk 归零后不得再出现。",
+  "binary_trees": {
+    "insn": 265,
+    "mem": 155,
+    "frames": 4,
+    "frame_min": 272,
+    "frame_med": 432,
+    "frame_max": 496,
+    "chkstk": 0
+  },
+  "mandelbrot": {
+    "insn": 296,
+    "mem": 249,
+    "frames": 1,
+    "frame_min": 1824,
+    "frame_med": 1824,
+    "frame_max": 1824,
+    "chkstk": 0
+  },
+  "partial_sums": {
+    "insn": 132,
+    "mem": 109,
+    "frames": 1,
+    "frame_min": 944,
+    "frame_med": 944,
+    "frame_max": 944,
+    "chkstk": 0
+  },
+  "_size": {
+    "ack": 192303,
+    "binary_trees": 192861,
+    "fib": 192303,
+    "mandelbrot": 193821,
+    "nq": 193345,
+    "partial_sums": 192797
+  }
+}

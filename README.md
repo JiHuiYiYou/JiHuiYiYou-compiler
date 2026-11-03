@@ -306,6 +306,7 @@ JiHuiYiYou-compiler/
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
+├── bench/                      benchmark suite (tasks + driver + methodology + published snapshot)
 ├── regress.py                  regression test suite (repository root)
 ├── docs/                       specs / internal docs / plans / changelog
 ├── installer/                  WiX installer + bundled ucrt64 toolchain

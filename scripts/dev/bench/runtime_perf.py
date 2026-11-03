@@ -26,6 +26,10 @@
   python scripts/dev/bench/runtime_perf.py --quick     # 只跑 fib(冒烟用)
   python scripts/dev/bench/runtime_perf.py --update-baseline   # 重写基线文件
 
+被测题目来自 `bench/tasks/<name>/task.{c,jhyy}`(v4.3.0 起;此前内联在本脚本里)。
+`bench/bench.py` 是它的超集(加题目、加工程性指标、加可发布输出),
+两边共用同一份任务源码与同一个计时器 —— **不复制第二份实现**。
+
 模式说明:
   · **墙钟**(jhyy/gcc-O0 比值)在 CI 的共享 runner 上噪声大(宿主负载不可控)
     ⇒ `--ci` 模式**只报告不拦**。要卡墙钟请在本地用 `--strict`。
@@ -61,108 +65,48 @@ BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 TOL = float(os.environ.get("TOL", "0.02"))
 
 # ── 被测程序:C 版与 jhyy 版语义等价,输出逐字相同(本脚本据此验正确性) ──
-PROGRAMS = {
-    "fib": (
-        """#include <stdio.h>
-int fib(int n) { if (n < 2) return n; return fib(n-1) + fib(n-2); }
-int main(void) { printf("fib(35) %% 1000000 = %d\\n", fib(35) % 1000000); return 0; }
-""",
-        """extern fn printf(fmt: *u8, val: i32) -> i32;
+#
+# v4.3.0:源码从 `bench/tasks/<name>/task.{c,jhyy}` 读,不再内联在本脚本里。
+# 为什么:同一道题在两个 harness 里各存一份 ⇒ 必然漂移 ⇒ 两边测的其实是不同的东西。
+# `bench/tasks/` 是**唯一真源**;`bench/bench.py`(对外发布用的那套)也从这里读。
+#
+# ⚠️ 搬迁**必须零影响**:源码逐字相同 ⇒ 生成的 .s 逐字节相同 ⇒
+# `runtime_perf.baseline.json` 一个字节都不用改。这是"搬迁没搞坏东西"的廉价证明。
+BENCH_TASKS = os.path.join(REPO, "bench", "tasks")
 
-fn fib(n: i32) -> i32 {
-    if n < 2 { return n; }
-    return fib(n - 1) + fib(n - 2);
-}
+# 本脚本(`perf` 门)拥有的题目 —— 它们的静态指标基线在
+# `scripts/dev/bench/runtime_perf.baseline.json`,**由本脚本独家判**。
+#
+# ⚠️ 为什么是固定列表而不是"目录里有什么就跑什么":
+#   `bench/tasks/` 会随新题目增长。若本脚本也跟着跑,新题目的基线就得写进
+#   本文件 ⇒ 两道门(fib/ack/nq 的历史基线 vs 其余题目的新基线)就混在一起了。
+#   ⇒ 固定列表 ⇒ 两份基线**管的任务不重叠** ⇒ 没有"改了 A 忘了改 B"的漂移。
+#   ⇒ 新题目的静态指标由 `bench/bench.py`(`bench-perf` 门)判。
+LEGACY_TASKS = ("fib", "ack", "nq")
 
-fn main_jhyy() -> i32 {
-    let r = fib(35) % 1000000;
-    printf("fib(35) %% 1000000 = %d\\n" as *u8, r);
-    return r;
-}
-""",
-    ),
-    "ack": (
-        """#include <stdio.h>
-int A(int m, int n) {
-    if (m == 0) return n + 1;
-    if (n == 0) return A(m - 1, 1);
-    return A(m - 1, A(m, n - 1));
-}
-int main(void) { printf("A(3, 8) = %d\\n", A(3, 8)); return 0; }
-""",
-        """extern fn printf(fmt: *u8, val: i32) -> i32;
 
-fn A(m: i32, n: i32) -> i32 {
-    if m == 0 { return n + 1; }
-    if n == 0 { return A(m - 1, 1); }
-    return A(m - 1, A(m, n - 1));
-}
+def load_programs():
+    """从 bench/tasks/<name>/ 读成对的 (C 源码, jhyy 源码)。
 
-fn main_jhyy() -> i32 {
-    let r = A(3, 8);
-    printf("A(3, 8) = %d\\n" as *u8, r);
-    return r;
-}
-""",
-    ),
-    "nq": (
-        """#include <stdio.h>
-static int sols = 0;
-static int cols[8];
-static int N = 7;
-void solve(int row) {
-    if (row == N) { sols++; return; }
-    for (int c = 0; c < N; c++) {
-        int ok = 1;
-        for (int r2 = 0; r2 < row; r2++) {
-            if (cols[r2] == c) { ok = 0; break; }
-            if (cols[r2] - c == r2 - row) { ok = 0; break; }
-            if (c - cols[r2] == r2 - row) { ok = 0; break; }
-        }
-        if (ok) { cols[row] = c; solve(row + 1); }
-    }
-}
-int main(void) { solve(0); printf("nqueens(7) = %d (expect 40)\\n", sols); return 0; }
-""",
-        """extern fn printf(fmt: *u8, val: i32) -> i32;
-
-fn ok(row: i32, c: i32, cols: *i32) -> i32 {
-    let mut r2: i32 = 0;
-    while r2 < row {
-        let prev = cols[r2];
-        if prev == c { return 0; }
-        if prev - c == r2 - row { return 0; }
-        if c - prev == r2 - row { return 0; }
-        r2 = r2 + 1;
-    }
-    return 1;
-}
-
-fn solve(cols: *i32, N: i32, row: i32, sols: *i32) {
-    if row == N {
-        *sols = *sols + 1;
-        return;
-    }
-    let mut c: i32 = 0;
-    while c < N {
-        if ok(row, c, cols) == 1 {
-            cols[row] = c;
-            solve(cols, N, row + 1, sols);
-        }
-        c = c + 1;
-    }
-}
-
-fn main_jhyy() -> i32 {
-    let cols: [i32; 7] = [0, 0, 0, 0, 0, 0, 0];
-    let mut sols: i32 = 0;
-    solve(&cols as *i32, 7, 0, &sols as *i32);
-    printf("nqueens(7) = %d (expect 40)\\n" as *u8, sols);
-    return sols;
-}
-""",
-    ),
-}
+    目录里没有 task.c 或 task.jhyy 的子目录一律跳过(不是任务)。
+    读到的源码**逐字**使用 —— 不做任何 strip / normalize,
+    否则 .s 会变、静态指标基线就会漂。
+    """
+    out = {}
+    if not os.path.isdir(BENCH_TASKS):
+        return out
+    for name in sorted(os.listdir(BENCH_TASKS)):
+        d = os.path.join(BENCH_TASKS, name)
+        c_path = os.path.join(d, "task.c")
+        j_path = os.path.join(d, "task.jhyy")
+        if not (os.path.isfile(c_path) and os.path.isfile(j_path)):
+            continue
+        with open(c_path, encoding="utf-8") as f:
+            c_src = f.read()
+        with open(j_path, encoding="utf-8") as f:
+            j_src = f.read()
+        out[name] = (c_src, j_src)
+    return out
 
 
 def run(cmd, cwd=None):
@@ -172,8 +116,13 @@ def run(cmd, cwd=None):
     return p.returncode, p.stdout
 
 
-def timeit(cmd, n):
-    """min-of-n 墙钟(毫秒)。第一轮是热身,不计入。"""
+def timeit_samples(cmd, n):
+    """跑 n+1 次,返回**去掉第一轮热身**之后的 n 个墙钟样本(毫秒)。
+
+    第一轮是热身(把产物读进 OS 文件缓存),不计入。
+    返回全部样本而不是只有 min —— 对外发布要报中位数和 p95,
+    只报 min 会把"运气好的一次"当成典型值。
+    """
     ts = []
     for i in range(n + 1):
         t0 = time.perf_counter()
@@ -181,7 +130,16 @@ def timeit(cmd, n):
         dt = (time.perf_counter() - t0) * 1000.0
         if i:
             ts.append(dt)
-    return min(ts)
+    return ts
+
+
+def timeit(cmd, n):
+    """min-of-n 墙钟(毫秒)。第一轮是热身,不计入。
+
+    保留这个"只要 min"的入口是为了**不改变既有语义** ——
+    CI 硬门与基线 JSON 都建立在它上面;要分位数请用 timeit_samples。
+    """
+    return min(timeit_samples(cmd, n))
 
 
 def asm_stats(path):
@@ -287,7 +245,16 @@ def main():
         print(f"ERROR: jhyy.exe not found at {JHY}", file=sys.stderr)
         return 2
     tmp = tempfile.mkdtemp(prefix="jhperf_")
-    names = ["fib"] if quick else list(PROGRAMS)
+    programs = load_programs()
+    if not programs:
+        print(f"ERROR: 找不到基准任务 —— {BENCH_TASKS} 下没有 task.c/task.jhyy 配对",
+              file=sys.stderr)
+        return 2
+    names = ["fib"] if quick else [n for n in LEGACY_TASKS if n in programs]
+    if not names:
+        print(f"ERROR: {BENCH_TASKS} 下找不到本门负责的题目 {LEGACY_TASKS}",
+              file=sys.stderr)
+        return 2
     rows = []
     failed = False
 
@@ -303,7 +270,7 @@ def main():
     print("")
 
     for name in names:
-        c_src, j_src = PROGRAMS[name]
+        c_src, j_src = programs[name]
         c_path = os.path.join(tmp, name + ".c")
         j_path = os.path.join(tmp, name + ".jhyy")
         open(c_path, "w", encoding="utf-8").write(c_src)

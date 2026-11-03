@@ -1,0 +1,29 @@
+// partial_sums — jhyy 实现（基准任务）
+//
+// 与 bench/tasks/partial_sums/task.c 语义等价,stdout 必须逐字相同。
+//
+// 算法:10 000 段 × 1 000 项 = 10 000 000 次迭代的整数部分和。
+// 每段的和用 (j * 17 + 23) % 1000 —— 纯确定性、无随机数。
+//
+// 这道题测的是**纯整数代码生成**:不碰浮点、不碰堆 ⇒ 整套题里
+// "最接近纯 jhyy 代码生成"的那一道(对照项)。
+//
+// CHECKSUM: 9990000000
+extern fn printf(fmt: *u8, val: i64) -> i32;
+
+fn main_jhyy() -> i32 {
+    let mut total: i64 = 0;
+    let mut i: i32 = 0;
+    while i < (20000 as i32) {
+        let mut sum: i64 = 0;
+        let mut j: i32 = 0;
+        while j < (1000 as i32) {
+            sum = sum + (((j * (17 as i32)) + (23 as i32)) % (1000 as i32)) as i64;
+            j = j + (1 as i32);
+        }
+        total = total + sum;
+        i = i + (1 as i32);
+    }
+    printf("%lld\n" as *u8, total);
+    return 0;
+}
