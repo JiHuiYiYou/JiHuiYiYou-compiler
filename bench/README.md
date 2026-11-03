@@ -42,6 +42,39 @@ python bench/bench.py --update-baseline
 环境变量:`JHY`(jhyy.exe 路径)· `GCC`(gcc 路径)· `RUNS`(每个程序跑几次,默认 7)
 · `TOL`(静态指标容差,默认 0.02)。
 
+## 差分对拍(正确性这条线)
+
+```bash
+# CI 门跑的那个:固定 16 个种子
+python bench/difftest.py --seeds bench/seeds/ci.txt --ci
+# 本地全量:32 个种子 + 探测已知缺陷
+python bench/difftest.py --seeds bench/seeds/all.txt --ci
+# 随机种子(不可复现,本地用)
+python bench/difftest.py --random --count 200 --mode avoid
+# 断言这道门看得见红
+python bench/difftest.py --selftest
+```
+
+**机制**:从**同一棵 AST** 生成 C 与 jhyy 两份源码 ⇒ 同一语义、两个独立实现
+⇒ 编译两个产物 ⇒ **stdout 逐字比对**。
+
+**两个模式**:
+- **规避模式**:避开已知缺陷的触发面 ⇒ **门红 ⇔ 有新缺陷**。
+- **全量模式**:不规避 ⇒ 已知缺陷会在这里冒出来 ⇒ 用来盯住"已知缺陷的行为有没有变"。
+
+**金标准**(`seeds/golden.json`)让这道门同时是「行为回归门」——
+差分测试器只看"两侧是否一致",**一致 ≠ 正确** ⇒ 金标准补上这一维。
+
+### ⚠️ 当前有 2 个已知缺陷(差分对拍挖出来的)
+
+| 台账 | 症状 | 绕法 |
+|---|---|---|
+| [W-185](../docs/internal/workarounds.md) | `u32 → i64` 的加宽用**符号扩展** ⇒ `u32 as i64` 出负数;`u32 / u32` 按有符号算 | u32 输出前先 `& 0x7FFFFFFF`;避开 u32 除法/取模 |
+| [W-186](../docs/internal/workarounds.md) | `u64` 的 `\| & ^ + - *` 在**任一操作数高位为 1**时结果错 | u64 的值压在 63 位以内 |
+
+⇒ 分歧的种子记在 `seeds/known-divergent.txt`;**行为与金标准一致 ⇒ 放行,行为变了 ⇒ 门红**。
+⇒ ⚠️ **jhyy 拒绝编译不算红** —— 生成器可能越出了 jhyy 接受的子集(我们自己的锅)。
+
 ## 目录
 
 ```
@@ -49,12 +82,16 @@ bench/
 ├── README.md              本篇 —— 怎么跑
 ├── METHODOLOGY.md         口径 / 参照系 / 维度定义 / 已知偏差 ⭐
 ├── bench.py               驱动:正确性 + 墙钟分布 + 静态指标 + 工程性指标 + 报告
-├── difftest.py            随机程序差分测试器(v4.3.3 起)
+├── difftest.py            随机程序差分测试器(C ↔ jhyy,逐字节 stdout 比对)
 ├── tasks/<name>/          一道题一对源码 + 元数据
 │   ├── task.c             C 参考实现
 │   ├── task.jhyy          jhyy 实现
 │   └── task.meta          key = value 元数据(规模 / libc 依赖 / checksum / 覆盖轴)
-├── seeds/ci.txt           固定种子集(差分门的硬门用)
+├── seeds/
+│   ├── ci.txt             CI 种子集(16 个)
+│   ├── all.txt            完整种子集(32 个,本地探测已知缺陷用)
+│   ├── golden.json        金标准 —— 每个种子两侧的输出(行为回归门)
+│   └── known-divergent.txt 已知分歧清单(哪些种子因已知缺陷而分歧)
 ├── baseline/
 │   ├── static.json        静态指标 + 二进制体积基线
 │   └── RESULTS-<日期>.md  可发布的表格快照(带机器规格 + 提交 sha)
@@ -66,6 +103,7 @@ bench/
 | 门 | id | 在哪 | 查什么 |
 |---|---|---|---|
 | 基准套件 | `bench-perf` | ci.yml · build-and-test | stdout 与 gcc 逐字相同 + 二进制体积不回归 + 静态指标不回归 |
+| 差分对拍 | `bench-diff` | ci.yml · build-and-test | 随机程序 · C 与 jhyy 的 stdout 逐字节相同 + 行为不回退(金标准) |
 | 运行时性能 | `perf` | ci.yml · build-and-test | fib/ack/nq 的静态指标不回归(墙钟只报告) |
 
 **两份基线管的任务不重叠** ⇒ 没有"改了 A 忘了改 B"的漂移:

@@ -335,7 +335,7 @@ numbers.
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
-| ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
+| ACTIVE workarounds | **2** — see [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |

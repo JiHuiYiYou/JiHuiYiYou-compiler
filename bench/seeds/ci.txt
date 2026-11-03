@@ -1,0 +1,22 @@
+# difftest 的 CI 种子集(CI 门 `bench-diff` 用 —— 16 个,控制 CI 时长)
+#
+# 格式:一行一个种子。同 seed ⇒ 同一份程序 ⇒ 结果可复现。
+# ⚠️ **加种子前先确认它能过** —— 门是红的就没人再跑它了。
+# 本地想跑更多:python bench/difftest.py --seeds bench/seeds/all.txt --ci
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16

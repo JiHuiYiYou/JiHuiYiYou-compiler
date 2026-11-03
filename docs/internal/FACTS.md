@@ -68,6 +68,7 @@
 | 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
 | 运行时性能 | `perf` | 静态指标硬门（指令数 / 访存 / 帧大小 / chkstk；墙钟只报告） | ci.yml · build-and-test · `python scripts/dev/bench/runtime_perf.py --ci` |
 | 基准套件 | `bench-perf` | 每道基准题的 stdout 与 gcc 逐字相同 + 二进制体积不回归 + 静态指标不回归（墙钟只报告） | ci.yml · build-and-test · `python bench/bench.py --ci` |
+| 差分对拍 | `bench-diff` | 随机程序 · C 与 jhyy 的 stdout 逐字节相同 + 行为不回退（金标准）；只红在输出不一致 / 运行时崩溃 | ci.yml · build-and-test · `python bench/difftest.py --seeds bench/seeds/ci.txt --ci` |
 | 内置工具链 | `toolchain` | 可重定位 / 头闭包 / poisoned PATH / windres | ci.yml · build-and-test · `powershell -File installer/scripts/collect-toolchain.ps1` + `powershell -File installer/scripts/verify-toolchain.ps1` |
 | VSCode bash 探测 | `vscode-bash` | 扩展的 terminal profile 指向一个真实存在的 bash | ci.yml · build-and-test · `powershell -File installer/scripts/verify-vscode-bash-detect.ps1` |
 | MCP 套件 | `mcp-pytest` | MCP 工具坏了 ⇒ CI 红 | ci.yml · build-and-test · `python -m pytest mcp-jhyy/tests` |
@@ -98,6 +99,7 @@
 | 跨代闭环 | `closure-check` | Stage2 的 `.s` == Stage3 的 `.s`（`compiler/tests/bootstrap/closure_check.sh`，带非空守卫） | `bash compiler/tests/bootstrap/closure_check.sh` · 改 `src0` 之后 |
 | 跨代 fixed-point | `fixed-point` | N=10 跨代 `.il` + `.s` byte-equal（`compiler/tests/bootstrap/fixed_point.sh`） | `python regress.py --fixed-point` · 改 `src0` 之后（发版级流程） |
 | 字节三件套 | `byte-equal` | `.il` / `.s` / `.exe` 三层 byte-equal | `python regress.py --byte-equal` · 跨版本对拍时 |
+| 差分全量 | `bench-diff-full` | 32 个种子的**全量模式** —— 探测已知缺陷（W-185 / W-186）的行为有没有变 | `python bench/difftest.py --seeds bench/seeds/all.txt --mode full --ci` · 定期跑 |
 
 > **为什么「跨代闭环」是本地门而不是 CI 门**(2026-11-03 审计):
 > CI 里那道闭环由 `make` 自己兜 —— `$(BIN_DIR)/jhyy.exe` 规则**迭代到不动点**,
@@ -115,8 +117,8 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **179** |
-| ACTIVE | **0** |
+| 条目总数 | **181** |
+| ACTIVE | **2** |
 | DEFERRED | 1 |
 | RESOLVED / SUPERSEDED / INVALID | 160 / 16 / 2 |
 
@@ -148,7 +150,7 @@
 | **v4.3.0** | **测评套件地基**：`bench/` 目录 + 基准门 + 口径（METHODOLOGY.md） | 🔄 进行中 |
 | v4.3.1 | 3 道新题（partial_sums / mandelbrot / binary_trees）+ 测量地板口径 + 附录 B 剩余覆盖缺口 | 🔄 进行中 |
 | v4.3.2 | 3 道浮点 / 字节变换新题（revcomp / nbody / spectral）+ 浮点位模式探针 | 🔄 进行中 |
-| v4.3.3 | 随机程序差分测试器 + 差分门（先 report-only 一个版本） | 🔴 预留号 |
+| v4.3.3 | 随机程序差分测试器 + 差分门 `bench-diff` + 金标准 | 🔄 进行中 |
 | v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | 🔴 预留号 |
 | v4.3.5 | `fmt_i64` 的 i64::MIN 缺陷（动 src0 ⇒ 走发版级流程） | 🔴 预留号 |
 
