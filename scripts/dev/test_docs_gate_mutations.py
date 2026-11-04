@@ -33,6 +33,10 @@
 
 **退出码**：0 = 每个变异都被抓到（且不变异时门是绿的）；1 = 有漏网。
 
+⚠️ **2026-11-04(W-194)**:整链变异组**必须**有 regress 摘要才跑得了
+（它要拿实测计数跟 FACTS 对拍）⇒ 缺摘要 = **失败**,不是「跳过」。
+此前缺摘要时只打一行「⚠ 跳过」而收尾仍报「全部被门抓到」⇒ **门绿而那组一条没验**。
+
 **用法**：
     python scripts/dev/test_docs_gate_mutations.py
     python scripts/dev/test_docs_gate_mutations.py --regress-summary tmp/regress-summary.json
@@ -164,36 +168,67 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
 # 这类是**最难抓**的一类:所有文档一起改成同一个假数 ⇒ 「一致性」门全绿。
 # 2026-11-02 实测:这类变异能同时骗过 5 道门 ⇒ 那时「事实为真」只是声明。
 # 现在:docs 门**仍然绿**(它只管一致性),但对拍门必须**红**。
-CHAIN_MUTATIONS: list[tuple[str, list[Edit]]] = [
-    ("回归三件套自洽但假", [
-        ("docs/internal/FACTS.md",
-         _FT_REG,
-         f"**999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff081019 total\uff09"),
-        ("README.md",
-         _RB_EN,
-         f"# => 999/999 passed (all with assertions), 0 failed, {_S} skipped (of 1019 total)"),
-        ("README.md",
-         _RT_EN,
-         f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** (1019 total) |"),
-        ("README.zh-CN.md",
-         _RB_ZH,
-         f"# => 999/999 passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of 1019 total)"),
-        ("README.zh-CN.md",
-         _RT_ZH,
-         f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
-    ]),
-    ("断言审计静态数自洽但假", [
-        ("docs/internal/FACTS.md",
-         _FT_AUD,
-         f"\u626b\u63cf 1019 \u00b7 \u53ef\u8dd1 999 \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"),
-        ("README.md",
-         _AU_EN,
-         f"| Assertion audit | 1019 scanned / 999 runnable / {_RA} real assertions / 0 zero-signal |"),
-        ("README.zh-CN.md",
-         _AU_ZH,
-         f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b 1019 / \u53ef\u8dd1 999 / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"),
-    ]),
-]
+# ⚠️ **整链变异要求「所有复述这个数的文档都改」** —— 漏一处 ⇒ docs 门会红
+#    (它发现还有地方写着旧数)⇒ 那条变异就不是「自洽」的了 ⇒ 报「测错了东西」。
+#    ⇒ 因此编辑点必须**按当前树里「谁还在复述」来定** ⇒ 见 `_with_optional`。
+_PLAN_REL = "docs/plans/v4/v4.3.0-plan.md"
+# 计划文件里的验收表曾复述过回归三件套 ⇒ 它一变 ⇒ 整链变异必须跟着改它。
+# (2026-11-04:该行已改成「全绿(数字见 FACTS.md § 2)」⇒ 不再复述 ⇒ 条件编辑自动跳过。)
+_PLAN_OLD = f"\u21d2 {_P} PASS / 0 failed / {_S} SKIP\uff08{_T} total\uff09"
+_PLAN_NEW = "\u21d2 \u5168\u7eff\uff08\u6570\u5b57\u89c1 [FACTS.md \u00a7 2](../../internal/FACTS.md)\uff09"
+
+
+def _with_optional(edits: list[Edit]) -> list[Edit]:
+    """**条件编辑**:只保留「当前树上确实存在(且只出现一次)」的编辑点。
+
+    为什么需要(W-194,2026-11-04):某个文档**不再**复述这个数之后,
+    对应的编辑点就会变成「变异点找不到」(0 处)⇒ `check_points` 判负
+    ⇒ 门自己变红 ⇒ 报的是「漏网」,而真相是「那个编辑点过期了」。
+    ⇒ 过期就**自动消失**,并在输出里说明跳过了哪一处。
+    """
+    out: list[Edit] = []
+    for rel, old, new in edits:
+        text, eol = _read(rel)
+        if text.count(old.replace("\n", eol)) == 1:
+            out.append((rel, old, new))
+        else:
+            print(f"  (条件编辑跳过:{rel} —— 当前树里没有这处复述)")
+    return out
+
+
+def _chain_mutations() -> list[tuple[str, list[Edit]]]:
+    """整链变异清单 —— **运行时**构造(编辑点依赖「当前树里谁还在复述」)。"""
+    return [
+        ("回归三件套自洽但假", _with_optional([
+            ("docs/internal/FACTS.md",
+             _FT_REG,
+             f"**999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff081019 total\uff09"),
+            ("README.md",
+             _RB_EN,
+             f"# => 999/999 passed (all with assertions), 0 failed, {_S} skipped (of 1019 total)"),
+            ("README.md",
+             _RT_EN,
+             f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** (1019 total) |"),
+            ("README.zh-CN.md",
+             _RB_ZH,
+             f"# => 999/999 passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of 1019 total)"),
+            ("README.zh-CN.md",
+             _RT_ZH,
+             f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
+            (_PLAN_REL, _PLAN_OLD, _PLAN_NEW),
+        ])),
+        ("断言审计静态数自洽但假", _with_optional([
+            ("docs/internal/FACTS.md",
+             _FT_AUD,
+             f"\u626b\u63cf 1019 \u00b7 \u53ef\u8dd1 999 \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"),
+            ("README.md",
+             _AU_EN,
+             f"| Assertion audit | 1019 scanned / 999 runnable / {_RA} real assertions / 0 zero-signal |"),
+            ("README.zh-CN.md",
+             _AU_ZH,
+             f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b 1019 / \u53ef\u8dd1 999 / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"),
+        ])),
+    ]
 
 # ── CI 实况的变异(2026-11-03 新增)──────────────────────────────────────
 # 门清单门(第 J 项)当时的**三个盲区**,每个一个场景:
@@ -337,11 +372,17 @@ def main() -> int:
     # 期望:**docs 门绿**(它只管一致性),**对拍门红**(它管「为真」)。
     print("\n  ── 整链变异(自洽但假)──────────────────────────────────────")
     if summary is None:
-        print("  ⚠ 跳过:没有 regress 摘要 ⇒ 跑一次 "
-              "`python regress.py --all --summary-json tmp/regress-summary.json` 再来")
+        # ⚠️ **W-194 真修 (2026-11-04)**:整链变异组**不许跳过**。
+        #   此前缺摘要时只打一行「⚠ 跳过」,收尾却照样报「N 个变异全部被门抓到」
+        #   ⇒ **门绿而整链那组一条都没验** ⇒ 证明是假的(本地一直这样 ⇒ CI 才抓到)。
+        #   ⇒ 缺摘要 = **失败**,并给出该跑什么命令。
+        print("[test_docs_gate_mutations] FAIL —— 缺 regress 摘要 ⇒ 整链变异组没法跑"
+              "(它要拿实测计数跟 FACTS 对拍)")
+        print("  跑一次 `python regress.py --all --summary-json tmp/regress-summary.json` 再来")
+        return 1
     else:
         facts_cmd = [sys.executable, str(FACTS_GATE), summary]
-        for name, edits in CHAIN_MUTATIONS:
+        for name, edits in _chain_mutations():
             if not check_points(edits, name, missed):
                 continue
             snap = snapshot(edits)
@@ -354,6 +395,8 @@ def main() -> int:
                     print(f"  ✓ {name:34} docs 门绿 / 对拍门红 —— {first[:66]}")
                 elif docs_rc != 0:
                     print(f"  ✗ {name:34} docs 门**也红了** ⇒ 这条不是「自洽」变异,测错了东西")
+                    print(f"    (多半是**还有文档复述着这个数** ⇒ 那处也要一起改 —— "
+                          f"见 `_with_optional` 的说明)")
                     missed.append(name)
                 else:
                     print(f"  ✗ {name:34} **没抓到**（对拍门仍然绿）")
@@ -391,7 +434,7 @@ def main() -> int:
         for m in missed:
             print("  x", m)
         return 1
-    print(f"[test_docs_gate_mutations] OK —— {len(MUTATIONS)} + {len(CHAIN_MUTATIONS)} + "
+    print(f"[test_docs_gate_mutations] OK —— {len(MUTATIONS)} + {len(_chain_mutations())} + "
           f"{len(CI_MUTATIONS)} 个变异全部被门抓到，还原后门是绿的。")
     return 0
 
