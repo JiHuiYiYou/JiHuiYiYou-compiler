@@ -121,13 +121,35 @@ echo "  FAILFAST     = $JHY_FP_FAILFAST"
 echo
 
 # Build v3.exe from v2 (jhyy.exe) compiling main.jhyy
-# jhyy 在 Windows 上会自动给 -o 加 .exe 后缀,所以 output 是 jhyy_v3.exe.exe
+#
+# ⚠️ **W-192 (2026-11-04) 真修:`-o` 给不带扩展名的 base** ——
+#   W-178(2026-11-01)之后 jhyy 的规则是「输出路径**已有 `.exe` 就不再追加**」
+#   ⇒ `-o …/jhyy_v3` 的产物是 `…/jhyy_v3.exe`,**不是** `jhyy_v3.exe.exe`。
+#   本脚本此前按**老规则**找 `jhyy_v3.exe.exe` ⇒ 找的产物从来不会被产出 ⇒
+#     ① 门在 setup 步就**假 FAIL**(编译器其实编成功了);
+#     ② 更坏:`$JHY_FP_BUILD_DIR` 是常驻目录,W-178 之前留下的
+#        `jhyy_v3.exe.exe` 会一直躺在那儿 ⇒ 脚本拿**陈旧编译器**当 v3
+#        ⇒ 整条链建在旧编译器上 ⇒ N=3 门报「closure broken」而闭环没坏。
+#   全仓惯例见 .github/workflows/release.yml:「`-o <不带后缀>`」。
+#
 # 重要: v3 binary 必须放在 compiler/build/bin/ 下,jh_paths_init 走 dirname × 4
-#       找 qbe.exe。如果放 /tmp/jhyy_fp/ 则 argv[0] = "/tmp/jhyy_fp/jhyy_v3.exe.exe"
+#       找 qbe.exe。如果放 /tmp/jhyy_fp/ 则 argv[0] = "/tmp/jhyy_fp/jhyy_v3.exe"
 #       walks up 4 次 → "/" 失败 ("cannot derive project root from argv[0]")
-JHYY_V3_BASE="$JHY_FP_BUILD_DIR/jhyy_v3.exe"
+JHYY_V3_BASE="$JHY_FP_BUILD_DIR/jhyy_v3"
 JHYY_V3="${JHYY_V3_BASE}.exe"
 JHYY_V3_INROOT="$JHYY_ROOT/compiler/build/bin/jhyy_v3_fp.exe.exe"
+
+# W-192:先清掉**本脚本自己**的上一轮产物。跨轮遗留的一定是**陈旧**的
+#       (编译器源码在这期间变过)⇒ 留着它 = 让旧编译器进链(见上面的说明)。
+#       build dir 里的 main_v*.il / _v*_main.il 同理:某代 emit 失败时,
+#       陈旧的 .il 会被当成本代的产物参与比对 ⇒ 报出假的「跨代一致」。
+rm -f "$JHYY_ROOT/compiler/build/bin/jhyy_v"*_fp.exe.exe
+rm -f "$JHY_FP_BUILD_DIR"/jhyy_v*.exe "$JHY_FP_BUILD_DIR"/jhyy_v*.exe.exe \
+       "$JHY_FP_BUILD_DIR"/jhyy_v*.exe.s \
+       "$JHY_FP_BUILD_DIR"/main_v*.il "$JHY_FP_BUILD_DIR"/main_v*.s \
+       "$JHY_FP_BUILD_DIR"/_v*_main.il "$JHY_FP_BUILD_DIR"/_v*_main.s \
+       "$JHY_FP_BUILD_DIR"/cap_v*.exe
+
 echo "[setup] Building v3 binary (jhyy.exe → src0/main.jhyy)..."
 if ! (cd "$JHYY_ROOT" && "$JHYY_V2" compile "$JHYY_INPUT" -o "$JHYY_V3_BASE" > /dev/null 2>&1); then
     echo "  ❌ FAIL (v2 failed to compile src0/main.jhyy → v3.exe)" >&2
@@ -295,8 +317,8 @@ for N in $(seq 4 "$JHY_FP_MAX_N"); do
     PREV_BIN="$JHYY_ROOT/compiler/build/bin/jhyy_v${PREV_N}_fp.exe.exe"
     PREV_IL="$JHY_FP_BUILD_DIR/main_v${PREV_N}.il"
     PREV_S="$JHY_FP_BUILD_DIR/main_v${PREV_N}.s"
-    NEXT_BIN_BASE="$JHY_FP_BUILD_DIR/jhyy_v${N}.exe"
-    NEXT_BIN="$JHY_FP_BUILD_DIR/jhyy_v${N}.exe.exe"
+    NEXT_BIN_BASE="$JHY_FP_BUILD_DIR/jhyy_v${N}"
+    NEXT_BIN="$JHY_FP_BUILD_DIR/jhyy_v${N}.exe"
     NEXT_BIN_INROOT="$JHYY_ROOT/compiler/build/bin/jhyy_v${N}_fp.exe.exe"
     NEXT_IL="$JHY_FP_BUILD_DIR/main_v${N}.il"
     NEXT_S="$JHY_FP_BUILD_DIR/main_v${N}.s"
@@ -304,8 +326,18 @@ for N in $(seq 4 "$JHY_FP_MAX_N"); do
     echo "[$N/$JHY_FP_MAX_N] IL closure N=$N (informational):"
 
     # build v_N.exe using v_(N-1).exe (用 project-root-aware copy)
+    # W-192:PREV_BIN 不存在 ⇒ 说明上一代 SKIP 了(它的 in-root 副本已被删)
+    #       ⇒ 直接 SKIP,**不要**去跑一个不存在的 binary(报错会误导成「编译失败」)。
+    if [[ ! -f "$PREV_BIN" ]]; then
+        echo "  ⚠️  SKIP (v$PREV_N binary missing: $PREV_BIN)"
+        INFO=$((INFO + 1))
+        continue
+    fi
     if ! (cd "$JHYY_ROOT" && "$PREV_BIN" compile "$JHYY_INPUT" -o "$NEXT_BIN_BASE" > /dev/null 2>&1); then
         echo "  ⚠️  SKIP (v$PREV_N failed to compile src0/main.jhyy → v$N.exe)"
+        # W-192:删掉该代的 in-root 副本 —— 留着它,下一代会拿它当 PREV_BIN
+        #       ⇒ 陈旧编译器顶替 ⇒ 报出的「跨代差异」其实是陈旧产物的差异。
+        rm -f "$NEXT_BIN_INROOT"
         INFO=$((INFO + 1))
         if [[ "$JHY_FP_FAILFAST" == "1" ]]; then
             echo "  ❌ FAILFAST (JHY_FP_FAILFAST=1, exit 1)" >&2
@@ -315,6 +347,7 @@ for N in $(seq 4 "$JHY_FP_MAX_N"); do
     fi
     if [[ ! -f "$NEXT_BIN" ]]; then
         echo "  ⚠️  SKIP (v$N binary not at $NEXT_BIN)"
+        rm -f "$NEXT_BIN_INROOT"
         INFO=$((INFO + 1))
         if [[ "$JHY_FP_FAILFAST" == "1" ]]; then
             echo "  ❌ FAILFAST (JHY_FP_FAILFAST=1, exit 1)" >&2
@@ -414,8 +447,10 @@ CAP_V2_EXIT="SKIP"
 CAP_V3_EXIT="SKIP"
 
 # v1 cap_test
-# -o 不能带 .exe:jhyy 会再补一个,`-o cap_v1.exe` 的产物是 cap_v1.exe.exe,
-# 于是下面 `-f` 判否 → exit 记 SKIP → 三代全 SKIP 仍判 PASS(这层门空转)。
+# `-o` 给**不带扩展名**的 base(W-192):W-178 之后 jhyy 不再给已有 `.exe` 的路径
+# 追加后缀 ⇒ `-o cap_v1` 的产物就是 `cap_v1.exe`。
+# (老行为下这里会产出 `cap_v1.exe.exe`,于是下面 `-f` 判否 → exit 记 SKIP ⇒
+#  三代全 SKIP 仍判 PASS —— 那层门空转。现在全 SKIP 会被显式判 FAIL,见下。)
 if (cd "$JHYY_ROOT" && "$JHYY_V1" compile --target=amd64_win "$CAP_TEST" -o "$JHY_FP_BUILD_DIR/cap_v1" > /dev/null 2>&1) && [[ -f "$JHY_FP_BUILD_DIR/cap_v1.exe" ]]; then
     CAP_V1_EXIT="$("$JHY_FP_BUILD_DIR/cap_v1.exe" > /dev/null 2>&1; echo $?)"
 fi

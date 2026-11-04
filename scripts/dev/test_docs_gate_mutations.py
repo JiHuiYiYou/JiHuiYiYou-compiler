@@ -40,6 +40,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,41 +52,94 @@ FACTS_GATE = ROOT / "scripts" / "dev" / "check_regress_facts.py"
 # (相对路径, 原文本, 变异后的文本)
 Edit = tuple[str, str, str]
 
+
+# ⚠️ **W-193 真修 (2026-11-04)**:变异文本里的数**必须动态读**,不能写死。
+#
+# 写死的后果(实测):回归数一变(加一个用例就会变)⇒ `check_points()` 数
+# 「变异点在文件里出现几次」得到 0 ⇒ 报「变异点找不到」⇒ **15 条变异全部漏网**
+# ⇒ 门自己变红 ⇒ CI 立刻红 ⇒ 早晚有人去「修」它(最省事的修法是删掉变异或门)
+# ⇒ 恰好毁掉「事实链看得见」这个**唯一的证明**。
+#
+# ⇒ 数从 **FACTS.md**(事实单一真相源)现场读;读不到就**响亮失败**,
+#   不再静默退化成「漏网」。
+def _facts_numbers() -> dict[str, int]:
+    text = (ROOT / "docs" / "internal" / "FACTS.md").read_text(encoding="utf-8")
+    m = re.search(
+        r"\*\*(\d+) PASS \+ 0 XFAIL \+ 0 failed \+ (\d+) SKIP\*\*\uff08(\d+) total\uff09",
+        text)
+    if not m:
+        raise SystemExit(
+            "ERR: FACTS.md 里找不到回归三件套"
+            "(`**N PASS + 0 XFAIL + 0 failed + N SKIP**\uff08N total\uff09`)"
+            " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
+    a = re.search(r"\u626b\u63cf (\d+) \u00b7 \u53ef\u8dd1 (\d+) \u00b7 \u771f\u65ad\u8a00 (\d+) \u00b7", text)
+    if not a:
+        raise SystemExit(
+            "ERR: FACTS.md 里找不到断言审计三件套"
+            "(`\u626b\u63cf N \u00b7 \u53ef\u8dd1 N \u00b7 \u771f\u65ad\u8a00 N \u00b7`)"
+            " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
+    return {
+        "pass": int(m.group(1)),
+        "skip": int(m.group(2)),
+        "total": int(m.group(3)),
+        "scanned": int(a.group(1)),
+        "runnable": int(a.group(2)),
+        "assertions": int(a.group(3)),
+    }
+
+
+_N = _facts_numbers()
+_P, _S, _T = _N["pass"], _N["skip"], _N["total"]
+_SC, _RN, _RA = _N["scanned"], _N["runnable"], _N["assertions"]
+
+# ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
+# README.md(英文门面)
+_RB_EN = f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T} total)"
+_RT_EN = f"| `regress.py` | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) |"
+_AU_EN = f"| Assertion audit | {_SC} scanned / {_RN} runnable / {_RA} real assertions / 0 zero-signal |"
+# README.zh-CN.md(中文门面)
+_RB_ZH = f"# => {_P}/{_P} passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of {_T} total)"
+_RT_ZH = f"| `regress.py` | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**({_T} total) |"
+_AU_ZH = f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b {_SC} / \u53ef\u8dd1 {_RN} / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"
+# FACTS.md(事实单一真相源)
+_FT_REG = f"**{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff08{_T} total\uff09"
+_FT_AUD = f"\u626b\u63cf {_SC} \u00b7 \u53ef\u8dd1 {_RN} \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"
+
 # ⚠️ 每条变异都必须**只改一个数** —— 否则测不出「门看得见哪个数」。
 MUTATIONS: list[tuple[str, list[Edit]]] = [
     # (a) 盲区:围栏代码块被剥掉 ⇒ 代码块里的数从来没被查过
     ("代码块里的回归通过数", [(
         "README.md",
-        "# => 265/265 passed (all with assertions), 0 failed, 20 skipped (of 285 total)",
-        "# => 264/265 passed (all with assertions), 0 failed, 20 skipped (of 285 total)")]),
+        _RB_EN,
+        f"# => {_P - 1}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T} total)")]),
     # (b) 盲区:上下文关键词必须同一行 ⇒ 「标题在上、数字在下」免检
     ("标题在上、数字在下的场景", [(
         "README.md",
-        "# => 265/265 passed (all with assertions), 0 failed, 20 skipped (of 285 total)",
-        "# => 265/265 passed (all with assertions), 0 failed, 20 skipped (of 279 total)")]),
+        _RB_EN,
+        f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T - 1} total)")]),
     # (c) 盲区:词表窄 ⇒ 断言审计那套词汇完全在门外
     ("断言审计的 scanned 数", [(
         "README.md",
-        "| Assertion audit | 285 scanned / 265 runnable / 205 real assertions / 0 zero-signal |",
-        "| Assertion audit | 281 scanned / 265 runnable / 205 real assertions / 0 zero-signal |")]),
+        _AU_EN,
+        f"| Assertion audit | {_SC - 1} scanned / {_RN} runnable / {_RA} real assertions / 0 zero-signal |")]),
     ("断言审计的 runnable 数（中文门面）", [(
         "README.zh-CN.md",
-        "| 断言强度审计 | 扫 285 / 可跑 265 / 真断言 205 / 零信号 0 |",
-        "| 断言强度审计 | 扫 285 / 可跑 261 / 真断言 205 / 零信号 0 |")]),
+        _AU_ZH,
+        f"| 断言强度审计 | 扫 {_SC} / 可跑 {_RN - 1} / 真断言 {_RA} / 零信号 0 |")]),
     ("断言审计的 real assertions 数", [(
         "README.md",
-        "| Assertion audit | 285 scanned / 265 runnable / 205 real assertions / 0 zero-signal |",
-        "| Assertion audit | 285 scanned / 265 runnable / 201 real assertions / 0 zero-signal |")]),
+        _AU_EN,
+        f"| Assertion audit | {_SC} scanned / {_RN} runnable / {_RA - 1} real assertions / 0 zero-signal |")]),
     # (d) 盲区:含日期的行被豁免 ⇒ 加个日期就免检
     ("加日期免检（旧漏洞）", [(
         "README.md",
-        "| `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) |",
-        "| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) | (2026-11-02 实测) |")]),
+        _RT_EN,
+        f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) | (2026-11-04 实测)")]),
     # (e) SKIP / total / 门数
     ("SKIP 数", [(
         "README.md",
-        "# => 265/265 passed (all with assertions), 0 failed, 20 skipped (of 285 total)",
-        "# => 265/265 passed (all with assertions), 0 failed, 21 skipped (of 285 total)")]),
+        _RB_EN,
+        f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S + 1} skipped (of {_T} total)")]),
     ("artifact_checks 门数", [(
         "README.md",
         "| `artifact_checks.sh` | **18 PASS / 0 FAIL** |",
@@ -113,31 +167,31 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
 CHAIN_MUTATIONS: list[tuple[str, list[Edit]]] = [
     ("回归三件套自洽但假", [
         ("docs/internal/FACTS.md",
-         "**265 PASS + 0 XFAIL + 0 failed + 20 SKIP**（285 total）",
-         "**999 PASS + 0 XFAIL + 0 failed + 20 SKIP**（1019 total）"),
+         _FT_REG,
+         f"**999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff081019 total\uff09"),
         ("README.md",
-         "# => 265/265 passed (all with assertions), 0 failed, 20 skipped (of 285 total)",
-         "# => 999/999 passed (all with assertions), 0 failed, 20 skipped (of 1019 total)"),
+         _RB_EN,
+         f"# => 999/999 passed (all with assertions), 0 failed, {_S} skipped (of 1019 total)"),
         ("README.md",
-         "| `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP** (285 total) |",
-         "| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + 20 SKIP** (1019 total) |"),
+         _RT_EN,
+         f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** (1019 total) |"),
         ("README.zh-CN.md",
-         "# => 265/265 passed (全部有断言), 0 failed, 20 skipped (of 285 total)",
-         "# => 999/999 passed (全部有断言), 0 failed, 20 skipped (of 1019 total)"),
+         _RB_ZH,
+         f"# => 999/999 passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of 1019 total)"),
         ("README.zh-CN.md",
-         "| `regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP**(285 total) |",
-         "| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + 20 SKIP**(1019 total) |"),
+         _RT_ZH,
+         f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
     ]),
     ("断言审计静态数自洽但假", [
         ("docs/internal/FACTS.md",
-         "扫描 285 · 可跑 265 · 真断言 205",
-         "扫描 1019 · 可跑 999 · 真断言 205"),
+         _FT_AUD,
+         f"\u626b\u63cf 1019 \u00b7 \u53ef\u8dd1 999 \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"),
         ("README.md",
-         "| Assertion audit | 285 scanned / 265 runnable / 205 real assertions / 0 zero-signal |",
-         "| Assertion audit | 1019 scanned / 999 runnable / 205 real assertions / 0 zero-signal |"),
+         _AU_EN,
+         f"| Assertion audit | 1019 scanned / 999 runnable / {_RA} real assertions / 0 zero-signal |"),
         ("README.zh-CN.md",
-         "| 断言强度审计 | 扫 285 / 可跑 265 / 真断言 205 / 零信号 0 |",
-         "| 断言强度审计 | 扫 1019 / 可跑 999 / 真断言 205 / 零信号 0 |"),
+         _AU_ZH,
+         f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b 1019 / \u53ef\u8dd1 999 / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"),
     ]),
 ]
 
