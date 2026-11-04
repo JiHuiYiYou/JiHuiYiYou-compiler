@@ -8,7 +8,7 @@
     },
     "depends": "",
     "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.3/jhyy-installer-4.1.3.exe",
-    "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hash": "a071961407cbd07f0d04ca358bb1aa8ff71ce103f60ad01de4fd39547e4af7c6",
     "shortcuts": [
         ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
         ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],
