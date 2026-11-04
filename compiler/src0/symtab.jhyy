@@ -371,6 +371,58 @@ fn symtab_lookup_one(t_raw: *u8, name: *u8) -> *Sym {
     return 0 as *Sym;  // 兜底
 }
 
+// symtab_lookup_typed —— 与 symtab_lookup_one 同款,但**优先返回 type_ptr 非 NULL 的同名符号**。
+//
+// 为什么需要(2026-11-04 实测,W-189):
+//   global scope 里**同名符号会有多份** —— 不同模块各自定义了同名 helper
+//   (例如 `target_is_win` 在 codegen_amd64_state / _emit_call / _xmm_argalloc 里各有一份)。
+//   sema.check_module 用 symtab_insert_sym 注册它们,而该函数**不查重名** ⇒ 多份并存。
+//   而**函数符号的 type_ptr 是检查那个函数体时**才填的
+//   ⇒ 探测链上的**第一份**往往还没填类型
+//   ⇒ sema 拿它当答案(它的 type_ptr == NULL)⇒ 误报「undefined variable」。
+//
+//   为什么被 FNV 偏移基触发:哈希决定桶位 ⇒ 决定探测链顺序 ⇒ 决定「第一份是谁」。
+//   旧的(错的)偏移基恰好把「有类型的那份」排在前面 ⇒ 潜伏多年没炸。
+//   W-186 真修(字面量按 u64 精确求值)⇒ 偏移基变成正确的 0xcbf29ce484222325
+//   ⇒ 顺序变了 ⇒ 自举第三代编译 main.jhyy 直接失败。
+//
+// 语义:同名 + 有类型 ⇒ 立刻返回(这是调用方要的「可用的那个」);
+//       同名但没类型 ⇒ 记下来当兜底(链上如果一份都没填类型,行为与旧版一致);
+//       链走完(空槽 / 绕回起点)⇒ 返回兜底那份,没有就 NULL。
+fn symtab_lookup_typed(t_raw: *u8, name: *u8) -> *Sym {
+    if t_raw == (0 as *u8) {
+        return 0 as *Sym;
+    }
+    let t = t_raw as *SymTable;
+    if (*t).count == (0 as i64) {
+        return 0 as *Sym;
+    }
+    let h = hash_string(name);
+    let mut idx = h & (*t).mask;
+    let start_idx = idx;
+    let mut fallback: *Sym = 0 as *Sym;
+
+    while true {
+        let entry = symtab_load_entry(t_raw, idx);
+        if entry == (0 as *Sym) {
+            return fallback;  // 空槽后必无同名的
+        }
+        if strcmp((*entry).name, name) == (0 as i32) {
+            if (*entry).type_ptr != (0 as *u8) {
+                return entry;   // **有类型的同名符号** ⇒ 优先用它
+            }
+            if fallback == (0 as *Sym) {
+                fallback = entry;  // 还没填类型的那份 ⇒ 兜底
+            }
+        }
+        idx = (idx + (1 as i64)) & (*t).mask;
+        if idx == start_idx {
+            return fallback;
+        }
+    }
+    return fallback;
+}
+
 fn symtab_lookup(t_raw: *u8, name: *u8) -> *Sym {
     let mut cur = t_raw;
     while cur != (0 as *u8) {

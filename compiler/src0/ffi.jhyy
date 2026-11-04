@@ -36,6 +36,11 @@ extern fn sprintf(buf: *u8, fmt: *u8, val: i32) -> i32;  // 单 i32
 // ir.jhyy 用这个 emit %lld 整数字面量（struct 字段偏移等可能 > INT_MAX）。
 extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
 extern fn strtoll(s: *u8, endptr: *u8, base: i32) -> i64;  // v1 sprint 3 commit 3 parse_pattern int literal
+// v4.1.3 (2026-11-04 真修 — W-186 / W-188):整数字面量的**量值**按 u64 精确求值。
+//   strtoll 是有符号的 ⇒ 量值 ≥ 2^63 时饱和到 LLONG_MAX(u64 高位值全变成同一个数)。
+//   返回值 = 位模式(按 i64 收 —— 同为 64 位,ABI 一致);
+//   flags:bit0 越界(≥ 2^64) / bit1 量值 ≥ 2^63 / bit2 已按负号折叠。
+extern fn jh_parse_int_literal(s: *u8, len: i64, negate: i32, out_val: *i64) -> i32;
 
 // v1 sprint 3 commit 4 parse_expr prefix_float + prefix_int suffix
 extern fn jh_f64_atof(s: *u8, len: i64, dst: *u8) -> i32;

@@ -478,7 +478,15 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
                                                  completed, ncompleted,
                                                  mod_path);
             errors_ti = errors_ti + rv1_err;
-            let _f1 = free(npath); let _f2 = free(dir_buf);
+            // ⚠️ **不 free npath** —— 它是上面 resolve_one_import_v1 用的 mod_path
+            // ⇒ 那个模块的 AST 节点把 **npath 当 loc_filename 存着**
+            //   （与下面 mod_path_buf / ip_path_buf / cp_path_buf 同一约定:
+            //     "Path buf lives forever — AST nodes ref it for loc_filename"）。
+            // 释放它 ⇒ AST 里留下悬垂指针 ⇒ 那个路径的字节会被后续分配覆盖
+            // ⇒ sema 报「undefined variable」时连文件名都是垃圾。
+            //   （2026-11-04 实测:这个洞被「FNV 偏移基被纠正」触发 —— 堆布局一变,
+            //     被释放的块正好被下一个分配复用,悬垂指针立刻显形。)
+            let _f2 = free(dir_buf);
         } else {
             if idecl == (0 as *Node) { j = j + (1 as i64); } else {
             let mut owner_sym_raw: *u8 = 0 as *u8;
@@ -535,7 +543,23 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
         (*ncompleted) = (*ncompleted) + (1 as i64);
     }
 
-    free(mod_source); free(ml_buf); free(mp_buf);
+    // ⚠️ **W-190 真修 (2026-11-04)**:**不 free mod_source** ──
+    //
+    // 为什么:这个模块的 AST(`mod_ast`)**在函数返回之后仍然活着** ——
+    //   它的 decls 被塞进 `out_decls`,由 main 的 sema 阶段继续处理
+    //   ⇒ AST 里对**源码缓冲**的引用(节点上的 `loc_filename` 走 mod_path ✓,
+    //   但还有别的引用指向 mod_source)在那之后仍会被读。
+    //   ⇒ 此刻 free(mod_source) ⇒ **悬垂指针** ⇒ 堆布局一变就被踩到。
+    //
+    // 实测(2026-11-04):带 free 时,sema 报「undefined variable」
+    //   (6/6 次复现,`target_is_win` 找不到);去掉 free 后 0/6 复现。
+    //   触发条件是**堆布局**变化 —— 正确的 FNV 偏移基(W-186 真修后的副产品)
+    //   恰好改变了布局 ⇒ 把这个潜伏 bug 顶了出来。
+    //
+    // 修法:与仓内既有约定一致 —— 「**AST 引用的缓冲永不释放**」
+    //   (见上面的 mod_path_buf / ip_path_buf / cp_path_buf 同一约定)。
+    //   代价:每个 import 的源码缓冲泄漏一次(编译器是短命进程 ⇒ 可接受)。
+    free(ml_buf); free(mp_buf);
     return errors_ti;
 }
 

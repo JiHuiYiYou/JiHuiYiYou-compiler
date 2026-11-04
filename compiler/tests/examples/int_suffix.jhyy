@@ -6,8 +6,9 @@
 // Covers: 42i8, 7u8, 100i64, 42u32, 0xFFu16 (hex), 7i32.
 //
 // NOTE: `1_000i64` (underscore + suffix) parse fails (lexer limitation),
-//   skip until lexer fixed. Also u64 max value (18446744073709551615u64)
-//   is parsed as i64 max (9223372036854775807) — W-XXX ACTIVE.
+//   skip until lexer fixed.
+//   (u64 max value 18446744073709551615u64 used to be parsed as i64 max
+//    9223372036854775807 — W-186, **fixed 2026-11-04**; see u64_wide_literal.jhyy)
 
 fn main_jhyy() -> i32 {
     let mut err: i32 = 0;

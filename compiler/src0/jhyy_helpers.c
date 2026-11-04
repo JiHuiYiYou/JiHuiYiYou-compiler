@@ -155,6 +155,87 @@ int jh_float_suffix_prim(const char *s, long long len) {
     return 9;  /* no suffix → PRIM_F64 */
 }
 
+/* v4.1.3 (2026-11-04 真修 — W-186 / W-188)：整数字面量的**量值**求值。
+
+   为什么不能继续用 strtoll：strtoll 是**有符号**的，量值 ≥ 2^63 时按 C 标准
+   **饱和到 LLONG_MAX**（errno = ERANGE）⇒ u64 的高位值全变成同一个数（W-186），
+   且 `-9223372036854775808i64`（i64::MIN）差 1（W-188）。
+   根因在**求值**这一步 —— u64 后缀是在值解析**之后**才读的，救不回来。
+
+   这里自己按 base 扫字符，量值按 **u64** 精确算到 2^64-1。
+
+   base 语义与 parser.jhyy 的 parse_int_literal 一致（也与 strtoll(base 0) 一致）：
+     "0x"/"0X" → 16；"0o"/"0O" → 8；"0b"/"0B" → 2；前导 "0" → 八进制；其余 → 10。
+   （lexer 只管扫哪些字符是数字，base 的**语义**在这里 —— 与旧路径同源。）
+
+   negate != 0 ⇒ 输出「取负后」的**位模式**（u64 回绕）：
+     量值 < 2^63 时返回量值本身、bit2 = 0（调用方照旧走「负号 + 字面量」那条路）；
+     量值 ≥ 2^63 时返回 0 - 量值（u64 回绕）、bit2 = 1（调用方据此把
+     「负号 + 字面量」**折成一个整数字面量节点** —— i64::MIN 只有这样才对）。
+
+   返回 flags：
+     bit0 = 越界（量值 ≥ 2^64，无法表示）
+     bit1 = 量值 ≥ 2^63（高位为 1）
+     bit2 = 已按 negate 折叠（见上）
+   out_val = 位模式（jhyy 侧按 i64 收 —— 同为 64 位，ABI 一致）。 */
+int jh_parse_int_literal(const char *s, long long len, int negate,
+                          unsigned long long *out_val) {
+    int base = 10;
+    long long i = 0;
+    if (len >= 2 && s[0] == '0') {
+        char c1 = s[1];
+        if (c1 == 'x' || c1 == 'X') { base = 16; i = 2; }
+        else if (c1 == 'o' || c1 == 'O') { base = 8; i = 2; }
+        else if (c1 == 'b' || c1 == 'B') { base = 2; i = 2; }
+        else { base = 8; i = 1; }   /* 前导 0 = 八进制（与 strtoll(base 0) 同） */
+    }
+    unsigned long long v = 0;
+    int ovf = 0;
+    for (; i < len; i++) {
+        char c = s[i];
+        int d;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else break;               /* 后缀（u64 / i32 …）或非法字符 → 停 */
+        if (d >= base) break;      /* 不是本 base 的数字 → 停 */
+        unsigned long long dv = (unsigned long long)d;
+        /* 溢出检测：v * base + dv > 2^64-1 ⇔ v > (2^64-1 - dv) / base */
+        if (v > (0xFFFFFFFFFFFFFFFFULL - dv) / (unsigned long long)base) {
+            ovf = 1;
+            break;
+        }
+        v = v * (unsigned long long)base + dv;
+    }
+    int flags = 0;
+    if (ovf) flags |= 1;
+    if (v >> 63) flags |= 2;
+    if (negate && (v >> 63)) {
+        v = 0ULL - v;             /* u64 回绕：0 - 2^63 = 2^63 */
+        flags |= 4;
+    }
+    if (out_val) *out_val = v;
+    return flags;
+}
+
+/* v4.1.3 (2026-11-04 真修 — W-185② / W-187)：编译期常量折叠器要的**无符号 64 位除法**。
+
+   为什么需要它：折叠路径(codegen.jhyy 的 cg_const_fold)必须与**运行期路径逐位一致**。
+   运行期现在按左操作数的符号性分流：
+     · 无符号 ⇒ `udiv` / `urem`（无符号语义）
+     · 有符号 ⇒ `div` / `rem`（有符号语义）
+   而折叠器自己算的是**有符号 i64** ⇒ u64 的高位值（位模式为负）上两者会分叉
+   ⇒ 顶层 `let x: u64 = 0xacca…u64 / 3u64;` 会与函数体里的同一表达式给出不同的值。
+
+   这里用 C 侧的 `unsigned long long` 算 ⇒ 精确、无 UB、也不依赖编译器自身的 `>>` 语义
+   （自举 ⇒ 改一次 `>>` 的语义就变一次 ⇒ 不能拿它当无符号移位器用）。
+
+   除零:调用方(jhyy 侧)只在 rv != 0 时才调 ⇒ 这里兜底返回 0。 */
+unsigned long long jh_udiv64(unsigned long long a, unsigned long long b) {
+    if (b == 0ULL) return 0ULL;
+    return a / b;
+}
+
 /* v1 sprint 3 commit 4：parse_expr prefix_int 解析 `42i32` / `100u8` 后缀。
    返回 PRIM_* 常量（0..10），无后缀或无法识别返回 PRIM_I32 (2)。 */
 int jh_int_suffix_prim(const char *s, long long len) {

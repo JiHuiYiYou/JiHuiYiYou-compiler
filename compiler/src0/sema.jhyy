@@ -1120,7 +1120,15 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             i = i - (1 as i64);
         }
         // 3) global scope lookup（imported fns / types / variants）
-        let gsym = symtab_lookup_local((*ctx).global_scope, (*id_sym).name);
+        //
+        // ⚠️ **W-189 真修 (2026-11-04)**:这里**必须**用 symtab_lookup_typed,
+        // 不能用 symtab_lookup_local ——
+        //   global scope 里**同名符号有多份**(不同模块各自定义了同名 helper,
+        //   例如 `target_is_win` 在 3 个模块里各有一份)⇒ 而函数符号的 type_ptr
+        //   是**检查那个函数体时**才填的 ⇒ 探测链第一份可能还没填类型
+        //   ⇒ 拿它 ⇒ `type_ptr == NULL` ⇒ 误报「undefined variable」。
+        //   symtab_lookup_typed 优先返回**有类型的**那份。
+        let gsym = symtab_lookup_typed((*ctx).global_scope, (*id_sym).name);
         if gsym != (0 as *Sym) {
             if (*gsym).kind == SYM_FN() || (*gsym).kind == SYM_TYPE() {
                 if (*gsym).type_ptr != (0 as *u8) {

@@ -352,7 +352,7 @@ fn lex_qbe_type_from_byte(c: i32) -> i32 {
 //   6. ILTOK_CALL         "<dst> =<qt> call $<name>(...)" | "call $<name>(...)"
 //   7. ILTOK_PHI          "<dst> =<qt> phi @b1 %t1, @b2 %t2"
 //   8. ILTOK_COPY         "<dst> =<qt> copy <src>"
-//   9. ILTOK_BINOP        "add|sub|mul|div|mod"
+//   9. ILTOK_BINOP        "add|sub|mul|div|udiv|mod|rem|urem|shl|shr|sar"
 //  10. ILTOK_RET          "ret <val>" | "ret"
 //  11. ILTOK_JMP          "jmp @<label>"
 //  12. ILTOK_JNZ          "jnz %<cond>, @<then>, @<else>"
@@ -734,6 +734,21 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
             else if sz == (108 as i32) { op_name = "extsl" as *u8; }
             else { op_name = "extsh" as *u8; }  // 'h'
             let _x = lex_next_byte(s);  // consume size letter
+        } else if n1 == (97 as i32) {
+            // ── W-187 真修 (2026-11-04):"sar" —— **算术**右移(补符号) ──
+            //   IL 的 `shr` 是**逻辑**右移(零填充);有符号右移补符号的 op 是 `sar`
+            //   (QBE IL 标准 op,见 QBE IL spec §6.3)。
+            //   dispatcher 's' 分支已 consume 's' ⇒ cursor 在 'a' ⇒ 必须 "ar"。
+            if n2 != (114 as i32) {
+                return -1 as i32;
+            }
+            // consume "ar" (2 bytes)
+            let mut i: i64 = 0 as i64;
+            while i < (2 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            op_name = "sar" as *u8;
         } else {
             // sub path: must be "ub" (else fall through to dispatcher's -1)
             if n1 != (117 as i32) || n2 != (98 as i32) {
@@ -747,34 +762,60 @@ fn next_token_binop(s: *LexState, arena: *u8, t: *u8, op_byte: i32) -> i32 {
             op_name = "sub" as *u8;
         }
     } else if op_byte == (117 as i32) {
-        // v2.11.13 (W-074.6 extu_* family): op_byte='u' is for extu_* only
-        // (zero-extend). 'u' is NOT used as first letter of any other QBE op
-        // (and/or/xor/sub all use other letters). Dispatcher 'e' branch 已
-        // detect "extu*", consume 'e', call here with op_byte='u'。Cursor 在 'x'。
+        // v2.11.13 (W-074.6 extu_* family): op_byte='u' 是 extu_*(零扩展)与
+        // **udiv/urem**(无符号除法/取模)的**共用**入口。
+        //   · dispatcher 'e' branch detect "extu*", consume 'e', call here with
+        //     op_byte='u' ⇒ cursor 在 'x' ⇒ 走 extu 路径;
+        //   · dispatcher 'u' branch(W-185② 新增)detect "udiv"/"urem",
+        //     consume 'u', call here with op_byte='u' ⇒ cursor 在 'd'/'r'。
+        // ⇒ 两条路径按 **peek 前缀**分流:'x' → extu,'d' → udiv,'r' → urem。
         let n1 = lex_peek_byte_at(s, 0 as i64);
         let n2 = lex_peek_byte_at(s, 1 as i64);
         let n3 = lex_peek_byte_at(s, 2 as i64);
-        // early-return guard: must be "xtu"
-        if n1 != (120 as i32) || n2 != (116 as i32) || n3 != (117 as i32) {
-            return -1 as i32;
+        // ── W-185② 真修 (2026-11-04):"udiv" / "urem" —— **无符号**除法/取模 ──
+        //   QBE IL 标准 op(见 QBE IL spec §6.3):无符号语义。
+        //   ⚠️ 必须 BEFORE 下面的 "xtu" guard —— 否则会被判成非法助记符 ⇒
+        //   **整条指令被静默 skip** ⇒ 吐出一串垃圾指令(同 W-145 ultof 的坑)。
+        if n1 == (100 as i32) && n2 == (105 as i32) && n3 == (118 as i32) {
+            // "udiv" — consume "div" (3 bytes)
+            let mut i: i64 = 0 as i64;
+            while i < (3 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            op_name = "udiv" as *u8;
+        } else if n1 == (114 as i32) && n2 == (101 as i32) && n3 == (109 as i32) {
+            // "urem" — consume "rem" (3 bytes)
+            let mut i: i64 = 0 as i64;
+            while i < (3 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            op_name = "urem" as *u8;
+        } else {
+            // extu path: cursor starts with 'x' (after dispatcher consumed 'e')
+            // early-return guard: must be "xtu"
+            if n1 != (120 as i32) || n2 != (116 as i32) || n3 != (117 as i32) {
+                return -1 as i32;
+            }
+            // consume "xtu" (3 bytes)
+            let mut i: i64 = 0 as i64;
+            while i < (3 as i64) {
+                let _x = lex_next_byte(s);
+                i = i + (1 as i64);
+            }
+            // peek byte 3 = size letter — early-return guard
+            let sz = lex_peek_byte_at(s, 0 as i64);
+            if sz != (98 as i32) && sz != (119 as i32) && sz != (108 as i32) && sz != (104 as i32) {
+                return -1 as i32;
+            }
+            // map size letter to op_name
+            if sz == (98 as i32) { op_name = "extub" as *u8; }
+            else if sz == (119 as i32) { op_name = "extuw" as *u8; }
+            else if sz == (108 as i32) { op_name = "extul" as *u8; }
+            else { op_name = "extuh" as *u8; }
+            let _x = lex_next_byte(s);  // consume size letter
         }
-        // consume "xtu" (3 bytes)
-        let mut i: i64 = 0 as i64;
-        while i < (3 as i64) {
-            let _x = lex_next_byte(s);
-            i = i + (1 as i64);
-        }
-        // peek byte 3 = size letter — early-return guard
-        let sz = lex_peek_byte_at(s, 0 as i64);
-        if sz != (98 as i32) && sz != (119 as i32) && sz != (108 as i32) && sz != (104 as i32) {
-            return -1 as i32;
-        }
-        // map size letter to op_name
-        if sz == (98 as i32) { op_name = "extub" as *u8; }
-        else if sz == (119 as i32) { op_name = "extuw" as *u8; }
-        else if sz == (108 as i32) { op_name = "extul" as *u8; }
-        else { op_name = "extuh" as *u8; }
-        let _x = lex_next_byte(s);  // consume size letter
     } else if op_byte == (109 as i32) {
         // "mul" 或 "mod" — consume "ul" or "od" (dispatcher 只 consume 'm' 了 1 char)
         // V2-B v2.6.0 (Unit B Stub-Fill): refactor — early-return guards for
@@ -1144,7 +1185,12 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
         }
     }
     let pc2 = lex_peek_byte(s);
-    if pc2 >= (48 as i32) && pc2 <= (57 as i32) {
+    // ⚠️ **W-191 真修 (2026-11-04)**:负号也要进「列表形式」的判定 ——
+    //   i64 / u64 的模块级全局**没有截断**(codegen 只截 i8/u8/i16/u16/i32/u32)
+    //   ⇒ 负值原样带 '-' 落地(`data $g = { l -5 }`)
+    //   ⇒ 修前 '-' 不是数字 ⇒ 落到「字符串形式」⇒ 硬报错
+    //      「unknown QBE IL mnemonic」⇒ **合法代码编译不过**。
+    if (pc2 >= (48 as i32) && pc2 <= (57 as i32)) || pc2 == (45 as i32) {
         // byte list form: collect digits/commas/ws into fresh arena buf,
         //   skip "b "/"w " etc. prefixes. Output form: "97, 98, 99, ..."
         is_byte_list = 1 as i32;
@@ -1178,8 +1224,16 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
                     else { wd = 1 as i32; }
                 }
             }
-            else if cc2 >= (48 as i32) && cc2 <= (57 as i32) {
-                // digit run → copy verbatim to byte_list_buf, append ", " if not first
+            else if (cc2 >= (48 as i32) && cc2 <= (57 as i32)) || cc2 == (45 as i32) {
+                // 数字串(或**负号**开头的数值)→ copy verbatim to byte_list_buf,
+                //   append ", " if not first
+                //
+                // ⚠️ **W-191 真修 (2026-11-04)**:两处 ——
+                //   ① **负号**:必须与后面的数字**连续**(不能被上面的 ", " 分隔)
+                //      ⇒ 负号 + 数字串**一起** memcpy。
+                //   ② **位数上限 16 → 24**:u64 最大 18446744073709551615 是 **20 位**
+                //      ⇒ 修前超 16 位被切断 ⇒ `.quad 9223372036854775, 807`
+                //      ⇒ **静默错值**(全局拿到的是错的数,而且符号后多出一个元素)。
                 if first == (0 as i32) {
                     if byte_list_len + 2 as i64 > byte_list_cap {
                         byte_list_cap = byte_list_cap * (2 as i64);
@@ -1191,7 +1245,12 @@ fn next_token_data_string(s: *LexState, arena: *u8, t: *u8) -> i32 {
                 first = 0 as i32;
                 let mut digit_start = (*s).cur;
                 let mut digit_len: i64 = 0 as i64;
-                while digit_len < (16 as i64) {
+                // 负号(可选)—— 与数字串连续拷贝 ⇒ 输出 "-5" 而不是 "- 5"
+                if cc2 == (45 as i32) {
+                    let _sn = lex_next_byte(s);
+                    digit_len = digit_len + (1 as i64);
+                }
+                while digit_len < (24 as i64) {
                     let dc = lex_peek_byte(s);
                     if dc >= (48 as i32) && dc <= (57 as i32) {
                         let _dn = lex_next_byte(s);
@@ -1842,6 +1901,16 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
             let _x = lex_next_byte(s);
             return next_token_binop(s, arena, t, 115 as i32);
         }
+        // ── W-187 真修 (2026-11-04):"sar" —— **算术**右移(补符号) ──
+        //   IL 的 `shr` 是**逻辑**右移(零填充);有符号右移补符号的 op 是 `sar`
+        //   (QBE IL 标准 op,见 QBE IL spec §6.3)。
+        //   ⚠️ 必须 BEFORE "sub"?—— 不冲突(n1 'a' vs 'u'),但必须在本分支末尾的
+        //      `return -1` 之前(否则整条指令被静默 skip ⇒ 垃圾指令)。
+        if n1 == (97 as i32) && n2 == (114 as i32) {
+            // "sar" — consume 's',然后 next_token_binop 消费 "ar"
+            let _x = lex_next_byte(s);
+            return next_token_binop(s, arena, t, 115 as i32);
+        }
         // v2.11.19: 'stosi' / 'stosl' / 'sltof' / 'swtof' / 'ultof' / 'uwtof'
         //   (f32→i32/i64 via cvttss2si; i32/i64/u32/u64→f64 via cvtsi2sd family)
         //   跟 dtosi/dtosl 同 pattern — unary src + 单 ILTOK enum,dst 宽度由 tok.qbe_type 决定。
@@ -1977,6 +2046,21 @@ fn next_token(s: *LexState, arena: *u8, t: *u8) -> i32 {
         let n2 = lex_peek_byte_at(s, 2 as i64);
         let n3 = lex_peek_byte_at(s, 3 as i64);
         let n4 = lex_peek_byte_at(s, 4 as i64);
+        // ── W-185② 真修 (2026-11-04):"udiv" / "urem" —— **无符号**除法/取模 ──
+        //   QBE IL 标准 op(见 QBE IL spec §6.3)。
+        //   ⚠️ 必须 BEFORE "ultof"/"uwtof" 的判定?—— 不冲突(n1 'd'/'r' vs 'l'/'w'),
+        //      但必须 BEFORE 本分支末尾的 `return -1`(否则整条指令被静默 skip
+        //      ⇒ 吐出一串垃圾指令 —— 同 W-145 `ultof` 的坑)。
+        if n1 == (100 as i32) && n2 == (105 as i32) && n3 == (118 as i32) {
+            // "udiv" — consume 'u',然后 next_token_binop 消费 "div"
+            let _x = lex_next_byte(s);
+            return next_token_binop(s, arena, t, 117 as i32);
+        }
+        if n1 == (114 as i32) && n2 == (101 as i32) && n3 == (109 as i32) {
+            // "urem" — consume 'u',然后 next_token_binop 消费 "rem"
+            let _x = lex_next_byte(s);
+            return next_token_binop(s, arena, t, 117 as i32);
+        }
         // 'ultof' = u,l,t,o,f / 'uwtof' = u,w,t,o,f
         if (n1 == (108 as i32) || n1 == (119 as i32)) && n2 == (116 as i32)
             && n3 == (111 as i32) && n4 == (102 as i32) {

@@ -2107,6 +2107,15 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
     let mut is_xor: i32 = 0 as i32;
     let mut is_shl: i32 = 0 as i32;
     let mut is_shr: i32 = 0 as i32;
+    // ── W-185② / W-187 真修 (2026-11-04):三个新的 IL op ──
+    //   is_udiv / is_urem:**无符号**除法/取模(x86 `divl`/`divq`,不用 idiv)
+    //   is_sar:**算术**右移(补符号;x86 `sarl`/`sarq`,不用 shrl/shrq)
+    // ⚠️ 判别用 cg_find_sub(纯**子串**搜索)且 op_text 是**整条指令原文**
+    //   ⇒ "udiv" 含 "div"、"urem" 含 "rem" ⇒ 新判别**必须排在** "div"/"rem" 之前,
+    //      否则会静默走错分支(无符号除法变成有符号除法 —— 正是 W-185② 本身)。
+    let mut is_udiv: i32 = 0 as i32;
+    let mut is_urem: i32 = 0 as i32;
+    let mut is_sar: i32 = 0 as i32;
     // v2.11.13 (W-074.6 C.1 fix): exts_* / extu_* family (sign/zero extend).
     // QBE spec §6.1: extsb/extub/extsh/extuh/extsw/extuw/extsl — unary ops,
     // required for `x as i64` cast (i32→i64 → extsw) and `x as i32` from u8/i8.
@@ -2229,10 +2238,22 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             is_sub = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "mul" as *u8, 3 as i64) >= (0 as i64) {
             is_mul = 1 as i32;
+        // ── W-185② 真修 (2026-11-04):"udiv" **必须** check BEFORE "div" ──
+        //   cg_find_sub 是纯**子串**搜索 + op_text 是整条指令原文
+        //   ⇒ "udiv" 含 "div" ⇒ 若先判 "div",无符号除法会被当成有符号除法
+        //      (那正是 W-185② 本身 —— 白改)。
+        } else if cg_find_sub(op_text, op_text_len, "udiv" as *u8, 4 as i64) >= (0 as i64) {
+            // W-185②: 'udiv' (QBE 无符号除法) — x86 "divl" / "divq"。
+            is_udiv = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "div" as *u8, 3 as i64) >= (0 as i64) {
             is_div = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "mod" as *u8, 3 as i64) >= (0 as i64) {
             is_mod = 1 as i32;
+        // ── W-185② 真修:"urem" **必须** check BEFORE "rem" ──
+        //   "urem" 含 "rem" ⇒ 同上,顺序反了就白改。
+        } else if cg_find_sub(op_text, op_text_len, "urem" as *u8, 4 as i64) >= (0 as i64) {
+            // W-185②: 'urem' (QBE 无符号取模) — x86 "divl" / "divq" + 取 %rdx。
+            is_urem = 1 as i32;
         } else if cg_find_sub(op_text, op_text_len, "rem" as *u8, 3 as i64) >= (0 as i64) {
             // v2.11.9 (W-074.7.9): 'rem' 必须 check BEFORE 'add' fallback
             // (因为 'rem' 跟 'add' 都不冲突, 但 order matters for cg_find_sub
@@ -2268,6 +2289,11 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             // v2.11.12: 'shr' (QBE unsigned shift right, per QBE spec §6.3) —
             // x86 "shrl" / "shrq" (zero-fill, matches QBE unsigned semantic)。
             is_shr = 1 as i32;
+        } else if cg_find_sub(op_text, op_text_len, "sar" as *u8, 3 as i64) >= (0 as i64) {
+            // ── W-187 真修 (2026-11-04):'sar' (QBE **算术**右移,per QBE spec §6.3) ──
+            //   x86 "sarl" / "sarq" (补符号)—— 与 'shr'(零填充)是两回事。
+            //   ⚠️ "sar" 与上面任何助记符都无子串包含关系 ⇒ 放最后即可。
+            is_sar = 1 as i32;
         }
     }
 
@@ -2360,6 +2386,30 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
         }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
+    } else if is_udiv != (0 as i32) {
+        // ── W-185② 真修 (2026-11-04):**无符号**除法 —— x86 `divl` / `divq` ──
+        //   与有符号 `idiv` 的唯一区别:被除数的高半部分必须**清零**而不是符号扩展:
+        //     有符号 idiv:dividend = %rdx:%rax,其中 %rdx = %rax 的符号扩展(cltd/cqto)
+        //     无符号 div:dividend = %rdx:%rax,其中 %rdx = 0(xorl/xorq %edx,%edx)
+        //   ⚠️ 用 `div` 而不是 `idiv` —— x86 的 `div` 就是无符号除法指令。
+        //   ⚠️ 立即数除数形态(`divl $imm`)不是合法 x86 ⇒ 不可达
+        //      (前端从不给二元运算发字面量操作数)—— 与既有的 idiv 路径同款限制。
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\txorq %rdx, %rdx\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tdivq" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\txorl %edx, %edx\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tdivl" as *u8);
+        }
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
     } else if is_div != (0 as i32) {
         // v2.11.9 (W-074.7.9): idiv 必须有 sign-extend prefix (cltd/cqto) — x86
         // idivl semantics dividend = (%edx << 32) | %eax; %edx 残留会触发 #DE
@@ -2405,6 +2455,29 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
         }
         // mod result 存 %rdx — 把它移到 %rax 让后续 mov %rax 存栈正确
         let _mrm1 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
+    } else if is_urem != (0 as i32) {
+        // ── W-185② 真修:**无符号**取模 —— x86 `divl`/`divq` + 取 %rdx ──
+        //   与有符号 `rem` 的唯一区别:高半部分清零(xorl/xorq)而不是符号扩展(cltd/cqto),
+        //   以及用 `div`(无符号)而不是 `idiv`(有符号)。
+        //   余数在 %rdx ⇒ 移到 %rax 让后续「mov %rax 存栈」正确(与 rem 同款)。
+        if qt == QBE_L_LOCAL() {
+            let _se1 = sb_append_cstr(arena, s, "\txorq %rdx, %rdx\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tdivq" as *u8);
+        } else {
+            let _se1 = sb_append_cstr(arena, s, "\txorl %edx, %edx\n" as *u8);
+            let _b1 = sb_append_cstr(arena, s, "\tdivl" as *u8);
+        }
+        let _b2 = sb_append_cstr(arena, s, " " as *u8);
+        if src2_is_imm != (0 as i32) {
+            let _b3i = sb_append_cstr(arena, s, "$" as *u8);
+            let _b3v = sb_appendf_lld(arena, s, "%lld" as *u8, src2_imm_val);
+            let _b3n = sb_append_cstr(arena, s, "\n" as *u8);
+        } else {
+            let _b3 = sb_appendf_lld(arena, s, "%lld" as *u8, src2_off);
+            let _b4 = sb_append_cstr(arena, s, "(%rbp)\n" as *u8);
+        }
+        // urem result 存 %rdx — 把它移到 %rax
+        let _mrm3 = sb_append_cstr(arena, s, "\tmovq %rdx, %rax\n" as *u8);
     } else if is_rem != (0 as i32) {
         // v2.11.9 (W-074.7.9): rem = signed remainder (QBE % operator). Same x86
         // path as mod — cltd/cqto + idiv + movq %rdx → %rax.
@@ -2480,17 +2553,27 @@ fn emit_binop(state: *u8, tok: *u8) -> i32 {
             let _b5 = sb_append_cstr(arena, s, reg_rax_for_qt(qt));
         }
         let _b6 = sb_append_cstr(arena, s, "\n" as *u8);
-    } else if is_shl != (0 as i32) || is_shr != (0 as i32) {
+    } else if is_shl != (0 as i32) || is_shr != (0 as i32) || is_sar != (0 as i32) {
         // v2.11.12: shl / shr 走 "shll"/"shlq"/"shrl"/"shrq"。
         // x86 shift by imm → "shll $N, %<reg>"; shift by reg → "movl src2(%rbp), %ecx"
         //   然后 "shll %cl, %<reg>"。per v2.11.12 ship gate: 32/64-bit shift (QBE_W/L)。
         // QBE shr = unsigned shift right (per QBE spec §6.3); match x86 shrl (zero-fill)。
         // shift result never address-holder (per v2.11.8 workarounds doc),所以 emit_mov_reg_to_temp
         // 走 formula `-(32 + t*8)` 正确。
-        let mut shift_op: *u8 = if is_shl != (0 as i32) { "shll" as *u8 } else { "shrl" as *u8 };
+        //
+        // ── W-187 真修 (2026-11-04):加第三态 `sar`(算术右移,补符号) ──
+        //   x86 `sarl`/`sarq` = 补符号右移;`shrl`/`shrq` = 零填充。
+        //   IL 的 `shr` 恒为零填充(无符号语义),有符号右移必须显式发 `sar`。
+        // ⚠️ **三态必须穷举**(shl/shr/sar × 32/64)—— 少一态就会把 64 位的
+        //   `shl` 误发成 32 位的 `shll`(GAS 会报 operand size mismatch ⇒ 链接失败)。
+        let mut shift_op: *u8 = "shll" as *u8;
+        if is_shr != (0 as i32) { shift_op = "shrl" as *u8; }
+        if is_sar != (0 as i32) { shift_op = "sarl" as *u8; }
         if qt == QBE_L_LOCAL() {
-            // 64-bit: shlq / shrq
-            shift_op = if is_shl != (0 as i32) { "shlq" as *u8 } else { "shrq" as *u8 };
+            // 64-bit: shlq / shrq / sarq
+            if is_shr != (0 as i32) { shift_op = "shrq" as *u8; }
+            else if is_sar != (0 as i32) { shift_op = "sarq" as *u8; }
+            else { shift_op = "shlq" as *u8; }
         }
         let mut load_op: *u8 = "movl" as *u8;
         if qt == QBE_L_LOCAL() {

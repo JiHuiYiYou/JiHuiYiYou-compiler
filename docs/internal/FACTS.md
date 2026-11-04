@@ -41,8 +41,8 @@
 
 | 项 | 值 |
 |---|---|
-| `python regress.py` | **265 PASS + 0 XFAIL + 0 failed + 20 SKIP**（285 total） |
-| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 285 · 可跑 265 · 真断言 205 · literal-return-ok 8 · expect-error 52 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **273 PASS + 0 XFAIL + 0 failed + 20 SKIP**（293 total） |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 293 · 可跑 273 · 真断言 212 · literal-return-ok 8 · expect-error 53 · skipped 6 · library 14 · **零信号 0** |
 | 产物级门数 | `artifact-checks` —— **18 道**（`check_*` 函数数） |
 
 ### 2.2 CI 门（完整清单）
@@ -99,7 +99,7 @@
 | 跨代闭环 | `closure-check` | Stage2 的 `.s` == Stage3 的 `.s`（`compiler/tests/bootstrap/closure_check.sh`，带非空守卫） | `bash compiler/tests/bootstrap/closure_check.sh` · 改 `src0` 之后 |
 | 跨代 fixed-point | `fixed-point` | N=10 跨代 `.il` + `.s` byte-equal（`compiler/tests/bootstrap/fixed_point.sh`） | `python regress.py --fixed-point` · 改 `src0` 之后（发版级流程） |
 | 字节三件套 | `byte-equal` | `.il` / `.s` / `.exe` 三层 byte-equal | `python regress.py --byte-equal` · 跨版本对拍时 |
-| 差分全量 | `bench-diff-full` | 32 个种子的**全量模式** —— 探测已知缺陷（W-185 / W-186）的行为有没有变 | `python bench/difftest.py --seeds bench/seeds/all.txt --mode full --ci` · 定期跑 |
+| 差分全量 | `bench-diff-full` | 32 个种子的**全量模式** —— W-185 / W-186 修好后**已知缺陷清单已清空** ⇒ 全量模式 ≡ 规避模式,只剩「有没有新缺陷」这一问 | `python bench/difftest.py --seeds bench/seeds/all.txt --mode full --ci` · 定期跑 |
 
 > **为什么「跨代闭环」是本地门而不是 CI 门**(2026-11-03 审计):
 > CI 里那道闭环由 `make` 自己兜 —— `$(BIN_DIR)/jhyy.exe` 规则**迭代到不动点**,
@@ -117,10 +117,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **183** |
-| ACTIVE | **2** |
+| 条目总数 | **188** |
+| ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 162 / 16 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 169 / 16 / 2 |
 
 ---
 

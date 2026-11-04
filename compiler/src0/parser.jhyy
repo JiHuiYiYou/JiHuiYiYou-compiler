@@ -1565,9 +1565,29 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     }
     else if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = parse_int_literal(t.start, t.length);
         let prim = jh_int_suffix_prim(t.start, t.length);
-        left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, prim);
+        // ── W-186 / W-188(2026-11-04 真修):量值按 **u64** 精确求值 ──
+        //
+        // 旧路径用 parse_int_literal(strtoll,**有符号**)⇒ 量值 ≥ 2^63 时按 C 标准
+        // **饱和到 LLONG_MAX** ⇒ u64 的高位值全变成同一个数(W-186:连字面量本身
+        // 都没解析对);而 u64 后缀是在**值解析之后**才读的 ⇒ 救不回来。
+        //
+        // jh_parse_int_literal 自己按 base 扫字符(语义与 parse_int_literal 一致),
+        // 量值精确到 2^64-1;返回**位模式**(按 i64 收)。
+        let mut lit_bits: i64 = 0;
+        let lit_flags = jh_parse_int_literal(t.start, t.length, 0 as i32, (&lit_bits) as *i64);
+        // 越界检查:**只查 64 位族** —— 32 位族(无后缀默认 i32)今天就是静默截断,
+        //   突然改成报错会砸掉一批「能编译的程序」(如 _audit_w098_no_cast.jhyy 的
+        //   `0x100000000 as i64` —— 那个字面量按 i32 语义是 4294967296)。
+        let mut lit_oob: i32 = 0;
+        if (lit_flags & 1) != 0 { lit_oob = 1; }                          // ≥ 2^64:任何类型都装不下
+        else if prim == PRIM_I64() && (lit_flags & 2) != 0 { lit_oob = 1; } // i64 装不下 ≥ 2^63
+        if lit_oob != 0 {
+            jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+            jh_fputs_stderr("error: integer literal out of range\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+        }
+        left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, lit_bits, prim);
     }
     else if t.kind == TOKEN_FLOAT() {
         parser_advance(p, &t);
@@ -2004,9 +2024,48 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
     // ── unary prefix: - ! ~ ──
     else if t.kind == TOKEN_MINUS() {
         parser_advance(p, &t);
-        let op = t.kind;
-        let expr = parse_expr(p, PREC_UNARY());
-        left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
+        // ── W-188(2026-11-04 真修):「负号 + 字面量」的折叠 ──
+        //
+        // `i64::MIN` 的写法是 `-9223372036854775808i64` —— **量值本身超出 i64 范围**,
+        // 只有**取负之后**才合法 ⇒ 旧路径(strtoll 饱和到 LLONG_MAX + 取负是独立的
+        // AST 节点)算出来是 -(2^63-1),**差 1**。
+        //
+        // 修法:量值按 u64 精确求值(见上面 TOKEN_INT 分支),负号按 **u64 位模式**折叠
+        // (0 - 2^63 在 u64 里回绕成 2^63 ⇒ 位模式正是 INT64_MIN)。
+        // ⚠️ **只折叠量值 ≥ 2^63 的那种** —— 那类字面量今天全是坏的 ⇒ 对现有程序
+        // **零行为变化**;其余负字面量照旧走「unary 节点」那条路(AST 形状不变)。
+        let mut neg_tok = empty_token();
+        parser_peek(p, &neg_tok);
+        let mut neg_folded: i32 = 0;
+        let mut neg_bits: i64 = 0;
+        if neg_tok.kind == TOKEN_INT() {
+            let nf = jh_parse_int_literal(neg_tok.start, neg_tok.length, 1 as i32, (&neg_bits) as *i64);
+            if (nf & 4) != 0 { neg_folded = 1; }
+        }
+        if neg_folded != 0 {
+            parser_advance(p, &neg_tok);
+            let neg_prim = jh_int_suffix_prim(neg_tok.start, neg_tok.length);
+            // 量值 ≥ 2^63 ⇒ 只有 i64 / u64 装得下;其余(i8/i16/i32/无后缀)⇒ 越界。
+            if neg_prim != PRIM_I64() && neg_prim != PRIM_U64() {
+                jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+                jh_fputs_stderr("error: integer literal out of range\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+            }
+            // ⚠️ **i64 还要看折叠后的位模式**:量值 > 2^63(i.e. 折叠结果是正数)
+            //   ⇒ 取负之后仍超出 i64 的取值范围 ⇒ 越界(例:`-0x8000000000000001i64`)。
+            //   量值**恰好** 2^63 ⇒ 折叠结果 = 0x8000000000000000 = i64::MIN ✓ 合法。
+            //   (u64 不查:负号 + u64 后缀的语义是「位模式回绕」,与旧的「先取负再折叠」一致。)
+            if neg_prim == PRIM_I64() && neg_bits > (0 as i64) {
+                jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+                jh_fputs_stderr("error: integer literal out of range\n" as *u8);
+                (*p).error_count = (*p).error_count + (1 as i32);
+            }
+            left = ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, neg_bits, neg_prim);
+        } else {
+            let op = t.kind;
+            let expr = parse_expr(p, PREC_UNARY());
+            left = ast_new_unary((*p).arena, loc_lf, loc_ll, loc_lc, op, expr);
+        }
     }
     else if t.kind == TOKEN_BANG() {
         parser_advance(p, &t);
