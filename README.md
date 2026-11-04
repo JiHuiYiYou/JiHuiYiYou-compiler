@@ -190,7 +190,7 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 273/273 passed (all with assertions), 0 failed, 20 skipped (of 293 total)
+# => 274/274 passed (all with assertions), 0 failed, 20 skipped (of 294 total)
 ```
 
 ### Verify the self-host closure
@@ -302,7 +302,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests (293 .jhyy files + 5 subdirectories) — run by regress.py
+│   │   ├── examples/           integration tests (294 .jhyy files + 5 subdirectories) — run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -329,8 +329,8 @@ numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` | **273 PASS + 0 XFAIL + 0 failed + 20 SKIP** (293 total) |
-| Assertion audit | 293 scanned / 273 runnable / 212 real assertions / 0 zero-signal |
+| `regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP** (294 total) |
+| Assertion audit | 294 scanned / 274 runnable / 213 real assertions / 0 zero-signal |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |

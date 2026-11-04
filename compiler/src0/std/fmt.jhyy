@@ -81,14 +81,22 @@ fn fmt_i32(out_buf: *u8, val: i32) -> i64 {
         n = 1 as i64;
     } else {
         let negative: i32 = if v < (0 as i32) { 1 as i32 } else { 0 as i32 };
-        if negative != (0 as i32) {
-            v = 0 as i32 - v;
-        }
-        while v > (0 as i32) {
-            let d: i32 = v - (v / (10 as i32)) * (10 as i32);
+        // ⚠️ **W-195 真修 (2026-11-04)**:原来这里先 `v = 0 - v` 取绝对值,
+        //   而 **i32::MIN 取负回绕成它自己**(仍是负数)⇒ `while v > 0` 一次都不跑
+        //   ⇒ 只打出一个 `-`(实测 fmt_i32(i32::MIN) 返回 1,应为 11)。
+        // ⇒ 改成**不取绝对值**,直接用**向 0 截断**的除法:
+        //   · `v % 10` 的符号跟 `v` 一样 ⇒ 取它的绝对值(余数在 -9..9 ⇒ 取负不溢出)
+        //   · `v = v / 10` 向 0 截断 ⇒ **MIN / 10 不溢出**(唯一会溢出的除法是 MIN / -1)
+        //     ⇒ MIN 天然可用,**不需要特判**。
+        // ⚠️ 刻意**不用无符号除法**(那会依赖编译器版本的 u32/u64 除法语义)。
+        while v != (0 as i32) {
+            let mut d: i32 = v % (10 as i32);
+            if d < (0 as i32) {
+                d = 0 as i32 - d;      // 余数在 -9..9 ⇒ 这里取负不会溢出
+            }
             rev[n] = digit_char(d);
             n = n + (1 as i64);
-            v = v / (10 as i32);
+            v = v / (10 as i32);        // 向 0 截断
         }
         if negative != (0 as i32) {
             rev[n] = 45 as i32;
@@ -123,14 +131,19 @@ fn fmt_i64(out_buf: *u8, val: i64) -> i64 {
         n = 1 as i64;
     } else {
         let negative: i32 = if v < (0 as i64) { 1 as i32 } else { 0 as i32 };
-        if negative != (0 as i32) {
-            v = 0 as i64 - v;
-        }
-        while v > (0 as i64) {
-            let d: i64 = v - (v / (10 as i64)) * (10 as i64);
+        // ⚠️ **W-195 真修 (2026-11-04)**:同 fmt_i32 的老形状 ⇒
+        //   `fmt_i64(i64::MIN)` 只打出一个 `-`(实测返回 1,应为 20
+        //   ⇒ `-9223372036854775808`)—— i64::MIN 取负回绕成它自己。
+        // ⇒ 改成不取绝对值,直接用向 0 截断的除法(理由见 fmt_i32 的注释)。
+        // ⚠️ `i64::MIN / 10` = -922337203685477580(向 0 截断)**不溢出** ⇒ MIN 天然可用。
+        while v != (0 as i64) {
+            let mut d: i64 = v % (10 as i64);
+            if d < (0 as i64) {
+                d = 0 as i64 - d;      // 余数在 -9..9 ⇒ 这里取负不会溢出
+            }
             rev[n] = digit_char(d as i32);
             n = n + (1 as i64);
-            v = v / (10 as i64);
+            v = v / (10 as i64);        // 向 0 截断
         }
         if negative != (0 as i32) {
             rev[n] = 45 as i32;
@@ -175,12 +188,25 @@ fn fmt_hex_u32(out_buf: *u8, val: i32, upper: i32) -> i64 {
                               0 as i32, 0 as i32, 0 as i32, 0 as i32,
                               0 as i32, 0 as i32, 0 as i32, 0 as i32];
     let mut n: i64 = 0 as i64;
-    let mut v: i32 = val;
-    while v > (0 as i32) {
-        let d: i32 = v - (v / (16 as i32)) * (16 as i32);
-        rev[n] = hex_char(d, upper);
+    // ⚠️ **W-195 真修 (2026-11-04)**:val 是 **u32 的位模式**(以 i32 传入)
+    //   ⇒ 值 ≥ 0x80000000 时它是**负的** ⇒ 修前 `while v > 0` 一次都不跑
+    //   ⇒ **输出空串**(实测 fmt_hex_u32(0x80000000) 返回 0,应为 8)。
+    // ⇒ 先把位模式**手工转成无符号的 i64**(0..2³²-1)⇒ 之后 i64 的除法就够用。
+    // ⚠️ **为什么不写 `val as u32 as i64`**:那条路依赖「u32 → i64 **零扩展**」
+    //   这条规则(W-185 刚修的)⇒ **老编译器**会符号扩展 ⇒ 用老编译器编出来的
+    //   std lib 会打出错的 hex ⇒ 手工转换只用「符号扩展 + i64 加法」
+    //   ⇒ **任何版本的编译器都对**。
+    let mut v: i64 = 0 as i64;
+    if val < (0 as i32) {
+        v = 4294967296i64 + (val as i64);   // 2³² + 负数 ⇒ 0..2³¹-1
+    } else {
+        v = val as i64;
+    }
+    while v > (0 as i64) {
+        let d: i64 = v - (v / (16 as i64)) * (16 as i64);
+        rev[n] = hex_char(d as i32, upper);
         n = n + (1 as i64);
-        v = v / (16 as i32);
+        v = v / (16 as i64);
     }
     let mut i: i64 = 0 as i64;
     while i < n {

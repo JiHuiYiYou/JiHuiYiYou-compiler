@@ -183,7 +183,7 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 273/273 passed (全部有断言), 0 failed, 20 skipped (of 293 total)
+# => 274/274 passed (全部有断言), 0 failed, 20 skipped (of 294 total)
 ```
 
 ### 验证自举闭环
@@ -291,7 +291,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试(293 个 .jhyy + 5 个子目录)— regress.py 自动跑
+│   │   ├── examples/           集成测试(294 个 .jhyy + 5 个子目录)— regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -316,8 +316,8 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py` | **273 PASS + 0 XFAIL + 0 failed + 20 SKIP**(293 total) |
-| 断言强度审计 | 扫 293 / 可跑 273 / 真断言 212 / 零信号 0 |
+| `regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP**(294 total) |
+| 断言强度审计 | 扫 294 / 可跑 274 / 真断言 213 / 零信号 0 |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |

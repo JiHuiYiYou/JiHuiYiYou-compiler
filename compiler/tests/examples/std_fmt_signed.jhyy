@@ -1,0 +1,132 @@
+// EXPECT: 0
+// W-195(v4.3.5):std::fmt 的**有符号打印族**。
+//
+// 修前(三个洞,同一个根因 —— 「先取绝对值 / `while v > 0`」这个形状
+//        被符号位废掉):
+//   ① fmt_i64(i64::MIN)  ⇒ 只打出一个 `-`(实测返回 1,应为 20)
+//   ② fmt_i32(i32::MIN)  ⇒ 只打出一个 `-`(实测返回 1,应为 11)
+//   ③ fmt_hex_u32(v ≥ 0x80000000) ⇒ **空串**(实测返回 0,应为 8)
+//      —— 它的 val 是 u32 的位模式(以 i32 传入)⇒ 高位为 1 时它是负数。
+//
+// ⚠️ **这个文件 import 的是 std/fmt.jhyy 的真身**(不是 inline 副本)
+//   —— per std_fmt_import.jhyy 的约定:副本不受约束 ⇒ 改真身没有回归会发现。
+//
+// ⚠️ **期望值一律用「小字面量」表达**(不直接写 MIN 的字面量):
+//   `i64::MIN` 写成 `0i64 - 9223372036854775807i64 - 1i64`
+//   ⇒ 期望值本身不受「字面量解析」那条路的影响。
+//
+// 断言强度:逐字节比 + 越界哨兵(每个用例前重填一遍,否则上一轮的残留会污染)。
+// EXPECT: 0
+import fmt;
+
+fn fill_sentinel(buf: *u8, n: i64) {
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        *(buf + i) = 170 as u8;
+        i = i + (1 as i64);
+    }
+}
+
+// 逐字节比:buf 的前 n 个字节必须等于给定的期望串
+fn expect_bytes(buf: *u8, n: i64, want: *u8, fails: *i32) {
+    let mut i: i64 = 0 as i64;
+    while i < n {
+        if buf[i as i32] != *(want + i) {
+            *fails = *fails + 1;
+        }
+        i = i + (1 as i64);
+    }
+}
+
+fn main_jhyy() -> i32 {
+    let mut fails: i32 = 0;
+    let mut buf: [u8; 32] = [0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8,
+                             0 as u8, 0 as u8, 0 as u8, 0 as u8];
+
+    // ── ① fmt_i64(i64::MIN) ⇒ "-9223372036854775808"(20 字节)──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n1 = fmt::fmt_i64(buf as *u8, 0i64 - 9223372036854775807i64 - 1i64);
+    if n1 != 20 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 20 as i64, "-9223372036854775808" as *u8, &fails);
+    if buf[20] != 0 as u8 { fails = fails + 1; }
+    if buf[21] != 170 as u8 { fails = fails + 1; }
+
+    // ── ② fmt_i32(i32::MIN) ⇒ "-2147483648"(11 字节)──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n2 = fmt::fmt_i32(buf as *u8, 0i32 - 2147483647i32 - 1i32);
+    if n2 != 11 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 11 as i64, "-2147483648" as *u8, &fails);
+    if buf[11] != 0 as u8 { fails = fails + 1; }
+    if buf[12] != 170 as u8 { fails = fails + 1; }
+
+    // ── ③ fmt_hex_u32(0x80000000) ⇒ "80000000"(8 字节)──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n3 = fmt::fmt_hex_u32(buf as *u8, 0i32 - 2147483647i32 - 1i32, 0 as i32);
+    if n3 != 8 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 8 as i64, "80000000" as *u8, &fails);
+    if buf[8] != 0 as u8 { fails = fails + 1; }
+    if buf[9] != 170 as u8 { fails = fails + 1; }
+
+    // ── ③b fmt_hex_u32(0xFFFFFFFF) ⇒ "ffffffff"(8 字节,小写)──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n3b = fmt::fmt_hex_u32(buf as *u8, 0i32 - 1i32, 0 as i32);
+    if n3b != 8 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 8 as i64, "ffffffff" as *u8, &fails);
+
+    // ── ③c fmt_hex_u32(0xFFFFFFFF, upper) ⇒ "FFFFFFFF"──
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n3c = fmt::fmt_hex_u32(buf as *u8, 0i32 - 1i32, 1 as i32);
+    if n3c != 8 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 8 as i64, "FFFFFFFF" as *u8, &fails);
+
+    // ── 既有行为回归护栏(修前就对的那些,不许被改坏)─────────────
+    // fmt_hex_u32(255) ⇒ "ff"(2 字节,**不补零**)
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n4 = fmt::fmt_hex_u32(buf as *u8, 255 as i32, 0 as i32);
+    if n4 != 2 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 2 as i64, "ff" as *u8, &fails);
+
+    // fmt_hex_u32(0) ⇒ "0"
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n5 = fmt::fmt_hex_u32(buf as *u8, 0 as i32, 0 as i32);
+    if n5 != 1 as i64 { fails = fails + 1; }
+    if buf[0] != 48 as u8 { fails = fails + 1; }
+
+    // fmt_i32(-12345) ⇒ "-12345"
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n6 = fmt::fmt_i32(buf as *u8, 0i32 - 12345i32);
+    if n6 != 6 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 6 as i64, "-12345" as *u8, &fails);
+
+    // fmt_i32(0) ⇒ "0"
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n7 = fmt::fmt_i32(buf as *u8, 0 as i32);
+    if n7 != 1 as i64 { fails = fails + 1; }
+    if buf[0] != 48 as u8 { fails = fails + 1; }
+
+    // fmt_i64(-1) ⇒ "-1"
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n8 = fmt::fmt_i64(buf as *u8, 0i64 - 1i64);
+    if n8 != 2 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 2 as i64, "-1" as *u8, &fails);
+
+    // fmt_i64(1234567890123) ⇒ 13 字节(既有行为)
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n9 = fmt::fmt_i64(buf as *u8, 1234567890123i64);
+    if n9 != 13 as i64 { fails = fails + 1; }
+    expect_bytes(buf as *u8, 13 as i64, "1234567890123" as *u8, &fails);
+
+    // fmt_i64(0) ⇒ "0"
+    fill_sentinel(buf as *u8, 32 as i64);
+    let n10 = fmt::fmt_i64(buf as *u8, 0i64);
+    if n10 != 1 as i64 { fails = fails + 1; }
+    if buf[0] != 48 as u8 { fails = fails + 1; }
+
+    return fails;
+}

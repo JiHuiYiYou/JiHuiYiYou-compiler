@@ -41,8 +41,8 @@
 
 | 项 | 值 |
 |---|---|
-| `python regress.py` | **273 PASS + 0 XFAIL + 0 failed + 20 SKIP**（293 total） |
-| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 293 · 可跑 273 · 真断言 212 · literal-return-ok 8 · expect-error 53 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP**（294 total） |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 294 · 可跑 274 · 真断言 213 · literal-return-ok 8 · expect-error 53 · skipped 6 · library 14 · **零信号 0** |
 | 产物级门数 | `artifact-checks` —— **18 道**（`check_*` 函数数） |
 
 ### 2.2 CI 门（完整清单）
@@ -117,10 +117,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **189** |
+| 条目总数 | **190** |
 | ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 170 / 16 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 171 / 16 / 2 |
 
 ---
 
@@ -147,12 +147,12 @@
 
 | 版本 | 内容 | 状态 |
 |---|---|---|
-| **v4.3.0** | **测评套件地基**：`bench/` 目录 + 基准门 + 口径（METHODOLOGY.md） | 🔄 进行中 |
-| v4.3.1 | 3 道新题（partial_sums / mandelbrot / binary_trees）+ 测量地板口径 + 附录 B 剩余覆盖缺口 | 🔄 进行中 |
-| v4.3.2 | 3 道浮点 / 字节变换新题（revcomp / nbody / spectral）+ 浮点位模式探针 | 🔄 进行中 |
-| v4.3.3 | 随机程序差分测试器 + 差分门 `bench-diff` + 金标准 | 🔄 进行中 |
-| v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | 🔴 预留号 |
-| v4.3.5 | `fmt_i64` 的 i64::MIN 缺陷（动 src0 ⇒ 走发版级流程） | 🔴 预留号 |
+| **v4.3.0** | **测评套件地基**：`bench/` 目录 + 基准门 + 口径（METHODOLOGY.md） | ✅ 已完成 2026-11-03 |
+| v4.3.1 | 3 道新题（partial_sums / mandelbrot / binary_trees）+ 测量地板口径 + 附录 B 剩余覆盖缺口 | ✅ 已完成 2026-11-03 |
+| v4.3.2 | 3 道浮点 / 字节变换新题（revcomp / nbody / spectral）+ 浮点位模式探针 | ✅ 已完成 2026-11-03 |
+| v4.3.3 | 随机程序差分测试器 + 差分门 `bench-diff` + 金标准 | ✅ 已完成 2026-11-03 |
+| v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | 🔄 **下一格** |
+| v4.3.5 | `fmt_i64` 的 i64::MIN 缺陷（动 src0 ⇒ 走发版级流程） | ✅ 已完成 2026-11-04（W-195） |
 
 > **为什么排在 v4.4 之前**：测评线要在**发版前**完成 ⇒ 编号在 v4.4 之前。
 > v4.3.0 原本是「IR 优化框架 + `-O` 开关」，2026-10-29 因实测价值 ≈ 1.8% 而
