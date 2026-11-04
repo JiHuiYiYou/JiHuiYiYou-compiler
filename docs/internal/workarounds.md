@@ -13998,6 +13998,12 @@ let b: u64 = 0xacca7f0dd3ac535fu64;   ⇒  %t2 =l copy 9223372036854775807
 - 用例:`compiler/tests/examples/u64_wide_literal.jhyy` · `literal_range_error.jhyy`
 - 工具:`bench/difftest.py`(差分对拍)· `bench/seeds/known-divergent.txt`
 - 规范:语言规范 §2.5(整数字面量的取值范围)
+- **副作用(2026-11-04 实测)**:这两个新 helper 住在 `compiler/src0/jhyy_helpers.c` 里
+  ⇒ 而**编译器把自己的 C helpers 链进每个用户程序**(`main.jhyy` 的 `HELPERS_O()`)
+  ⇒ 每个用户程序 **+615 B**(v4.1.2 → v4.1.3 实测:192303 → 192918)
+  ⇒ 对 192 KB 量级的程序是 +0.3%,在 bench 的体积门 102% 容差内
+  ⇒ 但它是**系统性的**:编译器每加一个 helper,所有用户的程序都变大
+  ⇒ 已记进 `bench/METHODOLOGY.md` § 5 的已知偏差清单(第 11 条)
 - 相关:**W-185**(同轮挖到,**不同根因**)、**W-188**(同源的 i64 字面量面 —— 共用同一个改动)、
   **W-098**(同族的"截断+符号扩展"模式)
 

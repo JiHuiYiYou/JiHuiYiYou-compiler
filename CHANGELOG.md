@@ -23,6 +23,7 @@
 
 | Version | One-line summary |
 |---|---|
+| **v4.1.3** | `u32`/`u64` division and remainder are unsigned, signed `>>` is arithmetic, `u32 → i64` zero-extends, integer literals are evaluated exactly as `u64` (an out-of-range literal is now a compile error instead of a silent saturation), `std::fmt` prints `i64::MIN`/`i32::MIN` and every `u32` in full, module-level 64-bit globals keep their value — plus the benchmark suite and a differential gate that is now a real regression gate; the fix uncovered three self-hosting bugs, all fixed |
 | **v4.1.2** | `jhyy --version` never existed — said out loud, plus version-number automation (`VERSION` as the single source of truth) |
 | **v4.1.1** | VS Code terminal profile probes for a real bash + a new `jhyy-bash.cmd` launcher; the "bundle a POSIX layer" plan is dropped |
 | **v4.1.0** | The installer bundles a minimal native ucrt64 toolchain ⇒ end users no longer need MSYS2 |
@@ -46,7 +47,6 @@
 
 | Slot | Change |
 |---|---|
-| v4.1.3 | The 2026-11-01/02 batch: `jhyy build` now honours `#[link_section]` and `-o`, its fallback path no longer exits 0 without an `.s`, the emitter covers the `cu*` opcodes and unsigned condition codes, slice writes and `mut` bindings are fixed, a compile-time constant folder landed, `&mut [i32; N]` / `&T` are indexable, `jhyy --help` finally describes `dump` honestly — plus a full-repository documentation audit and a serious hardening of the docs gate. The 2026-11-04 batch: `u32`/`u64` division and remainder are unsigned, signed `>>` is arithmetic, `u32 → i64` zero-extends, integer literals are evaluated exactly as `u64` (and an out-of-range literal is now a compile error instead of a silent saturation) — the fix uncovered two real self-hosting bugs, which are fixed too; module-level 64-bit globals no longer lose their value (or fail to compile) in the data section; `std::fmt` now prints `i64::MIN` / `i32::MIN` in full and every `u32` value in hex (both used to print a lone `-` or an empty string) |
 | v4.4.0 (stage 1) | Register allocator + safety net (byte-identical output); stage 2 is the emit layer consuming registers |
 | v4.2.1 | Frame size computed from what the function actually needs (the hard-coded 8192-byte reserve is gone) ⇒ ~41% runtime |
 | v4.2.0 | Runtime performance gate lands in CI (hard gate on static metrics, wall-clock only reported) + `bench.sh` timer really fixed |

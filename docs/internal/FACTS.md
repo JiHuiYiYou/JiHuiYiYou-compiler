@@ -15,17 +15,17 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **4.1.2**（真相源 = 仓库根 `VERSION` 文件） |
+| 当前版本 | **4.1.3**（真相源 = 仓库根 `VERSION` 文件） |
 | **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
-| 最新 release | `v4.1.2`（2026-10-29） |
+| 最新 release | `v4.1.3`（2026-11-04） |
 | 版本轴 | v0.x(C 编译器，冻结于 v1.0.0) · v1.x(自举，终结于 v1.8.3) · v2.x(QBE 重写，终结于 v2.16.0) · v3.x(语言扩展，终结于 v3.4.2) · **v4.x(当前)** |
 | 编译器二进制 | `compiler/build/bin/jhyy.exe`（~1.9 MB） |
 
 | 产物 | 体积 |
 |---|---|
-| `jhyy-installer-4.1.2.exe` | ~55 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
-| `jhyy-compiler-4.1.2.msi` | ~28 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
-| `jhyy-lang-4.1.2.vsix` | VS Code 扩展 |
+| `jhyy-installer-4.1.3.exe` | ~55 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
+| `jhyy-compiler-4.1.3.msi` | ~28 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
+| `jhyy-lang-4.1.3.vsix` | VS Code 扩展 |
 
 > 自 **v4.1.0** 起 installer 自带最小原生 ucrt64 工具链 ⇒ **最终用户不需要 MSYS2**。
 

@@ -8,14 +8,14 @@
 
 **Statically typed. Expression-oriented. Compiled to native by a self-written amd64 backend.**
 
-[![Version](https://img.shields.io/badge/version-v4.1.2-00d4aa)](CHANGELOG.md)
-[![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v412)
+[![Version](https://img.shields.io/badge/version-v4.1.3-00d4aa)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v413)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v412) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
+[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v413) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
 
 </div>
 
@@ -92,8 +92,8 @@ toolchain (`<INSTALLDIR>\toolchain\`).
 
 | Artifact | Size | What it is |
 |---|---|---|
-| [`jhyy-installer-4.1.2.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-installer-4.1.2.exe) | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
-| [`jhyy-compiler-4.1.2.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.2/jhyy-compiler-4.1.2.msi) | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
+| [`jhyy-installer-4.1.3.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.3/jhyy-installer-4.1.3.exe) | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
+| [`jhyy-compiler-4.1.3.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.3/jhyy-compiler-4.1.3.msi) | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
 
 Checksums are published alongside the assets as `SHA256.txt`.
 
@@ -318,7 +318,7 @@ JiHuiYiYou-compiler/
 
 ---
 
-## Status (v4.1.2)
+## Status (v4.1.3)
 
 In plain terms: **the test suite is green** — every case passes, none fails, and
 every test asserts something that could actually fail. The compiler compiles
@@ -331,14 +331,15 @@ numbers.
 |--------|-------|
 | `regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP** (294 total) |
 | Assertion audit | 294 scanned / 274 runnable / 213 real assertions / 0 zero-signal |
+| Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
 | `artifact_checks.sh` | **18 PASS / 0 FAIL** |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
 | ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.2.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
-| `jhyy-compiler-4.1.2.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
-| `jhyy-lang-4.1.2.vsix` | shipped (VS Code extension) |
+| `jhyy-installer-4.1.3.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
+| `jhyy-compiler-4.1.3.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
+| `jhyy-lang-4.1.3.vsix` | shipped (VS Code extension) |
 
 **Changelog** — [`CHANGELOG.md`](CHANGELOG.md) has one line per release; the detailed
 per-axis record is the v4 umbrella,
@@ -404,7 +405,7 @@ top-level distribution). See [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 `vscode-ext/` provides syntax highlighting (TextMate grammar + file icons), a native ▶
 `Run JHYY File` command (`Ctrl+F5`) and a `Compile JHYY File (no run)` command. The
-latest shipped build is `jhyy-lang-4.1.2.vsix`.
+latest shipped build is `jhyy-lang-4.1.3.vsix`.
 
 ---
 
@@ -443,4 +444,4 @@ Since v0.6, every sprint has been built collaboratively with AI assistance.
 
 ---
 
-<sub>v4.1.2 — 2026-10-29 · version automation (`VERSION` is the single source of truth) · self-written amd64 backend</sub>
+<sub>v4.1.3 — 2026-11-04 · version automation (`VERSION` is the single source of truth) · self-written amd64 backend</sub>
