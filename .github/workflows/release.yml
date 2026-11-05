@@ -446,6 +446,22 @@ jobs:
           $sha256Url = "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v$($env:VERSION)/SHA256.txt"
           $minor = ($env:VERSION -split '\.')[0..1] -join '.'
 
+          # installer 体积:**实测**,不写死。
+          #
+          # 为什么不能写死:模板是**每版都发**的那一份 ⇒ 模板里写死的体积不是
+          # 「过期一次」,而是**每发一版都发一个错的**。这里以前写死「~55MB」——
+          # 打包一变大(FACTS.md § 1 记的就是当前体积),每版 release note 都带着
+          # 那个旧数字发出去,而**没有任何门看得见**(尺寸对拍门只查两份 README)。
+          # ⇒ 量刚编出来的产物,填进 ${INSTALLER_SIZE}。
+          $installerExe = "installer/build-artifacts/jhyy-installer-$($env:JHY_VERSION_DISPLAY).exe"
+          if (-not (Test-Path $installerExe)) {
+            Write-Host "::error::找不到 $installerExe —— 量不出 installer 体积,拒绝发布"
+            exit 1
+          }
+          $installerBytes = (Get-Item $installerExe).Length
+          $installerSize = "~" + [math]::Round($installerBytes / 1MB) + " MB"
+          Write-Host "[OK] installer 体积: $installerSize ($installerBytes bytes)"
+
           # v4.1.2: **每版的「主要改动」在自己的文件里**(installer/release-notes/<ver>.md)
           # —— 模板只留跟版本无关的部分(安装 / 验证 / 卸载 / 已知问题 / changelog 链接)。
           # 以前模板里写死的是上一版的正文 ⇒ 每发一版都要手改模板 ⇒ 迟早发出去一份
@@ -474,6 +490,7 @@ jobs:
             -replace '\$\{ISO_DATE\}', $isoDate `
             -replace '\$\{INSTALLER_URL\}', $installerUrl `
             -replace '\$\{SHA256_URL\}', $sha256Url `
+            -replace '\$\{INSTALLER_SIZE\}', $installerSize `
             -replace '\$\{MINOR\}', $minor
 
           # ⚠️ 用 MatchEvaluator 而不是 `-replace`,因为正文里有 `$`(例如

@@ -1,0 +1,639 @@
+// ast_dump.jhyy — `jhyy dump` 的 AST 树打印
+//
+// 2026-11-05:把 `jhyy dump` 从 stub 变成真实现(以前只打一行
+// "not implemented" 然后 exit 1 —— 而 help / 规范 / README 都写着
+// 「打印 AST 供调试」⇒ CLI 在说谎)。
+//
+// 打印形状(**每行一个节点**,子节点缩进一级):
+//
+//   MODULE @hello.jhyy:1:1 no_std=0
+//     FUNC_DECL @hello.jhyy:3:1 name=main_jhyy nparams=0 extern=0
+//       PARAM @hello.jhyy:3:12 name=x
+//         IDENT @hello.jhyy:3:12 name=x
+//       BLOCK @hello.jhyy:4:5 nstmts=1
+//         RETURN @hello.jhyy:5:9
+//           INT @hello.jhyy:5:16 value=42 prim=0
+//
+// 约定:
+//   · **空节点不打印**(例如没有 else 的 if、没有 init 的 return)—— 少一行噪音;
+//   · 数组类字段先打 `n=<count>`,元素随后按子节点逐个列出;
+//   · 位置用 `@文件:行:列`(parser 记的 loc_filename / loc_line / loc_col);
+//   · f64 **没有十进制打印器**(jhyy 的 sprintf 只能带一个 i32,且 Win64 的
+//     变参约定把浮点放在 XMM ⇒ 不能直接调 C sprintf)⇒ 打**位模式**(hex),
+//     精确且不骗人。
+//
+// ⚠️ 单函数实现(一个大 if 链 + 自递归):jhyy **不支持 forward reference**
+// ⇒ 「按 kind 分派到小函数」那条路走不通(小函数要回调 ad_node ⇒ 互相递归)。
+// 这跟 codegen.jhyy 的 cg_expr 是同一个形状(它也是 49 个 kind 的大 if 链)。
+
+import ast;
+import symtab;
+import lexer;
+
+extern fn jh_fputs_stdout(s: *u8) -> i32;
+extern fn sprintf_lld(buf: *u8, fmt: *u8, val: i64) -> i32;
+extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
+
+// ───────────────────────────── 小工具 ─────────────────────────────
+
+// 缩进:一级两个空格
+fn ad_indent(depth: i32) -> i32 {
+    let mut i: i32 = 0 as i32;
+    while i < depth {
+        let _s = jh_fputs_stdout("  " as *u8);
+        i = i + (1 as i32);
+    }
+    return 0 as i32;
+}
+
+// 裸整数(不带 key=)
+fn ad_num(v: i64) -> i32 {
+    let buf = malloc(32 as i64);
+    let _n = sprintf_lld(buf, "%lld" as *u8, v);
+    let _r = jh_fputs_stdout(buf as *u8);
+    free(buf);
+    return 0 as i32;
+}
+
+// " key=value"(字符串)
+fn ad_kv_str(key: *u8, v: *u8) -> i32 {
+    let _a = jh_fputs_stdout(" " as *u8);
+    let _b = jh_fputs_stdout(key as *u8);
+    let _c = jh_fputs_stdout("=" as *u8);
+    return jh_fputs_stdout(v as *u8);
+}
+
+// " key=<i64>"
+fn ad_kv_num(key: *u8, v: i64) -> i32 {
+    let _a = jh_fputs_stdout(" " as *u8);
+    let _b = jh_fputs_stdout(key as *u8);
+    let _c = jh_fputs_stdout("=" as *u8);
+    return ad_num(v);
+}
+
+// " key=0x<16 hex>"
+fn ad_kv_hex64(key: *u8, bits: i64) -> i32 {
+    let _a = jh_fputs_stdout(" " as *u8);
+    let _b = jh_fputs_stdout(key as *u8);
+    let _c = jh_fputs_stdout("=0x" as *u8);
+    let buf = malloc(32 as i64);
+    let mut i: i32 = 0 as i32;
+    while i < (16 as i32) {
+        let shift: i64 = ((15 as i32 - i) as i64) * (4 as i64);
+        let nib: i32 = ((bits >> shift) as i32) & (15 as i32);
+        let mut ch: i32 = (48 as i32) + nib;
+        if nib >= (10 as i32) {
+            ch = (87 as i32) + (nib - (10 as i32));
+        }
+        let p = (buf as i64 + (i as i64)) as *i32;
+        (*p) = ch;
+        i = i + (1 as i32);
+    }
+    let pz = (buf as i64 + (16 as i64)) as *i32;
+    (*pz) = 0 as i32;
+    let _r = jh_fputs_stdout(buf as *u8);
+    free(buf);
+    return 0 as i32;
+}
+
+// Sym → 名字(NULL 安全)
+fn ad_sym_name(s: *u8) -> *u8 {
+    if s == (0 as *u8) {
+        return "(null)" as *u8;
+    }
+    let sym = s as *Sym;
+    let nm = (*sym).name;
+    if nm == (0 as *u8) {
+        return "(null)" as *u8;
+    }
+    return nm;
+}
+
+// 位置 @file:line:col
+fn ad_loc(n: *Node) -> i32 {
+    let _a = jh_fputs_stdout(" @" as *u8);
+    let f = (*n).loc_filename;
+    if f != (0 as *u8) {
+        let _ff = jh_fputs_stdout(f as *u8);
+    }
+    let _c1 = jh_fputs_stdout(":" as *u8);
+    let _l = ad_num((*n).loc_line as i64);
+    let _c2 = jh_fputs_stdout(":" as *u8);
+    let _cc = ad_num((*n).loc_col as i64);
+    return 0 as i32;
+}
+
+// PARAM / FIELD / VARIANT —— 这三类**不是 Node**(是各自的小结构:
+// NodeFuncDeclParam / StructFieldDecl / EnumVariantDecl / NodeFieldInit)
+// ⇒ 没法走 node_kind_name ⇒ 自己打一行「伪节点」,再把它的类型/值当子节点。
+// (不这么做的话,「名字」和「类型」会串到两行上 ⇒ 读的人会认错归属。)
+fn ad_param_line(name: *u8, depth: i32) -> i32 {
+    let _nl = jh_fputs_stdout("\n" as *u8);
+    let _ind = ad_indent(depth);
+    let _p = jh_fputs_stdout("PARAM" as *u8);
+    let _n = ad_kv_str("name" as *u8, name as *u8);
+    return 0 as i32;
+}
+
+fn ad_field_line(name: *u8, depth: i32) -> i32 {
+    let _nl = jh_fputs_stdout("\n" as *u8);
+    let _ind = ad_indent(depth);
+    let _p = jh_fputs_stdout("FIELD" as *u8);
+    let _n = ad_kv_str("name" as *u8, name as *u8);
+    return 0 as i32;
+}
+
+fn ad_variant_line(name: *u8, depth: i32) -> i32 {
+    let _nl = jh_fputs_stdout("\n" as *u8);
+    let _ind = ad_indent(depth);
+    let _p = jh_fputs_stdout("VARIANT" as *u8);
+    let _n = ad_kv_str("name" as *u8, name as *u8);
+    return 0 as i32;
+}
+
+// 返回类型:同样不是独立节点(是函数节点的字段)⇒ 打个 "RET" 伪节点,
+// 免得它跟 PARAM 同一缩进 ⇒ 读的人会以为那是第三个参数。
+fn ad_ret_line(depth: i32) -> i32 {
+    let _nl = jh_fputs_stdout("\n" as *u8);
+    let _ind = ad_indent(depth);
+    let _p = jh_fputs_stdout("RET" as *u8);
+    return 0 as i32;
+}
+
+// ════════════════════════════════════════════════════
+// ad_node — 打印一棵 AST 子树
+// ════════════════════════════════════════════════════
+
+fn ad_node(n: *Node, depth: i32) -> i32 {
+    if n == (0 as *u8) {
+        return 0 as i32;
+    }
+    // 换行打在**每个节点自己**的行首(depth 0 除外 —— 那行前面没有东西)
+    // ⇒ 父节点的行在第一个子节点开打时就结束了 ⇒ 缩进层级对得上。
+    if depth > (0 as i32) {
+        let _nl = jh_fputs_stdout("\n" as *u8);
+    }
+    let _ind = ad_indent(depth);
+    let kind = (*n).kind;
+    let _kn = jh_fputs_stdout(node_kind_name(kind) as *u8);
+    let _lc = ad_loc(n);
+    let mut child: i32 = depth + (1 as i32);
+
+    // ─── literals ───
+    if kind == NODE_INT() {
+        let di = node_int_data(n);
+        let _v = ad_kv_num("value" as *u8, (*di).value);
+        let _p = ad_kv_num("prim" as *u8, (*di).prim as i64);
+        return 0 as i32;
+    }
+    if kind == NODE_FLOAT() {
+        let df = node_float_data(n);
+        // f64 的 8 字节原样读出来当位模式
+        let tmp = malloc(8 as i64);
+        let _cp = memcpy(tmp, df as *u8, (8 as i64));
+        let bits = *(tmp as *i64);
+        free(tmp);
+        let _v = ad_kv_hex64("bits" as *u8, bits);
+        let _p = ad_kv_num("prim" as *u8, (*df).prim as i64);
+        return 0 as i32;
+    }
+    if kind == NODE_STRING() {
+        let ds = node_string_data(n);
+        let _c = jh_fputs_stdout(" chars=\"" as *u8);
+        let _ch = jh_fputs_stdout((*ds).chars as *u8);
+        let _q = jh_fputs_stdout("\"" as *u8);
+        let _l = ad_kv_num("len" as *u8, (*ds).len);
+        return 0 as i32;
+    }
+    if kind == NODE_CHAR() {
+        let dc = node_char_data(n);
+        let _v = ad_kv_num("ch" as *u8, (*dc).ch as i64);
+        return 0 as i32;
+    }
+    if kind == NODE_BOOL() {
+        let db = node_bool_data(n);
+        if (*db).value != (0 as i32) {
+            let _t = ad_kv_str("value" as *u8, "true" as *u8);
+        } else {
+            let _f = ad_kv_str("value" as *u8, "false" as *u8);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_NULL() {
+        return 0 as i32;
+    }
+
+    // ─── expressions ───
+    if kind == NODE_IDENT() {
+        let did = node_ident_data(n);
+        let _v = ad_kv_str("name" as *u8, ad_sym_name((*did).sym) as *u8);
+        return 0 as i32;
+    }
+    if kind == NODE_UNARY() {
+        let du = node_unary_data(n);
+        let _o = ad_kv_str("op" as *u8, token_kind_name((*du).op) as *u8);
+        let _e = ad_node((*du).expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_BINARY() {
+        let dbn = node_binary_data(n);
+        let _o = ad_kv_str("op" as *u8, token_kind_name((*dbn).op) as *u8);
+        let _l = ad_node((*dbn).left as *Node, child);
+        let _r = ad_node((*dbn).right as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_CALL() {
+        let dc2 = node_call_data(n);
+        // 计数**先打** —— 否则它会落到第一个子节点的行尾(读的人会以为
+        // "nargs" 是那个子节点的属性)
+        let _n = ad_kv_num("nargs" as *u8, (*dc2).nargs);
+        let _c = ad_node((*dc2).callee as *Node, child);
+        let mut i: i64 = 0 as i64;
+        while i < (*dc2).nargs {
+            let el = *(((*dc2).args as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        if (*dc2).ntype_args > (0 as i64) {
+            let _t = ad_kv_num("ntype_args" as *u8, (*dc2).ntype_args);
+            let mut j: i64 = 0 as i64;
+            while j < (*dc2).ntype_args {
+                let el2 = *(((*dc2).type_args as i64 + j * (8 as i64)) as **Node);
+                let _a2 = ad_node(el2, child);
+                j = j + (1 as i64);
+            }
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_QUALIFIED_CALL() {
+        let dq = node_qualified_call_data(n);
+        let _n = ad_kv_num("nargs" as *u8, (*dq).nargs);
+        let _m = ad_node((*dq).module as *Node, child);
+        let _f = ad_node((*dq).function as *Node, child);
+        let mut i: i64 = 0 as i64;
+        while i < (*dq).nargs {
+            let el = *(((*dq).args as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_FIELD() {
+        let dfd = node_field_data(n);
+        let _e = ad_node((*dfd).expr as *Node, child);
+        let _f = ad_kv_str("field" as *u8, (*dfd).field as *u8);
+        return 0 as i32;
+    }
+    if kind == NODE_INDEX() {
+        let dix = node_index_data(n);
+        let _e = ad_node((*dix).expr as *Node, child);
+        let _i = ad_node((*dix).index as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_CAST() {
+        let dca = node_cast_data(n);
+        let _e = ad_node((*dca).expr as *Node, child);
+        let _t = ad_node((*dca).target_type as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ARRAY_TYPE() {
+        let dat = node_array_type_data(n);
+        let _e = ad_node((*dat).elem_type as *Node, child);
+        let _c = ad_node((*dat).count_expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ARRAY_LIT() {
+        let dal = node_array_lit_data(n);
+        let _n = ad_kv_num("nelems" as *u8, (*dal).nelems);
+        let mut i: i64 = 0 as i64;
+        while i < (*dal).nelems {
+            let el = *(((*dal).elems as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_SLICE_TYPE() {
+        let dst = node_slice_type_data(n);
+        let _e = ad_node((*dst).elem_type as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_SLICE_LIT() {
+        let dsl = node_slice_lit_data(n);
+        let _a = ad_node((*dsl).array as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_SLICE_RANGE() {
+        let dsr = node_slice_range_data(n);
+        let _b = ad_node((*dsr).base as *Node, child);
+        let _s = ad_node((*dsr).start as *Node, child);
+        let _e = ad_node((*dsr).end as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_SIZEOF() {
+        let dsz = node_sizeof_data(n);
+        let _t = ad_node((*dsz).target as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ALIGNOF() {
+        let dal2 = node_alignof_data(n);
+        let _t = ad_node((*dal2).target as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ADDR_OF() {
+        let dao = node_addr_of_data(n);
+        let _m = ad_kv_num("mut" as *u8, (*dao).is_mut as i64);
+        let _e = ad_node((*dao).expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_DEREF() {
+        let dde = node_deref_data(n);
+        let _e = ad_node((*dde).expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_VOLATILE_TYPE() {
+        let dvt = node_volatile_type_data(n);
+        let _i = ad_node((*dvt).inner as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_REF_TYPE() {
+        let drt = node_ref_type_data(n);
+        let _m = ad_kv_num("mut" as *u8, (*drt).is_mut as i64);
+        let _i = ad_node((*drt).inner as *Node, child);
+        if (*drt).lifetime != (0 as *u8) {
+            let _l = ad_node((*drt).lifetime as *Node, child);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_BUILTIN_FENCE() {
+        let dbf = node_builtin_fence_data(n);
+        let _k = ad_kv_num("fence" as *u8, (*dbf).kind);
+        return 0 as i32;
+    }
+    if kind == NODE_CLOSURE_LITERAL() {
+        let dcl = node_closure_data(n);
+        let _n = ad_kv_num("nparams" as *u8, (*dcl).nparams);
+        let mut i: i64 = 0 as i64;
+        while i < (*dcl).nparams {
+            let p = ((*dcl).params as i64 + i * (16 as i64)) as *NodeFuncDeclParam;
+            let _pl = ad_param_line(ad_sym_name((*p).sym) as *u8, child);
+            let _t = ad_node((*p).type_annot as *Node, child + (1 as i32));
+            i = i + (1 as i64);
+        }
+        let _b = ad_node((*dcl).body as *Node, child);
+        return 0 as i32;
+    }
+
+    // ─── statements ───
+    if kind == NODE_BLOCK() {
+        let dbk = node_block_data(n);
+        let _n = ad_kv_num("nstmts" as *u8, (*dbk).nstmts);
+        let mut i: i64 = 0 as i64;
+        while i < (*dbk).nstmts {
+            let el = *(((*dbk).stmts as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_IF() {
+        let dif = node_if_data(n);
+        let _c = ad_node((*dif).cond as *Node, child);
+        let _t = ad_node((*dif).then_body as *Node, child);
+        let _e = ad_node((*dif).else_body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_WHILE() {
+        let dwl = node_while_data(n);
+        let _c = ad_node((*dwl).cond as *Node, child);
+        let _b = ad_node((*dwl).body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_FOR() {
+        let dfr = node_for_data(n);
+        let _v = ad_kv_str("var" as *u8, ad_sym_name((*dfr).var) as *u8);
+        let _s = ad_kv_num("slice" as *u8, (*dfr).is_slice as i64);
+        let _a = ad_node((*dfr).start as *Node, child);
+        let _b = ad_node((*dfr).end as *Node, child);
+        let _c = ad_node((*dfr).body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_LET() {
+        let dlt = node_let_data(n);
+        let _m = ad_kv_num("mut" as *u8, (*dlt).is_mutable as i64);
+        let _n = ad_kv_str("name" as *u8, ad_sym_name((*dlt).sym) as *u8);
+        let _t = ad_node((*dlt).type_annot as *Node, child);
+        let _i = ad_node((*dlt).init as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ASSIGN() {
+        let das = node_assign_data(n);
+        let _t = ad_node((*das).target as *Node, child);
+        let _v = ad_node((*das).value as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_RETURN() {
+        let drt2 = node_return_data(n);
+        let _e = ad_node((*drt2).expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_BREAK() {
+        return 0 as i32;
+    }
+    if kind == NODE_CONTINUE() {
+        return 0 as i32;
+    }
+    if kind == NODE_DEFER() {
+        let ddf = node_defer_data(n);
+        let _e = ad_node((*ddf).expr as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_ASM_BLOCK() {
+        let dab = node_asm_block_data(n);
+        let _t = ad_kv_str("text" as *u8, (*dab).text as *u8);
+        let _n = ad_kv_num("noperands" as *u8, (*dab).noperands);
+        let mut i: i64 = 0 as i64;
+        while i < (*dab).noperands {
+            let el = *(((*dab).operands as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_EXPR_STMT() {
+        let des = node_expr_stmt_data(n);
+        let _e = ad_node((*des).expr as *Node, child);
+        return 0 as i32;
+    }
+
+    // ─── match + patterns ───
+    if kind == NODE_MATCH() {
+        let dmt = node_match_data(n);
+        let _n = ad_kv_num("narms" as *u8, (*dmt).narms);
+        let _s = ad_node((*dmt).subject as *Node, child);
+        let mut i: i64 = 0 as i64;
+        while i < (*dmt).narms {
+            let el = *(((*dmt).arms as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_MATCH_ARM() {
+        let dma = node_match_arm_data(n);
+        let _p = ad_node((*dma).pattern as *Node, child);
+        let _b = ad_node((*dma).body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_LIT() {
+        let dpl = node_pattern_lit_data(n);
+        let _v = ad_kv_num("value" as *u8, (*dpl).value);
+        let _p = ad_kv_num("prim" as *u8, (*dpl).prim as i64);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_IDENT() {
+        let dpi = node_pattern_ident_data(n);
+        let _n = ad_kv_str("name" as *u8, ad_sym_name((*dpi).sym) as *u8);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_ENUM() {
+        let dpe = node_pattern_enum_data(n);
+        let _t = ad_kv_str("type" as *u8, ad_sym_name((*dpe).type_sym) as *u8);
+        let _v = ad_kv_str("variant" as *u8, ad_sym_name((*dpe).variant_sym) as *u8);
+        let _i = ad_node((*dpe).inner as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_RANGE() {
+        let dpr = node_pattern_range_data(n);
+        let _lo = ad_node((*dpr).lo as *Node, child);
+        let _hi = ad_node((*dpr).hi as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_OR() {
+        let dpo = node_pattern_or_data(n);
+        let _l = ad_node((*dpo).left as *Node, child);
+        let _r = ad_node((*dpo).right as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_PATTERN_WILD() {
+        return 0 as i32;
+    }
+
+    // ─── struct / enum ───
+    if kind == NODE_STRUCT_LIT() {
+        let dsl2 = node_struct_lit_data(n);
+        let _t = ad_kv_str("type" as *u8, ad_sym_name((*dsl2).type_sym) as *u8);
+        let _n = ad_kv_num("nfields" as *u8, (*dsl2).nfields);
+        let mut i: i64 = 0 as i64;
+        while i < (*dsl2).nfields {
+            let f = ((*dsl2).fields as i64 + i * (16 as i64)) as *NodeFieldInit;
+            let _fl = ad_field_line((*f).name as *u8, child);
+            let _fv = ad_node((*f).value as *Node, child + (1 as i32));
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_ENUM_VARIANT() {
+        let dev = node_enum_variant_data(n);
+        let _t = ad_kv_str("type" as *u8, ad_sym_name((*dev).type_sym) as *u8);
+        let _v = ad_kv_str("variant" as *u8, ad_sym_name((*dev).variant_sym) as *u8);
+        let _p = ad_node((*dev).payload as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_STRUCT_DEF() {
+        let dsd = node_struct_def_data(n);
+        let _n = ad_kv_num("nfields" as *u8, (*dsd).nfields);
+        let mut i: i64 = 0 as i64;
+        while i < (*dsd).nfields {
+            let f = ((*dsd).fields as i64 + i * (16 as i64)) as *StructFieldDecl;
+            let _fl = ad_field_line((*f).name as *u8, child);
+            let _ft = ad_node((*f).type_annot as *Node, child + (1 as i32));
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+    if kind == NODE_ENUM_DEF() {
+        let ded = node_enum_def_data(n);
+        let _n = ad_kv_num("nvariants" as *u8, (*ded).nvariants);
+        let mut i: i64 = 0 as i64;
+        while i < (*ded).nvariants {
+            let v = ((*ded).variants as i64 + i * (16 as i64)) as *EnumVariantDecl;
+            let _vl = ad_variant_line((*v).name as *u8, child);
+            let _vt = ad_node((*v).payload_type as *Node, child + (1 as i32));
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+
+    // ─── decls ───
+    if kind == NODE_FUNC_DECL() {
+        let dfd2 = node_func_decl_data(n);
+        let _nm = ad_kv_str("name" as *u8, ad_sym_name((*dfd2).sym) as *u8);
+        let _n = ad_kv_num("nparams" as *u8, (*dfd2).nparams);
+        let _x = ad_kv_num("extern" as *u8, (*dfd2).is_extern as i64);
+        let _inl = ad_kv_num("inline" as *u8, (*dfd2).is_inline as i64);
+        let _nk = ad_kv_num("naked" as *u8, (*dfd2).is_naked as i64);
+        if (*dfd2).link_section != (0 as *u8) {
+            let _ls = ad_kv_str("section" as *u8, (*dfd2).link_section as *u8);
+        }
+        let mut i: i64 = 0 as i64;
+        while i < (*dfd2).nparams {
+            let p = ((*dfd2).params as i64 + i * (16 as i64)) as *NodeFuncDeclParam;
+            let _pl = ad_param_line(ad_sym_name((*p).sym) as *u8, child);
+            let _pt = ad_node((*p).type_annot as *Node, child + (1 as i32));
+            i = i + (1 as i64);
+        }
+        if (*dfd2).ret_type != (0 as *u8) {
+            let _rl = ad_ret_line(child);
+            let _rt = ad_node((*dfd2).ret_type as *Node, child + (1 as i32));
+        }
+        let _bd = ad_node((*dfd2).body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_TYPE_DECL() {
+        let dtd = node_type_decl_data(n);
+        let _nm = ad_kv_str("name" as *u8, ad_sym_name((*dtd).sym) as *u8);
+        let _n = ad_kv_num("ntype_params" as *u8, (*dtd).ntype_params);
+        let _b = ad_node((*dtd).body as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_EXTERN_DECL() {
+        let dxd = node_extern_decl_data(n);
+        let _nm = ad_kv_str("name" as *u8, ad_sym_name((*dxd).sym) as *u8);
+        return 0 as i32;
+    }
+    if kind == NODE_IMPORT_DECL() {
+        let did2 = node_import_decl_data(n);
+        let _nm = ad_kv_str("name" as *u8, ad_sym_name((*did2).sym) as *u8);
+        return 0 as i32;
+    }
+    if kind == NODE_CONST_DECL() {
+        let dcd = node_const_decl_data(n);
+        let _nm = ad_kv_str("name" as *u8, ad_sym_name((*dcd).sym) as *u8);
+        let _t = ad_node((*dcd).type_annot as *Node, child);
+        let _i = ad_node((*dcd).init as *Node, child);
+        return 0 as i32;
+    }
+    if kind == NODE_MODULE() {
+        let dmd = node_module_data(n);
+        let _ns = ad_kv_num("no_std" as *u8, (*dmd).is_no_std as i64);
+        let _n = ad_kv_num("ndecls" as *u8, (*dmd).ndeccls);
+        let mut i: i64 = 0 as i64;
+        while i < (*dmd).ndeccls {
+            let el = *(((*dmd).decls as i64 + i * (8 as i64)) as **Node);
+            let _a = ad_node(el, child);
+            i = i + (1 as i64);
+        }
+        return 0 as i32;
+    }
+
+    // 未知 kind:只打名字(不猜)
+    return 0 as i32;
+}
+
+// ad_dump_module — 入口:打印整个 module
+fn ad_dump_module(m: *Node) -> i32 {
+    let _r = ad_node(m, 0 as i32);
+    let _nl = jh_fputs_stdout("\n" as *u8);
+    return 0 as i32;
+}

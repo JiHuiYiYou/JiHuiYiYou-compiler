@@ -89,6 +89,18 @@ MAIN_JHYY = Path("compiler/src0/main.jhyy")
 CHANGELOG = Path("docs/archive/logs/v4/changelog-v4.0.0.md")
 RELEASE_NOTES_DIR = Path("installer/release-notes")
 
+# FACTS.md § 1 的「产物 | 体积」表 —— **产物体积的落点**。
+#
+# 为什么体积必须**实测**:这两个数(55 / 28 MB)以前是**手打的** —— 打包变了没人知道。
+# 而 docs 门 `check_artifact_sizes` 只保证「FACTS 与两份 README 一致」,
+# **不保证为真**(它自己的注释就写着这句)⇒ 「一致但假」正是这个仓最防的那类失效。
+# ⇒ 体积在 `finalize` 这一步量(产物就在手边),当场回填。
+FACTS_MD = Path("docs/internal/FACTS.md")
+
+# 提到产物名的**全部**文件 —— 体积要在这几处同步,否则 docs 门会因
+# 「FACTS 说 56 / README 说 55」而红(那个门只比一致性,不比谁对)。
+SIZE_FACADE = [FACTS_MD, Path("README.md"), Path("README.zh-CN.md")]
+
 # 两份 README 的版本徽章 —— shields.io URL 里的 label 不同(英文 `version` / 中文 `版本`),
 # 但版本串的位置一样(`badge/<label>-vX.Y.Z-<color>`)⇒ 同一个正则模板 + 各自的 label。
 # **为什么要进这道门**:徽章是读者第一眼看到的版本号。2026-10-30 实测:两道门
@@ -274,6 +286,19 @@ def fingerprints(version: str) -> dict[str, list[str]]:
         ):
             scan(path, pat, rel(path) + " " + label, optional=True)
 
+    # FACTS.md § 1 的产物表 —— 名字里的版本也必须 == VERSION。
+    #
+    # 为什么补(2026-11-05 实测):`set` 刷两份 README 的产物名,**不碰 FACTS.md**
+    # ⇒ 刷完版本,README 指向新版的产物,FACTS 的产物表还写着**上一版**的名字
+    # + 旧体积 —— 而**所有门都绿**(facades 门只比两份 README 互不打架)。
+    # ⇒ 现在 `finalize` 会把 FACTS 的产物名 + 体积一起刷成实测值,这道门盯着它。
+    for pat, label in (
+        (r"jhyy-installer-(\d+\.\d+\.\d+)\.exe", "安装器名"),
+        (r"jhyy-compiler-(\d+\.\d+\.\d+)\.msi", "MSI 名"),
+        (r"jhyy-lang-(\d+\.\d+\.\d+)\.vsix", "扩展名"),
+    ):
+        scan(FACTS_MD, pat, rel(FACTS_MD) + " " + label, optional=True)
+
     wdir = ROOT / WINGET_BASE / version
     if not wdir.is_dir():
         out[f"{WINGET_BASE.as_posix()}/{version}/"] = ["<目录缺失>"]
@@ -384,7 +409,8 @@ def cmd_set(new: str, *, dry_run: bool = False) -> int:
     if new != old:
         write_version(new)
 
-    # 编译器横幅(2 处字面量)
+    # 编译器横幅(1 处字面量 —— 2026-11-05 起:`jhyy` 与 `jhyy --help` 的两份
+    # help 合成一份 `print_help()` ⇒ main.jhyy 里只剩这一处)
     n = replace_in_file(
         ROOT / MAIN_JHYY,
         [
@@ -586,6 +612,59 @@ def cmd_check() -> int:
 # --------------------------------------------------------------------------
 # finalize —— 回填 sha256(产物出来之后)
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# 产物体积:**实测回填**
+# --------------------------------------------------------------------------
+def _fmt_mb(nbytes: int) -> str:
+    """字节 → `~N MB`。
+
+    ⚠️ **必须与 release.yml 的算法一致**(那边是 `[math]::Round($bytes / 1MB)`):
+    1MB = 1024²、四舍五入到整 MB。两边算出同一个数,release note 与 FACTS
+    才不会各说各话。
+    """
+    return f"~{round(nbytes / (1024 * 1024))} MB"
+
+
+def _backfill_size(path: Path, art_re: str, size: str) -> int:
+    """把「提到该产物的行」上的体积改成实测值 —— 只改**第一个** MB 数字。
+
+    只改第一个:一行里理论上可能有别的 MB(例如「含 92 MB 工具链」)⇒ 改多了
+    就是替人做主。剩下的若真不一致,docs 门 `check_artifact_sizes` 会指出来。
+    """
+    if not path.is_file():
+        return 0
+    text = read_text(path)
+    lines = text.split("\n")
+    n = 0
+    for i, line in enumerate(lines):
+        if not re.search(art_re, line):
+            continue
+        new, k = re.subn(r"~[\d.]+\s*MB", size, line, count=1)
+        if k:
+            lines[i] = new
+            n += k
+    if n:
+        write_text(path, "\n".join(lines))
+    return n
+
+
+def _sync_artifact_names(path: Path, version: str) -> int:
+    """把产物名里的**版本段**刷成当前 VERSION。
+
+    为什么也要刷:`bump_version.py set` 只刷两份 README,**不碰 FACTS.md**
+    ⇒ 刷完版本,README 指向新版的产物,FACTS 的产物表却还写着**上一版**的
+    名字 + 旧体积 —— 而当时**所有门都绿**。
+    """
+    if not path.is_file():
+        return 0
+    pairs = [
+        (r"(jhyy-installer-)[\d.]+(\.exe)", rf"\g<1>{version}\g<2>"),
+        (r"(jhyy-compiler-)[\d.]+(\.msi)", rf"\g<1>{version}\g<2>"),
+        (r"(jhyy-lang-)[\d.]+(\.vsix)", rf"\g<1>{version}\g<2>"),
+    ]
+    return replace_in_file(path, pairs, required=False)
+
+
 def cmd_finalize(artifact: str | None = None) -> int:
     version = read_version()
     art_dir = ROOT / "installer" / "build-artifacts"
@@ -633,6 +712,35 @@ def cmd_finalize(artifact: str | None = None) -> int:
             ],
         )
         print(f"[bump_version] {rel(wini)}: {n} 处")
+
+    # ── 产物体积:**实测回填**(FACTS.md § 1 + 两份 README)────────────
+    #
+    # 这一步**产物就在手边** ⇒ 体积就在这里量、当场回填。
+    # 三个文件写的是**同一个数** ⇒ 同一份实测值写进三处:
+    #   · docs 门的「一致性」成立(FACTS vs 两份 README)
+    #   · 「为真」由**这次测量**保证 —— 以前它是手打的,而那个门只比一致性
+    #     (`check_artifact_sizes` 的注释原话:「这只保证「一致」,不保证「为真」」)
+    art_dir = ROOT / "installer" / "build-artifacts"
+    msi_file = art_dir / f"jhyy-compiler-{version}.msi"
+    measures = [(installer_exe, r"jhyy-installer-[\d.]+\.exe")]
+    if msi_file.is_file():
+        measures.append((msi_file, r"jhyy-compiler-[\d.]+\.msi"))
+    else:
+        print(f"[bump_version] ⚠ 找不到 {rel(msi_file)} —— MSI 体积这轮**不实测**"
+              f"(FACTS.md 与两份 README 里 MSI 那行保持原样,别当成已回填)")
+    jhyy_bin = ROOT / "compiler" / "build" / "bin" / "jhyy.exe"
+    if jhyy_bin.is_file():
+        measures.append((jhyy_bin, r"jhyy\.exe"))
+
+    for art, art_re in measures:
+        size = _fmt_mb(art.stat().st_size)
+        touched = [(p, _backfill_size(p, art_re, size)) for p in SIZE_FACADE]
+        where = ", ".join(f"{rel(p)}×{k}" for p, k in touched if k) or "（没找到可写的行）"
+        print(f"[bump_version] {rel(art)} = {size} ({art.stat().st_size} bytes) → {where}")
+
+    # FACTS.md 产物名里的**版本段** —— `set` 不碰 FACTS ⇒ 这一格以前没人管
+    n = _sync_artifact_names(FACTS_MD, version)
+    print(f"[bump_version] {rel(FACTS_MD)}: 产物名版本同步 {n} 处")
 
     print("")
     print("[bump_version] 回填完成。跑 `check` 确认零漂移。")

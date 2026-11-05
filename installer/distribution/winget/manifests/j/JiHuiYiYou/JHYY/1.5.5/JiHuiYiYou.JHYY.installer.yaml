@@ -1,3 +1,5 @@
+# Created with winget manifest schema v1.9.0
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
 # winget installer manifest - JHYY 1.5.5
 #
 # Sprint v1.5.5 — InstallerSha256 to be filled by GH Actions release workflow
@@ -8,7 +10,7 @@
 # Why Burn bundle: WiX 4 Burn bundles are first-class winget installers
 # (`InstallerType: burn`); winget CLI runs them with `BurnArgs`.
 
-PackageLocale: en-US
+PackageIdentifier: JiHuiYiYou.JHYY
 PackageVersion: 1.5.5
 Platform:
   - Windows.Desktop
@@ -17,6 +19,8 @@ InstallerType: burn
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v1.5.5/jhyy-installer-1.5.5.exe
+    # ⚠️ 这一版的 InstallerSha256 是**占位符** —— 当年 release workflow 还没接上,
+    # 而 v1.5.5 的发行资产**已经 404** ⇒ 这个目录**永远不可发布**(历史快照,保留原样)。
     InstallerSha256: <FILL_AT_RELEASE_TIME_FROM_SHA256.txt>
     InstallerSwitches:
       Silent: /quiet
@@ -25,4 +29,4 @@ Installers:
     Commands:
       - jhyy
 ManifestType: installer
-ManifestVersion: 1.5.0
+ManifestVersion: 1.9.0

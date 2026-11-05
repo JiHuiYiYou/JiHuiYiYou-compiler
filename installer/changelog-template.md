@@ -1,7 +1,7 @@
 # JHYY ${VERSION} Release
 
 > **Release date**: ${ISO_DATE}
-> **Download**: jhyy-installer-${VERSION}.exe (~55MB Burn bundle — 含 .NET 8 Desktop Runtime;v4.1.0 起另含内置 GCC 工具链)
+> **Download**: jhyy-installer-${VERSION}.exe (${INSTALLER_SIZE} Burn bundle — 含 .NET 8 Desktop Runtime;v4.1.0 起另含内置 GCC 工具链)
 > **SHA256**: 见 SHA256.txt
 > **Compatibility**: Windows 10 1809+ / Windows 11 / Windows Server 2019+ (x64)
 
@@ -40,16 +40,22 @@ ${MAIN_CHANGES}
 ## 已知问题
 
 - ⚠️ **代码未签名** — Windows SmartScreen 弹 "Unknown publisher" warning, 选 "More info → Run anyway"。正式签名 (Authenticode) 待排期 (需 HSM / EV cert)
-- ⚠️ **winget / scoop 还没提交到上游仓库** — 本仓里的 manifest 只是 *reference*; 要真能 `winget install` / `scoop install` 还得向上游提 PR (路径见下)
+- ⚠️ **winget / scoop 至今没有提交到上游仓库** — 本仓里的 manifest 只是 *reference*; 要真能 `winget install` / `scoop install` 还得向上游提 PR (路径见下)。上游 PR **一次都没提过**, 排期表里也**没有这一格**。
 - ℹ️ **内置 gcc 的版本是钉死的** — 发行时钉的那个版本随包走(产物可复现)。想用更新或更旧的 gcc:设 `JHY_GCC`(见「安装」段)
 
 ## 完整 changelog
 
 见 [`docs/archive/logs/v4/changelog-v4.0.0.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v4/changelog-v4.0.0.md)(v4.x 的 umbrella;各版本的段都在里面)
 
-## 第三方包管理 (manifest reference, 尚未提交到上游)
+## 第三方包管理 (manifest 已在仓内备好, 尚未提交到上游)
 
-- **winget**: `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/${VERSION}/` — 3 manifest 文件 (version + installer + locale en-US)
-- **scoop**: `installer/distribution/scoop/jhyy.json` — single-file manifest
+- **winget**: `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/${VERSION}/` — 3 manifest 文件 (version + installer + locale en-US) —— **已通过本地 `winget validate`(零警告)**
+- **scoop**: `installer/distribution/scoop/jhyy.json` — single-file manifest(`checkver` / `autoupdate` 的正则已对着线上实测命中)
 
-实际 PR 到 [winget-pkgs](https://github.com/microsoft/winget-pkgs) / [ScoopInstaller/Main](https://github.com/ScoopInstaller/Main) 待排期 (per `docs/archive/plans/v1/v1.5.0任务清单 + 概要设计.md` 决策-11)。
+实际 PR 到 [winget-pkgs](https://github.com/microsoft/winget-pkgs) / [ScoopInstaller/Main](https://github.com/ScoopInstaller/Main)
+**至今一次都没提过**, 排期表里也**没有这一格** —— 最初的决定
+([`v1.5.0 任务清单 + 概要设计`](../docs/archive/plans/v1/v1.5.0任务清单%20+%20概要设计.md) 决策-11)
+把它推到 v2.x, 而 v2.x 轴早已终结。
+> 最近一次核对上游:**2026-11-05** —— winget-pkgs 无 `manifests/j/JiHuiYiYou/JHYY/` 路径,
+> ScoopInstaller/Main 无 `bucket/jhyy.json`。
+> ⇒ 将来若发布:scoop **先走个人 bucket**, winget 走 winget-pkgs 的 PR。

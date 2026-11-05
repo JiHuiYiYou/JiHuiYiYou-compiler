@@ -97,14 +97,22 @@ _P, _S, _T = _N["pass"], _N["skip"], _N["total"]
 _SC, _RN, _RA = _N["scanned"], _N["runnable"], _N["assertions"]
 
 # ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
+# ⚠️ **模板必须与门面里那几行逐字一致** —— 门面改了措辞或分隔符,这里要跟着改,
+#   否则 `check_points()` 数到 0 处 ⇒ 报「变异点找不到」⇒ 那条变异被判漏网。
+#   (2026-11-05:门面把回归通过数从 `N/N passed (all with assertions)` 改成
+#    `N passed`、把断言审计那行从 `/` 分隔改成 `·` 分隔 ⇒ 6 个模板同步更新。)
+#
+# ⚠️ **门面里同一个数只在一处复述** —— 代码块一行 + 状态表一行。整链变异靠把
+#   这两处一起改掉来构造「自洽但假」;若门面在第三处也写了同一个数,那处不改
+#   ⇒ docs 门会提前变红 ⇒ 测出来的就不是「自洽」而是「不一致」了。
 # README.md(英文门面)
-_RB_EN = f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T} total)"
-_RT_EN = f"| `regress.py` | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) |"
-_AU_EN = f"| Assertion audit | {_SC} scanned / {_RN} runnable / {_RA} real assertions / 0 zero-signal |"
+_RB_EN = f"# => {_P} passed, {_S} skipped ({_T} total)"
+_RT_EN = f"| `regress.py` (regression suite) | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) |"
+_AU_EN = f"| Assertion audit | {_SC} scanned · {_RN} runnable · {_RA} real assertions · 0 zero-signal |"
 # README.zh-CN.md(中文门面)
-_RB_ZH = f"# => {_P}/{_P} passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of {_T} total)"
-_RT_ZH = f"| `regress.py` | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**({_T} total) |"
-_AU_ZH = f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b {_SC} / \u53ef\u8dd1 {_RN} / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"
+_RB_ZH = f"# => {_P} passed, {_S} skipped ({_T} total)"
+_RT_ZH = f"| `regress.py`(\u56de\u5f52\u5957\u4ef6) | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**({_T} total) |"
+_AU_ZH = f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b {_SC} \u00b7 \u53ef\u8dd1 {_RN} \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7 \u96f6\u4fe1\u53f7 0 |"
 # FACTS.md(事实单一真相源)
 _FT_REG = f"**{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff08{_T} total\uff09"
 _FT_AUD = f"\u626b\u63cf {_SC} \u00b7 \u53ef\u8dd1 {_RN} \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"
@@ -115,35 +123,35 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
     ("代码块里的回归通过数", [(
         "README.md",
         _RB_EN,
-        f"# => {_P - 1}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T} total)")]),
+        f"# => {_P - 1} passed, {_S} skipped ({_T} total)")]),
     # (b) 盲区:上下文关键词必须同一行 ⇒ 「标题在上、数字在下」免检
     ("标题在上、数字在下的场景", [(
         "README.md",
         _RB_EN,
-        f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S} skipped (of {_T - 1} total)")]),
+        f"# => {_P} passed, {_S} skipped ({_T - 1} total)")]),
     # (c) 盲区:词表窄 ⇒ 断言审计那套词汇完全在门外
     ("断言审计的 scanned 数", [(
         "README.md",
         _AU_EN,
-        f"| Assertion audit | {_SC - 1} scanned / {_RN} runnable / {_RA} real assertions / 0 zero-signal |")]),
+        f"| Assertion audit | {_SC - 1} scanned · {_RN} runnable · {_RA} real assertions · 0 zero-signal |")]),
     ("断言审计的 runnable 数（中文门面）", [(
         "README.zh-CN.md",
         _AU_ZH,
-        f"| 断言强度审计 | 扫 {_SC} / 可跑 {_RN - 1} / 真断言 {_RA} / 零信号 0 |")]),
+        f"| 断言强度审计 | 扫 {_SC} · 可跑 {_RN - 1} · 真断言 {_RA} · 零信号 0 |")]),
     ("断言审计的 real assertions 数", [(
         "README.md",
         _AU_EN,
-        f"| Assertion audit | {_SC} scanned / {_RN} runnable / {_RA - 1} real assertions / 0 zero-signal |")]),
+        f"| Assertion audit | {_SC} scanned · {_RN} runnable · {_RA - 1} real assertions · 0 zero-signal |")]),
     # (d) 盲区:含日期的行被豁免 ⇒ 加个日期就免检
     ("加日期免检（旧漏洞）", [(
         "README.md",
         _RT_EN,
-        f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) | (2026-11-04 实测)")]),
+        f"| `regress.py` (regression suite) | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) | (2026-11-04 实测)")]),
     # (e) SKIP / total / 门数
     ("SKIP 数", [(
         "README.md",
         _RB_EN,
-        f"# => {_P}/{_P} passed (all with assertions), 0 failed, {_S + 1} skipped (of {_T} total)")]),
+        f"# => {_P} passed, {_S + 1} skipped ({_T} total)")]),
     ("artifact_checks 门数", [(
         "README.md",
         "| `artifact_checks.sh` | **18 PASS / 0 FAIL** |",
@@ -157,6 +165,11 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         "README.md",
         "| ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |",
         "| ~42 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |")]),
+    # (g) release notes 模板里写死体积 —— 模板**每版都发**,写死 = 每版都发错
+    ("模板里写死 installer 体积", [(
+        "installer/changelog-template.md",
+        "${INSTALLER_SIZE} Burn bundle",
+        "${INSTALLER_SIZE} Burn bundle (~55MB)")]),
     # (f) 台账的前向版本标签:指向一个不存在的版本
     ("台账标签指向不存在的版本", [(
         "docs/internal/workarounds.md",
@@ -205,16 +218,16 @@ def _chain_mutations() -> list[tuple[str, list[Edit]]]:
              f"**999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff081019 total\uff09"),
             ("README.md",
              _RB_EN,
-             f"# => 999/999 passed (all with assertions), 0 failed, {_S} skipped (of 1019 total)"),
+             f"# => 999 passed, {_S} skipped (1019 total)"),
             ("README.md",
              _RT_EN,
-             f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** (1019 total) |"),
+             f"| `regress.py` (regression suite) | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP** (1019 total) |"),
             ("README.zh-CN.md",
              _RB_ZH,
-             f"# => 999/999 passed (\u5168\u90e8\u6709\u65ad\u8a00), 0 failed, {_S} skipped (of 1019 total)"),
+             f"# => 999 passed, {_S} skipped (1019 total)"),
             ("README.zh-CN.md",
              _RT_ZH,
-             f"| `regress.py` | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
+             f"| `regress.py`(\u56de\u5f52\u5957\u4ef6) | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
             (_PLAN_REL, _PLAN_OLD, _PLAN_NEW),
         ])),
         ("断言审计静态数自洽但假", _with_optional([
@@ -223,10 +236,10 @@ def _chain_mutations() -> list[tuple[str, list[Edit]]]:
              f"\u626b\u63cf 1019 \u00b7 \u53ef\u8dd1 999 \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"),
             ("README.md",
              _AU_EN,
-             f"| Assertion audit | 1019 scanned / 999 runnable / {_RA} real assertions / 0 zero-signal |"),
+             f"| Assertion audit | 1019 scanned · 999 runnable · {_RA} real assertions · 0 zero-signal |"),
             ("README.zh-CN.md",
              _AU_ZH,
-             f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b 1019 / \u53ef\u8dd1 999 / \u771f\u65ad\u8a00 {_RA} / \u96f6\u4fe1\u53f7 0 |"),
+             f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b 1019 \u00b7 \u53ef\u8dd1 999 \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7 \u96f6\u4fe1\u53f7 0 |"),
         ])),
     ]
 

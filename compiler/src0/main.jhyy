@@ -9,7 +9,7 @@
 //   - cmd_compile 在 build 之上加 QBE + gcc 链接（绝对路径，per v1.0.0 L1 § 134）
 //   - resolve_imports (main.c:241) 暂不翻译 — 单文件能用，多文件待 commit 2b/2c
 //   - path_to_win (/) 转换：jhyy 端 inline 写
-//   - 已知差异：cmd_dump 是 stub（commit 2c 加 ast_dump.jhyy）
+//   - 已知差异：**无**（cmd_dump 已于 2026-11-05 真实现 —— 见 ast_dump.jhyy）
 //
 // 本 commit 范围（v0.8 commit 2a）：
 //   - main_jhyy dispatch
@@ -17,7 +17,7 @@
 //   - cmd_build: lex → parse → sema → codegen → 写 .il
 //   - cmd_compile: cmd_build + QBE + gcc link
 //   - cmd_run: cmd_compile + system(exe)
-//   - cmd_dump: stub (return 1)
+//   - cmd_dump: **2026-11-05 从 stub 变成真实现**（lex → parse → 打印 AST 树）
 //   - 暂不支持 multi-file
 
 import ffi;
@@ -34,6 +34,7 @@ extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn fopen(path: *u8, mode: *u8) -> *u8;
 import arena;
 import ast;
+import ast_dump;  // 2026-11-05: `jhyy dump` 的 AST 树打印(以前是 stub)
 import types;
 import symtab;
 import lexer;
@@ -296,6 +297,43 @@ fn str_ends_with_exe(s: *u8) -> i32 {
     // 'e' / 'E'
     if c3 != (101 as i32) && c3 != (69 as i32) { return 0 as i32; }
     return 1 as i32;
+}
+
+// str_ends_with_s: s 是否以 ".s" 结尾
+//
+// 跟 str_ends_with_exe 同构,但**大小写敏感** —— 汇编后缀固定小写 ".s"。
+fn str_ends_with_s(s: *u8) -> i32 {
+    let n: i64 = strlen(s);
+    if n < (2 as i64) {
+        return 0 as i32;
+    }
+    let base: i64 = s as i64;
+    let off0: i64 = base + n - (2 as i64);
+    let p0: *u8 = off0 as *u8;
+    let c0: i32 = (*p0) as i32;
+    let off1: i64 = base + n - (1 as i64);
+    let p1: *u8 = off1 as *u8;
+    let c1: i32 = (*p1) as i32;
+    if c0 != (46 as i32) { return 0 as i32; }   // '.'
+    if c1 != (115 as i32) { return 0 as i32; }  // 's'
+    return 1 as i32;
+}
+
+// asm_path_of: 算 .s 路径 —— out_buf **以 ".s" 结尾就原样用**,否则追加 ".s"。
+// 返回写入的长度(不含 NUL)。
+//
+// 2026-11-05:修前有三处各自无条件 `out_buf + ".s"`(build_il / cmd_build /
+// cmd_compile)⇒ 用户写 `-o foo.s` 拿到的是 `foo.s.s`。现在跟 .exe 那侧
+// (P2-5 的 str_ends_with_exe)同一个规矩:**后缀已经有了就别再追加**。
+fn asm_path_of(out_buf: *u8, dest: *u8) -> i64 {
+    let mut len: i64 = str_copy(dest, out_buf);
+    if str_ends_with_s(out_buf) != (0 as i32) {
+        return len;
+    }
+    let off: i64 = str_concat_at(dest, len, ".s" as *u8);
+    let nul: *u8 = (dest as i64 + off) as *u8;
+    store_byte_i32(nul, 0 as i32);
+    return off;
 }
 
 // ════════════════════════════════════════════════════
@@ -873,13 +911,10 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let nul1 = (il_path as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
 
-    // 算 asm_path (跟 compile() 同 pattern: output + ".s")
+    // 算 asm_path (跟 compile() 同 pattern: output + ".s";后缀有了就不重复追加)
     let asm_path_buf = malloc(1024 as i64);
     let asm_path = asm_path_buf;
-    str_copy(asm_path, output);
-    let off2 = str_concat_at(asm_path, n_o, ".s" as *u8);
-    let nul2 = (asm_path as i64 + off2) as *u8;
-    store_byte_i32(nul2, 0 as i32);
+    let _nasm0 = asm_path_of(output, asm_path);
 
     let sb_inner = (*ir).sb;
     let buf_p = (*sb_inner).buf;
@@ -1573,7 +1608,7 @@ fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
 // v4.1.3 (W-168): 支持 `-o <output>` —— 见函数体内注释
 fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     if argc < (1 as i32) {
-        jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o output]\n" as *u8);
+        jh_fputs_stderr("usage: jhyy build <file.jhyy> [-o base]\n" as *u8);
         return 1 as i32;
     }
     /* W-168 (2026-10-30 真修):解析 `-o <output>`。
@@ -1601,6 +1636,15 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
                 i = next_i;
             }
         } else {
+            // 未知选项**不再**被当成输入文件名(同 cmd_compile 的 2026-11-05 修)。
+            // 修前:`jhyy build --no-link x.jhyy` 去打开一个叫 "--no-link" 的文件。
+            let c0: i32 = (*arg) as i32;
+            if c0 == (45 as i32) {
+                jh_fputs_stderr("build: unknown option " as *u8);
+                jh_fputs_stderr(arg);
+                jh_fputs_stderr("\n(try `jhyy --help`)\n" as *u8);
+                return 1 as i32;
+            }
             if input == (0 as *u8) {
                 input = arg;
             }
@@ -1635,14 +1679,12 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     // `derived` ⇒ 在这里 free 之后 `out_buf` 会变悬垂指针。cmd_compile 也是
     // 把 free 放在末尾的(main.jhyy cmd_compile 尾部)—— 正是为了避开这个坑。
     //
-    // 算 .s 路径(与 build_il 内部、cmd_compile 同一公式:out_buf + ".s")
+    // 算 .s 路径(与 build_il 内部、cmd_compile 同一公式:out_buf + ".s";
+    // 后缀已经有了就不重复追加 —— 见 asm_path_of)
     let n_b = strlen(out_buf);
     let asm_buf = malloc(1024 as i64);
     let asm_path = asm_buf;
-    str_copy(asm_path, out_buf);
-    let off_b = str_concat_at(asm_path, n_b, ".s" as *u8);
-    let nul_b = (asm_path as i64 + off_b) as *u8;
-    store_byte_i32(nul_b, 0 as i32);
+    let _nasm_b = asm_path_of(out_buf, asm_path);
     if r == (0 as i32) {
         // fallback:build_il 只写了 .il(它自己写的,同一公式 output + ".il"),
         // .s 要靠 run_backend 补 —— 对齐 cmd_compile 的同一分支。
@@ -1687,9 +1729,11 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
 // regress_v1.py 传 `-o` 写 regress 结果，但 v0.8 commit 2 翻译时漏了 -o 解析
 // → regress_v1.py NORUN=7）
 // v2.0.0: 加 `t: i32` Target 参数 → build_il + run_qbe
-fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
+// 2026-11-05: 加 `no_link_flag: i32` —— `--no-link` 现在由**顶层 dispatcher**
+// 全局摘掉(跟 `--target=` 一样,位置随便放都能用)⇒ 这里只收结果。
+fn cmd_compile(argc: i32, argv: *u8, t: i32, no_link_flag: i32) -> i32 {
     if argc < (1 as i32) {
-        jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output]\n" as *u8);
+        jh_fputs_stderr("usage: jhyy compile <file.jhyy> [-o output] [--no-link]\n" as *u8);
         return 1 as i32;
     }
 
@@ -1703,7 +1747,7 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
      * runtime → gcc fail → cleanup 删 .s (per link_with_gcc L887/981)。 */
     let mut input: *u8 = 0 as *u8;
     let mut user_out: *u8 = 0 as *u8;
-    let mut no_link: i32 = 0 as i32;
+    let mut no_link: i32 = no_link_flag;
     let mut i: i32 = 0 as i32;
     while i < argc {
         let i64_i = i as i64;
@@ -1721,6 +1765,16 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
             if strcmp(arg, "--no-link" as *u8) == (0 as i32) {
                 no_link = 1 as i32;
             } else {
+                // 未知选项**不再**被当成输入文件名。
+                // 修前(2026-11-05):`jhyy compile --foo x.jhyy` 会去打开一个
+                // 叫 "--foo" 的文件,报错只说 "cannot open file",不说是哪个文件。
+                let c0: i32 = (*arg) as i32;
+                if c0 == (45 as i32) {
+                    jh_fputs_stderr("compile: unknown option " as *u8);
+                    jh_fputs_stderr(arg);
+                    jh_fputs_stderr("\n(try `jhyy --help`)\n" as *u8);
+                    return 1 as i32;
+                }
                 if input == (0 as *u8) {
                     input = arg;
                 }
@@ -1734,6 +1788,21 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
     if input == (0 as *u8) {
         jh_fputs_stderr("compile: no input file\n" as *u8);
         return 1 as i32;
+    }
+
+    // ── 交叉 target 的链接守卫(2026-11-05)──
+    //
+    // link_with_gcc 链的是 **Windows** 工具链(宿主 gcc + runtime.c + .exe 后缀)
+    // ⇒ 拿它去链一个 amd64_sysv / freestanding 的 .s,得到的是一个**按 Win64
+    // 调用约定**的 PE:实测 `jhyy --target=amd64_sysv compile x.jhyy` 编译期
+    // **退出码 0、零告警**,跑起来调 libc 时**段错误**(exit 139)。
+    // ⇒ 非 amd64_win 的 target 必须显式 --no-link,拿 .s 去用匹配的工具链接。
+    if t != TARGET_AMD64_WIN() {
+        if no_link != (1 as i32) {
+            jh_fputs_stderr("jhyy: refusing to link a cross target - this build's linker always emits a Windows .exe (via the bundled toolchain).\n" as *u8);
+            jh_fputs_stderr("      Use --no-link, then link the .s with a toolchain that matches the target.\n" as *u8);
+            return 1 as i32;
+        }
     }
 
     /* 默认从 input 派生 output 名（去 .jhyy 后缀） */
@@ -1762,10 +1831,7 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32) -> i32 {
     let off1 = str_concat_at(il_path, n_o, ".il" as *u8);
     let nul1 = (il_path as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
-    str_copy(asm_path, out_buf);
-    let off2 = str_concat_at(asm_path, n_o, ".s" as *u8);
-    let nul2 = (asm_path as i64 + off2) as *u8;
-    store_byte_i32(nul2, 0 as i32);
+    let _nasm_o = asm_path_of(out_buf, asm_path);
     str_copy(exe_path, out_buf);
     // P2-5 (2026-11-01):`-o` 的输出路径**已有 .exe 就别再追加**。
     // 修前无条件追加 ⇒ `-o game_run.exe` 产出 `game_run.exe.exe`。
@@ -1832,8 +1898,30 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
         jh_fputs_stderr("usage: jhyy run <file.jhyy>\n" as *u8);
         return 1 as i32;
     }
-    let argv_arr = argv as **u8;
-    let input = (*argv_arr);
+    // 2026-11-05:run 的参数 = 第一个非选项参数(修前只取 argv[0] ⇒
+    // `jhyy run --foo x.jhyy` 会把 "--foo" 当文件名)。未知选项直接报错。
+    let mut input: *u8 = 0 as *u8;
+    let mut ri: i32 = 0 as i32;
+    while ri < argc {
+        let ri64 = ri as i64;
+        let rarg_p = ptr_add_u8(argv, ri64 * (8 as i64)) as **u8;
+        let rarg = (*rarg_p);
+        let rc0: i32 = (*rarg) as i32;
+        if rc0 == (45 as i32) {
+            jh_fputs_stderr("run: unknown option " as *u8);
+            jh_fputs_stderr(rarg);
+            jh_fputs_stderr("\n(try `jhyy --help`)\n" as *u8);
+            return 1 as i32;
+        }
+        if input == (0 as *u8) {
+            input = rarg;
+        }
+        ri = ri + (1 as i32);
+    }
+    if input == (0 as *u8) {
+        jh_fputs_stderr("run: no input file\n" as *u8);
+        return 1 as i32;
+    }
 
     // v1.8.3.2 W-065: pre-check that input file defines `fn main_jhyy` before
     // shelling out to QBE + gcc link. Library snippets (e.g. the website's
@@ -1957,7 +2045,7 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     let arg_arr_pp3 = ptr_add_u8(arg_arr, (16 as i64)) as **u8;
     (*arg_arr_pp3) = out_buf;
 
-    let r = cmd_compile(3 as i32, arg_arr, t);
+    let r = cmd_compile(3 as i32, arg_arr, t, 0 as i32);
     free(arg_arr);
     if r != (0 as i32) {
         free(out_buf);
@@ -2009,11 +2097,139 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     return rc;
 }
 
-// cmd_dump: stub for now
+// print_help: 完整帮助文本(唯一一份)。
+//
+// 2026-11-05:以前有**两份**帮助 —— `jhyy`(无参数)给的是阉割版(没有 targets、
+// 没有 --no-link、`dump` 那行还不标"未实现"),`jhyy --help` 才是完整版 ⇒
+// 用户最自然的第一步(`jhyy`)恰好拿到信息最少的那份,而且短版里**没告诉**
+// 用户 `--help` 还有完整版。现在只有**一份**,两条路径都走它。
+//
+// ⚠️ 版本号横幅是**字符串字面量** `jhyy compiler vX.Y.Z (self-hosted)` ——
+// bump_version.py 按这个正则扫/改(scripts/dev/bump_version.py)⇒ 全文件
+// **只能有这一处**,别再复制一份到别处。
+fn print_help() -> i32 {
+    printf("jhyy compiler v4.1.3 (self-hosted)\n" as *u8, 0);
+    printf("\n" as *u8, 0);
+    printf("usage: jhyy [--target=<triple>] [--no-link] <command> [args]\n" as *u8, 0);
+    printf("\n" as *u8, 0);
+    printf("commands:\n" as *u8, 0);
+    // v4.1.2 (W-164):这两行的说明以前是**反的**。
+    //   实际语义(main.jhyy:cmd_compile / cmd_build):
+    //     compile = build_il + link_with_gcc ⇒ 有 main 时产出 .exe
+    //               (无 main 的库文件只编译,不链)
+    //     build   = build_il 只编译            ⇒ 产出 .s,不链
+    //   旧文案写的是「compile → .obj」+「build → compile + link to .exe」
+    //   ⇒ 用户照着 help 跑 `jhyy build hello.jhyy` **拿不到 exe**
+    //   (只出 hello.s,退出码 2 = in-mem 路径已 emit,不是错误)。
+    printf("  compile <file.jhyy> [-o output]   compile + link -> .exe (a lib without main is compiled only)\n" as *u8, 0);
+    printf("  build   <file.jhyy> [-o base]     compile only -> .s (no link; -o is a base name, .s appended)\n" as *u8, 0);
+    printf("  run     <file.jhyy>              compile + link + execute\n" as *u8, 0);
+    printf("  dump    <file.jhyy>              print the parsed AST tree (parse only; no sema/codegen)\n" as *u8, 0);
+    printf("\n" as *u8, 0);
+    printf("flags:\n" as *u8, 0);
+    printf("  --target=<triple>  select target (default amd64_win); see targets below\n" as *u8, 0);
+    printf("  --no-link          compile to .s only, skip the link step (required for cross targets)\n" as *u8, 0);
+    printf("  --help             show this message and exit\n" as *u8, 0);
+    printf("\n" as *u8, 0);
+    printf(target_help());  // multi-line target list
+    return 0 as i32;
+}
+
+// cmd_dump: 打印解析后的 AST 树(2026-11-05 真实现)
 // v2.0.0: 加 `t: i32` Target 参数 (unused; dump 不做 codegen)
+//
+// 走 **parse only**:读文件 → lex → parse → 打印 AST ⇒ 不跑 sema / codegen
+// —— dump 要看的是「语法长什么样」,不是「编译成什么样」。
+// (lexer / parser 的初始化照抄 build_il 的字面量:字段顺序必须与声明逐字一致,
+//  漏字段 = 落在分配区外 = 越界 —— 见 W-118。)
 fn cmd_dump(argc: i32, argv: *u8, t: i32) -> i32 {
-    jh_fputs_stderr("cmd_dump: not implemented yet (exits 1)\n" as *u8);
-    return 1 as i32;
+    let mut input: *u8 = 0 as *u8;
+    let mut i: i32 = 0 as i32;
+    while i < argc {
+        let i64_i = i as i64;
+        let arg_p = ptr_add_u8(argv, i64_i * (8 as i64)) as **u8;
+        let arg = (*arg_p);
+        let c0: i32 = (*arg) as i32;
+        if c0 == (45 as i32) {
+            jh_fputs_stderr("dump: unknown option " as *u8);
+            jh_fputs_stderr(arg);
+            jh_fputs_stderr("\n(try `jhyy --help`)\n" as *u8);
+            return 1 as i32;
+        }
+        if input == (0 as *u8) {
+            input = arg;
+        }
+        i = i + (1 as i32);
+    }
+    if input == (0 as *u8) {
+        jh_fputs_stderr("usage: jhyy dump <file.jhyy>\n" as *u8);
+        return 1 as i32;
+    }
+
+    let source = read_file(input);
+    if source == (0 as *u8) {
+        jh_fputs_stderr("dump: cannot open " as *u8);
+        jh_fputs_stderr(input);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
+
+    // ── Arena ──
+    let mut arena: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    arena_init(&arena, (32 as i64) * (1024 as i64) * (1024 as i64));
+
+    // ── Lexer ──
+    let mut lexer: Lexer = Lexer {
+        source:       0 as *u8,
+        current:      0 as *u8,
+        end:          0 as *u8,
+        filename:     0 as *u8,
+        line:         0 as i32,
+        col:          0 as i32,
+        peek_kind:    0 as i32,
+        peek_start:   0 as *u8,
+        peek_len:     0 as i64,
+        peek_lf:      0 as *u8,
+        peek_ll:      0 as i32,
+        peek_lc:      0 as i32,
+        has_peek:     0 as i32,
+        error_count:  0 as i32,
+    };
+    lexer_init(&lexer, source, input);
+
+    // ── Parser ──
+    let mut parser_v: Parser = Parser {
+        lexer:         0 as *Lexer,
+        arena:         0 as *Arena,
+        prev_kind:     0 as i32,
+        prev_start:    0 as *u8,
+        prev_length:   0 as i64,
+        prev_lf:       0 as *u8,
+        prev_ll:       0 as i32,
+        prev_lc:       0 as i32,
+        global_scope:  0 as *u8,
+        current_scope: 0 as *u8,
+        scope_depth:   0 as i32,
+        error_count:   0 as i32,
+    };
+    parser_init(&parser_v, &lexer, &arena);
+
+    let ast_node = parser_parse(&parser_v);
+    if parser_v.error_count > (0 as i32) {
+        jh_fputs_stderr("parse errors\n" as *u8);
+        free(source);
+        return 1 as i32;
+    }
+
+    let _r = ast_dump::ad_dump_module(ast_node);
+    free(source);
+    return 0 as i32;
 }
 
 // ═══ Entry point ═══
@@ -2031,14 +2247,9 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     }
 
     if argc < (2 as i32) {
-        printf("jhyy compiler v4.1.3 (self-hosted)\n" as *u8, 0);
-        printf("usage: jhyy <command> [args]\n" as *u8, 0);
-        printf("  --target=<triple> (default amd64_win)\n" as *u8, 0);
-        printf("  compile <file.jhyy> [-o output]\n" as *u8, 0);
-        printf("  build   <file.jhyy> [-o output]\n" as *u8, 0);
-        printf("  run     <file.jhyy>\n" as *u8, 0);
-        printf("  dump    <file.jhyy>\n" as *u8, 0);
-        return 0 as i32;
+        // 无参数 = 打完整帮助(2026-11-05:以前这里给的是**阉割版**,
+        // 与 `jhyy --help` 的完整版不一致 ⇒ 见 print_help 的注释)
+        return print_help();
     }
 
     // v2.4.0 Stage 1: scan argv for --help flag. If found anywhere, print
@@ -2056,31 +2267,7 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
         hi = hi + (1 as i32);
     }
     if help_requested == (1 as i32) {
-        printf("jhyy compiler v4.1.3 (self-hosted)\n" as *u8, 0);
-        printf("\n" as *u8, 0);
-        printf("usage: jhyy [--target=<triple>] [--help] <command> [args]\n" as *u8, 0);
-        printf("\n" as *u8, 0);
-        printf("commands:\n" as *u8, 0);
-        // v4.1.2 (W-164):这两行的说明以前是**反的**。
-        //   实际语义(main.jhyy:cmd_compile / cmd_build):
-        //     compile = build_il + link_with_gcc ⇒ 有 main 时产出 .exe
-        //               (无 main 的库文件只编译,不链)
-        //     build   = build_il 只编译            ⇒ 产出 .s,不链
-        //   旧文案写的是「compile → .obj」+「build → compile + link to .exe」
-        //   ⇒ 用户照着 help 跑 `jhyy build hello.jhyy` **拿不到 exe**
-        //   (只出 hello.s,退出码 2 = in-mem 路径已 emit,不是错误)。
-        printf("  compile <file.jhyy> [-o output]   compile + link -> .exe (lib w/o main: compile only)\n" as *u8, 0);
-        printf("  build   <file.jhyy> [-o output]   compile only -> .s (no link)\n" as *u8, 0);
-        printf("  run     <file.jhyy>              compile + link + execute\n" as *u8, 0);
-        printf("  dump    <file.jhyy>              NOT IMPLEMENTED yet (exits 1)\n" as *u8, 0);
-        printf("\n" as *u8, 0);
-        printf("flags:\n" as *u8, 0);
-        printf("  --target=<triple>  select target (default amd64_win); see targets below\n" as *u8, 0);
-        printf("  --no-link          compile to .s only, skip gcc link (for cross-toolchains)\n" as *u8, 0);
-        printf("  --help             show this message and exit\n" as *u8, 0);
-        printf("\n" as *u8, 0);
-        printf(target_help());  // multi-line target list (v2.4.0)
-        return 0 as i32;
+        return print_help();
     }
     // argv is *u8 (passed from C runtime). Each element is *u8, 8 bytes.
     // argv[0] = program path, argv[1] = command, argv[2...] = args
@@ -2093,6 +2280,10 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     // (else argv[1] would be the flag and cmd dispatcher says "unknown command").
     // Default = TARGET_AMD64_WIN (v1.x 兼容).
     let mut target: i32 = target_default();
+    // 2026-11-05:`--no-link` 提到**全局**层(跟 `--target=` 一样,位置随便放)。
+    // 修前它只在 cmd_compile 里解析 ⇒ `jhyy --no-link compile x.jhyy` 的
+    // argv[1] 是那个 flag ⇒ "unknown command"。
+    let mut no_link_global: i32 = 0 as i32;
     let mut si: i32 = 1 as i32;
     while si < argc {
         let si64 = si as i64;
@@ -2119,6 +2310,9 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
             }
             target = parsed;
         }
+        if strcmp(sarg, "--no-link" as *u8) == (0 as i32) {
+            no_link_global = 1 as i32;
+        }
         si = si + (1 as i32);
     }
     // In-place compaction: shift argv[i] down to argv[w] if argv[i] is not
@@ -2143,12 +2337,20 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
             p2 = p2 + (1 as i32);
         }
         if is_t == (0 as i32) {
-            if w != r {
-                let w64 = w as i64;
-                let wp = ptr_add_u8(argv, w64 * (8 as i64)) as **u8;
-                (*wp) = rarg;
+            // 2026-11-05:`--no-link` 也在这一层被摘掉(跟 `--target=` 一样)
+            // ⇒ 子命令的解析器永远看不到它 ⇒ 也就不会把它当成文件名。
+            let mut is_nl: i32 = 0 as i32;
+            if strcmp(rarg, "--no-link" as *u8) == (0 as i32) {
+                is_nl = 1 as i32;
             }
-            w = w + (1 as i32);
+            if is_nl == (0 as i32) {
+                if w != r {
+                    let w64 = w as i64;
+                    let wp = ptr_add_u8(argv, w64 * (8 as i64)) as **u8;
+                    (*wp) = rarg;
+                }
+                w = w + (1 as i32);
+            }
         }
         r = r + (1 as i32);
     }
@@ -2162,17 +2364,33 @@ fn main_jhyy(argc: i32, argv: *u8) -> i32 {
     let rest_argv = rest_argv_p;
 
     if strcmp(cmd_dispatched, "compile" as *u8) == (0 as i32) {
-        return cmd_compile(rest_argc, rest_argv, target);
+        return cmd_compile(rest_argc, rest_argv, target, no_link_global);
     }
     if strcmp(cmd_dispatched, "build" as *u8) == (0 as i32) {
         return cmd_build(rest_argc, rest_argv, target);
     }
     if strcmp(cmd_dispatched, "run" as *u8) == (0 as i32) {
+        // 2026-11-05:`run` 需要可执行文件 ⇒ `--no-link` 对它**没有意义**。
+        // 静默忽略也是一句谎 ⇒ 说一句。
+        if no_link_global == (1 as i32) {
+            jh_fputs_stderr("jhyy: warning: --no-link is ignored by `run` (it needs the executable)\n" as *u8);
+        }
         return cmd_run(rest_argc, rest_argv, target);
     }
     if strcmp(cmd_dispatched, "dump" as *u8) == (0 as i32) {
         return cmd_dump(rest_argc, rest_argv, target);
     }
-    jh_fputs_stderr("unknown command\n" as *u8);
+    // 未知命令 / 未知选项(2026-11-05):修前只有一句 "unknown command",
+    // 既不列命令、也不提 --help。
+    let cc0: i32 = (*cmd_dispatched) as i32;
+    if cc0 == (45 as i32) {
+        jh_fputs_stderr("jhyy: unknown option " as *u8);
+        jh_fputs_stderr(cmd_dispatched);
+        jh_fputs_stderr("\n(try `jhyy --help`)\n" as *u8);
+        return 1 as i32;
+    }
+    jh_fputs_stderr("jhyy: unknown command '" as *u8);
+    jh_fputs_stderr(cmd_dispatched);
+    jh_fputs_stderr("'\n(commands: compile / build / run / dump - try `jhyy --help`)\n" as *u8);
     return 1 as i32;
 }

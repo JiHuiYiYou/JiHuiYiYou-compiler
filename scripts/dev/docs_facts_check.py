@@ -407,6 +407,34 @@ def check_artifact_sizes(d: dict) -> None:
                              f"FACTS.md § 1 声明的是 {want} MB")
 
 
+def check_template_size() -> None:
+    """release notes **模板**里不得写死产物体积。
+
+    ⚠️ **为什么模板比 README 更严**:模板是**每版都发**的那一份 ⇒ 里面写死的
+    数字不是「过期一次」,而是**每发一版都发一个错的**。这里以前写死「~55MB」——
+    打包一变大,每版 release note 都带着旧数字发出去,而尺寸对拍门
+    (`check_artifact_sizes`)只查两份 README ⇒ 这处**零门覆盖**。
+
+    ⇒ 体积只能走 `${INSTALLER_SIZE}` 占位符 —— release.yml 在
+      「Generate release notes from template」步里**量刚编出来的产物**填进去。
+      那一步还有一道「占位符没替换完 ⇒ 拒发」的门 ⇒ 忘了接线 = 发不出去,
+      而不是发出去一个错的数字。
+    """
+    rel = "installer/changelog-template.md"
+    p = ROOT / rel
+    if not p.is_file():
+        fail(f"{rel} 不存在")
+        return
+    text = read(p)
+    if "${INSTALLER_SIZE}" not in text:
+        fail(f"{rel}: 没有 ${{INSTALLER_SIZE}} 占位符 ⇒ Download 那行的体积只能实测填进去"
+             f"(既不能写死,也不能悄悄删掉 —— 体积是发版时才知道的事实)")
+    for i, line in enumerate(text.splitlines(), 1):
+        for m in re.finditer(r"~?\s*(\d+(?:\.\d+)?)\s*MB", line):
+            fail(f"{rel}:{i}: 模板里写死了体积「{m.group(0).strip()}」⇒ 模板每版都发,"
+                 f"写死的数字迟早是错的(当前体积见 FACTS.md § 1;发版时由 release.yml 实测填入)")
+
+
 def check_ledger_version_labels() -> None:
     """台账里**前向引用**的 `(vX.Y.Z)` 标签必须指向真实存在的版本记录。
 
@@ -1184,6 +1212,7 @@ def main() -> int:
     check_gates(d)
     check_fact_numbers(d)
     check_artifact_sizes(d)
+    check_template_size()
     check_links()
     check_backtick_paths()
     check_code_index()

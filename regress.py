@@ -383,7 +383,11 @@ def _run_cross_env_sysv_test(test_name: str, cross_mode: str,
         cmd = [
             "wsl.exe", "-d", "Ubuntu", "bash", "-c",
             f"cd {jhyy_repo_in_linux} && "
-            f"{wsl_binary} compile --target=amd64_sysv_freestanding "
+            # 2026-11-05:加 --no-link —— 交叉 target 的**链接**现在被编译器拒绝
+            # (link_with_gcc 链的是宿主 Windows 工具链,链出来的 PE 是按 Win64
+            # 调用约定的,跑起来段错误)⇒ 交叉 target 一律 --no-link,拿 .s 去
+            # 用匹配的工具链链(跟下面的 docker 分支同一条规矩)。
+            f"{wsl_binary} compile --target=amd64_sysv_freestanding --no-link "
             f"{wsl_jhyy} -o /tmp/_cross_sysv && "
             f"gcc -nostdlib -static -T runtime/linux_elf/link.ld "
             f"-o /tmp/_cross_sysv.elf runtime/linux_elf/crt0.S /tmp/_cross_sysv.s && "

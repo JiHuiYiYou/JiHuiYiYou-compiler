@@ -19,13 +19,19 @@
 | **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
 | 最新 release | `v4.1.3`（2026-11-04） |
 | 版本轴 | v0.x(C 编译器，冻结于 v1.0.0) · v1.x(自举，终结于 v1.8.3) · v2.x(QBE 重写，终结于 v2.16.0) · v3.x(语言扩展，终结于 v3.4.2) · **v4.x(当前)** |
-| 编译器二进制 | `compiler/build/bin/jhyy.exe`（~1.9 MB） |
+| 编译器二进制 | `compiler/build/bin/jhyy.exe`（~2 MB） |
 
 | 产物 | 体积 |
 |---|---|
 | `jhyy-installer-4.1.3.exe` | ~55 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
 | `jhyy-compiler-4.1.3.msi` | ~28 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
 | `jhyy-lang-4.1.3.vsix` | VS Code 扩展 |
+
+> ℹ️ **体积是实测的** —— `bump_version.py finalize` 量 `installer/build-artifacts/`
+> 里的产物后回填（见 [build.md § 版本号自动化](build.md#版本号自动化)）
+> ⇒ **别手改这几行**，手改了下次 finalize 会覆盖掉。
+> 门 `check_artifact_sizes` 只保证「FACTS 与两份 README 一致」，**不保证为真**
+> ⇒ 「为真」由那次实测保证。
 
 > 自 **v4.1.0** 起 installer 自带最小原生 ucrt64 工具链 ⇒ **最终用户不需要 MSYS2**。
 
@@ -119,10 +125,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **190** |
+| 条目总数 | **199** |
 | ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 171 / 16 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 180 / 16 / 2 |
 
 ---
 
@@ -143,7 +149,9 @@
 | v4.5 | M5 Part 3（0-C 闭环 —— 最后一项）· **阶段 0：std API 收口 + 缺口补齐**（2026-11-02 新增；**阶段 0 不依赖 v4.4** ⇒ 可与性能线并行） | 🔴 预留号 |
 
 > v4.4.0 **阶段一**（寄存器分配器 + 安全网，产物逐字节不变）已于 2026-10-30 完成。
-> 已 ship 的 v4.0.x / v4.1.x / v4.2.x sprint 计划见 `docs/archive/plans/v4/`。
+> 已 ship 的 v4 sprint 计划（v4.0.0 … v4.0.7）见 [`docs/archive/plans/v4/`](../archive/plans/v4/)
+> —— v4.1.x / v4.2.x **没有**独立的 `-plan.md`（内容记在 [`CHANGELOG.md`](../../CHANGELOG.md)
+> 的 release / change slot 表，以及性能线总纲里）。
 
 ### 4.2 测评线（v4.3.x —— 发版前）
 
@@ -153,13 +161,18 @@
 | v4.3.1 | 3 道新题（partial_sums / mandelbrot / binary_trees）+ 测量地板口径 + 附录 B 剩余覆盖缺口 | ✅ 已完成 2026-11-03 |
 | v4.3.2 | 3 道浮点 / 字节变换新题（revcomp / nbody / spectral）+ 浮点位模式探针 | ✅ 已完成 2026-11-03 |
 | v4.3.3 | 随机程序差分测试器 + 差分门 `bench-diff` + 金标准 | ✅ 已完成 2026-11-03 |
-| v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | 🔄 **下一格** |
+| v4.3.4 | 对外基线快照 + 两份 README 同步 + release notes | ✅ 已完成 2026-11-04（随 release `v4.1.3` 发布） |
 | v4.3.5 | `fmt_i64` 的 i64::MIN 缺陷（动 src0 ⇒ 走发版级流程） | ✅ 已完成 2026-11-04（W-195） |
 
 > **为什么排在 v4.4 之前**：测评线要在**发版前**完成 ⇒ 编号在 v4.4 之前。
 > v4.3.0 原本是「IR 优化框架 + `-O` 开关」，2026-10-29 因实测价值 ≈ 1.8% 而
 > **降级到 v4.4 之后**（IR 优化框架已并入 v4.4.5）⇒ 号码空出。
 > ⚠️ **静态指标基线绑定编译器版本** ⇒ v4.4.x 的寄存器分配落地后必须重取一次。
+>
+> **测评线整格随 release `v4.1.3`（2026-11-04）收口** —— v4.3.4 的「对外基线快照 + 两份
+> README 同步 + release notes」是那次发布本身的收尾动作 ⇒ 它没有独立的 tag / 产物
+> （release 记录见 [`CHANGELOG.md`](../../CHANGELOG.md) 的 v4.1.3 行）。
+> ⇒ **下一格 = 性能线 v4.4.0**（寄存器分配①阶段二 —— emit 层消费寄存器）。
 
 ### 4.3 OS 线（v4.6 → v4.15）
 
@@ -186,6 +199,22 @@
 
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 —— **不预先落文档**，启动时再领版本号。
+
+### 4.5 第三方包管理上游发布（**未排期**）
+
+| 渠道 | 状态（2026-11-05 核对上游） |
+|---|---|
+| winget-pkgs | **从未提交** —— 上游无 `manifests/j/JiHuiYiYou/` 路径 |
+| scoop | **从未提交** —— 上游 `bucket/jhyy.json` 不存在；**将来若发，先走个人 bucket**（`JiHuiYiYou/scoop-bucket`），Main bucket 另议 |
+| 仓内 manifest | **已修好** —— **4.1.1 / 4.1.2 / 4.1.3 三个目录 `winget validate` 零警告通过**；scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt 实测命中。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样）⇒ **提 PR 的前置条件已就绪**，缺的只是「什么时候提」 |
+
+> ⚠️ 别把这一格跟 § 4.4 的「包管理器」混为一谈 —— § 4.4 说的是**语言层面**的
+> 包管理器（`jhyy new/build/test` + `jhyy.toml`），这一格说的是**发行渠道**。
+>
+> 背景：v1.5.5 的决策是「**写 manifest，实际 publish 推到 v2.x**」—— 而 **v2.x 轴
+> 早已终结**（v2.16.0）⇒ 这个决定**从来没被执行**，manifest 就一直躺在仓里当
+> reference；而且它们**还是坏的**（version/installer 装反、scoop 脚本用 `//`
+> 注释）⇒ 台账 **W-203 / W-204**。
 
 ---
 

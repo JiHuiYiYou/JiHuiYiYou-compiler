@@ -1,3 +1,5 @@
+# Created with winget manifest schema v1.9.0
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
 # winget locale manifest (en-US) - JHYY 4.1.1
 #
 # v4.1.0 起:**不再需要 MSYS2** —— installer 自带一份最小原生 MSYS2 ucrt64
@@ -5,6 +7,7 @@
 # <INSTALLDIR>\toolchain\。装完即可 `jhyy compile hello.jhyy`。
 # 之前需要自己装 MSYS2 + ucrt64 GCC(而且 MSI 有硬门槛,没装根本装不上)。
 
+PackageIdentifier: JiHuiYiYou.JHYY
 PackageVersion: 4.1.1
 PackageLocale: en-US
 Publisher: JiHuiYiYou
@@ -50,5 +53,5 @@ ReleaseNotes: |-
   See docs/archive/logs/v4/changelog-v4.0.0.md for the full changelog.
 ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v4/changelog-v4.0.0.md
 PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
-ManifestType: locale
-ManifestVersion: 1.5.0
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

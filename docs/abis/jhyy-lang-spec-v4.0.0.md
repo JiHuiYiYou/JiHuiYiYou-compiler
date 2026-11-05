@@ -896,23 +896,32 @@ import math;
 ## 16. 命令行
 
 ```
-jhyy [--target=<triple>] [--help] <command> [args]
+jhyy [--target=<triple>] [--no-link] <command> [args]
 ```
 
 | 命令 | 作用 |
 |---|---|
-| `compile <file.jhyy> [-o output]` | 编译为目标文件（Windows 上链接为 `.exe`） |
-| `build <file.jhyy> [-o output]` | 编译 + 链接 |
+| `compile <file.jhyy> [-o output]` | 编译 + 链接 → `.exe`（无 `main` 的库文件只编译、不链） |
+| `build <file.jhyy> [-o base]` | 只编译 → `.s`（**不**链接）；`-o` 是**基名**，`.s` 追加在后面 |
 | `run <file.jhyy>` | 编译 + 链接 + 执行 |
-| `dump <file.jhyy>` | 打印 AST / 定型 IR 供调试 |
+| `dump <file.jhyy>` | 打印解析后的 **AST 树**（每行一个节点，子节点缩进一级；只到 parse —— 不跑 sema / codegen） |
 
 | 标志 | 作用 |
 |---|---|
 | `--target=<triple>` | 选择目标（默认 `amd64_win`）。可选值见 [ABI § 1](jhyy-abi-v4.0.0.md#1-目标平台) |
-| `--no-link` | 只产出 `.s`，跳过 gcc 链接 |
-| `--help` | 打印完整帮助 |
+| `--no-link` | 只产出 `.s`，跳过链接。**位置任意**（子命令前后都行） |
+| `--help` | 打印完整帮助（不带参数跑 `jhyy` 打的是同一份） |
 
 ⚠️ **命令行只接受一个输入文件**，多余的文件参数被静默忽略（见 [§ 1.2](#12-源文件与多文件)）。
+
+⚠️ **未识别的选项会被拒绝**，不会当成文件名 —— `jhyy compile --foo a.jhyy` 报
+`unknown option`，而不是去打开一个叫 `--foo` 的文件。
+
+⚠️ **除 `amd64_win` 外的目标链不了** —— `--target` 只决定**代码生成**的调用约定，
+而链接器永远是 Windows 工具链（宿主 gcc + Windows 运行时 + `.exe`）⇒ 拿它链
+SysV / freestanding 的 `.s`，会得到一个**按 Win64 调用约定**的 PE，跑起来调用
+libc 时段错误。⇒ 交叉目标**必须**加 `--no-link`，拿 `.s` 去用与目标匹配的工具链
+链接（见 [§ 17.6](#176-freestanding-目标与-entry-符号)）。
 
 ---
 
@@ -986,7 +995,7 @@ fence_release();   // sfence
 
 ### 17.6 freestanding 目标与 entry 符号
 
-`--target=amd64_win_freestanding` / `amd64_sysv_freestanding` 选择的是**调用约定归属**（见 [ABI § 1](jhyy-abi-v4.0.0.md#1-目标平台)），**不改变链接方式**。
+`--target=` 选择的是**调用约定归属**，**不改变链接器** —— 而链接器永远是 Windows 工具链 ⇒ **除 `amd64_win` 外的目标都只能 `--no-link`**（见 [§ 16](#16-命令行)；调用约定归属见 [ABI § 1](jhyy-abi-v4.0.0.md#1-目标平台)）。
 
 - **entry 符号由用户自行提供**，编译器不提供默认 entry：
 

@@ -1,32 +1,27 @@
-// target_dispatch.jhyy — v2.0.0 target dispatcher (Sprint A Stage 1)
-// C-side mirror: compiler/src/target/target_dispatch.{c,h}
+// target_dispatch.jhyy — target 解析 / dispatch(CLI 层)
 //
-// Four targets recognized at parse time:
-//   - TARGET_AMD64_WIN                  : x86_64-w64-mingw32 (default; v1.x 兼容)
-//   - TARGET_AMD64_WIN_FREESTANDING     : x86_64-w64-none (UEFI; ships v2.1.0)
-//   - TARGET_AMD64_SYSV                 : x86_64-linux-none (ships v2.7.0 Phase 2b)
-//   - TARGET_AMD64_SYSV_FREESTANDING    : x86_64-linux-none-freestanding (v2.7.1+)
+// 四个 target(CLI `--target=<name>` 的取值):
+//   - amd64_win                : x86-64-w64-mingw32(默认;hosted Windows)
+//   - amd64_win_freestanding   : x86-64-w64-none(UEFI;freestanding,无 libc)
+//   - amd64_sysv               : x86-64-linux-none(Linux;SysV ABI)
+//   - amd64_sysv_freestanding  : x86-64-linux-none-freestanding(Linux;无 libc)
 //
-// In v2.7.0 only TARGET_AMD64_WIN reaches codegen as full self path; TARGET_AMD64_SYSV
-// 真 codegen path wired in Phase 2b (emit_call arg-reg split per target tag).
-// TARGET_AMD64_SYSV_FREESTANDING ship 留 v2.7.1。ABI 抽离 in v2.1.0;
-// real freestanding .efi + OVMF demo in v2.3.0.
+// **能力边界(2026-11-05 写实)**:四个 target **都真出代码**(自研 in-mem 后端;
+// QBE 在 v2.x 末就下线了)。但**只有 amd64_win 能被这个 build 链接**:
+// link_with_gcc 链的是宿主 Windows 工具链(gcc + runtime.c + .exe 后缀)
+// ⇒ 拿它链一个 SysV / freestanding 的 .s,得到的是一个**按 Win64 调用约定**
+// 的 PE(实测跑起来调 libc 时段错误,exit 139),而编译器**退出码 0、零告警**。
+// ⇒ 另外三个 target 必须显式 `--no-link`,拿 .s 去用匹配的工具链接。
 //
-// Stage 2 byte-equal closure: tag values match 1:1 with C-side enum in
-// compiler/src/target/target_dispatch.h (Amd64Win=0, Amd64WinFreestanding=1,
-// Amd64Sysv=2, Amd64SysvFreestanding=3). Closure invariant is .il byte-equal
-// (not binary byte-equal), so this enum is consumed only as a function parameter
-// — no shared memory layout with jhyy-side (unlike W-005 CGContext 128B invariant).
+// 2026-11-05:删掉五个**死函数**(target_name / target_qbe_flag /
+// jh_target_count / target_status / target_abi_module)—— 它们带着一堆 v2.x
+// 时代的注释(「Mirrors C-side ... .c」—— 那个 C 文件 v4.0.21 就删了;
+// 「only ... passed to QBE」—— QBE 早没了),留着只会骗人。
+// 真 ABI dispatch 是 **codegen.jhyy 的静态 import**(abi_amd64_win /
+// abi_amd64_win_freestanding / abi_amd64_sysv / abi_amd64_sysv_freestanding)。
 //
-// v2.4.0 Stage 1: add target_help() for --help CLI surface + jh_target_count()
-// for use by main.jhyy (avoids [*][*]u8 array literal syntax complexity).
-// v2.7.0 Phase 2a: rename TARGET_AMD64_SYSV_STUB → TARGET_AMD64_SYSV (不再 stub;
-// 7 ABI fn 实 codegen module abi_amd64_sysv.jhyy 已 wire); add
-// TARGET_AMD64_SYSV_FREESTANDING=3 (placeholder, v2.7.1 ship); update
-// target_backend_mode SYSV → BACKEND_SELF (不再 QBE fallback); add
-// target_abi_module(t) chokepoint for cg_module dispatch.
-// v4.0.0: parity confirmed with C-side target_dispatch.c (all 4 targets →
-// BACKEND_SELF; QBE removed).
+// ⚠️ 本文件现在是 target 层的**唯一实现** —— C 侧那份
+// (compiler/src/target/target_dispatch.c) 已随 v4.0.21 的「删 C 编译器」删除。
 
 extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn jh_fputs_stderr(s: *u8) -> i32;
@@ -41,43 +36,25 @@ fn TARGET_AMD64_SYSV()                 -> i32 { return 2 as i32; }
 fn TARGET_AMD64_SYSV_FREESTANDING()    -> i32 { return 3 as i32; }
 
 // ════════════════════════════════════════════════════
-// V2-B v2.6.0 (Unit E Wire): backend mode constants
+// Backend mode constants
 //
-// BACKEND_QBE  = pass-through to QBE (v1.x / v2.0.0-v2.5.0 default)
-// BACKEND_SELF = self-written jhyy backend (codegen_amd64_run)
-//
-// windows targets → BACKEND_SELF (v2.6.0+)
-// sysv stub       → BACKEND_QBE (v2.7.0 territory)
-//
-// QBE_FALLBACK env var (read by main.jhyy before calling target_backend_mode)
-// remains the explicit override regardless of target.
+// BACKEND_SELF = 自研 in-mem 后端(codegen_amd64_run_text)—— **唯一**还在的路径。
+// BACKEND_QBE  = 旧 QBE 路径的常量残留:QBE 已下线,target_backend_mode 对四个
+//                已知 target 一律返回 BACKEND_SELF ⇒ 这个常量只剩「未知 tag
+//                的兜底」这一处引用(见 target_backend_mode)。
 // ════════════════════════════════════════════════════
 
 fn BACKEND_QBE()  -> i32 { return 0 as i32; }
 fn BACKEND_SELF() -> i32 { return 1 as i32; }
 
-// target_backend_mode — return which backend to use for target t.
-// v2.7.0 Phase 2a: SYSV + SYSVFS 都 → BACKEND_SELF (跟 Win/WinFS 一致,不再 QBE fallback);
-// 实 codegen path 区分留 Phase 2b (emit_call arg-reg split per target tag)。
-// Caller (main.jhyy run_backend) checks QBE_FALLBACK env first.
+// target_backend_mode — 返回 target t 用哪个后端。
+// 四个已知 target 一律 BACKEND_SELF(自研后端);只有「未知 tag」才落到兜底。
 fn target_backend_mode(t: i32) -> i32 {
     if t == TARGET_AMD64_WIN()              { return BACKEND_SELF(); }
     if t == TARGET_AMD64_WIN_FREESTANDING() { return BACKEND_SELF(); }
     if t == TARGET_AMD64_SYSV()             { return BACKEND_SELF(); }
     if t == TARGET_AMD64_SYSV_FREESTANDING(){ return BACKEND_SELF(); }
-    return BACKEND_QBE();  // unknown → safe QBE fallback
-}
-
-// ════════════════════════════════════════════════════
-// jh_target_count — number of supported targets (v2.4.0 helper)
-// Used by main.jhyy to enumerate targets for --help / error messages
-// without needing array literal syntax in jhyy-side. jhyy-side returns
-// the count; main.jhyy calls target_name(jh_target_count()-1-idx) etc.
-// ════════════════════════════════════════════════════
-
-fn jh_target_count() -> i32 {
-    // v2.7.0 Phase 2a: 3 → 4 (added TARGET_AMD64_SYSV_FREESTANDING)
-    return 4 as i32;
+    return BACKEND_QBE();
 }
 
 // ════════════════════════════════════════════════════
@@ -99,12 +76,13 @@ fn target_parse(s: *u8) -> i32 {
     }
     jh_fputs_stderr("unknown target '" as *u8);
     jh_fputs_stderr(s);
-    jh_fputs_stderr("', available: amd64_win, amd64_win_freestanding, amd64_sysv (v2.7.0 Phase 2b wire), amd64_sysv_freestanding (v2.7.1 ship)\n" as *u8);
+    jh_fputs_stderr("'\navailable: amd64_win, amd64_win_freestanding, amd64_sysv, amd64_sysv_freestanding\n" as *u8);
+    jh_fputs_stderr("note: only amd64_win can be linked by this build - the others need --no-link\n" as *u8);
     return -(1 as i32);  // sentinel; caller (main_jhyy CLI loop) treats as fatal
 }
 
 // ════════════════════════════════════════════════════
-// target_default — default tag (v1.x 兼容)
+// target_default — 默认 tag
 // ════════════════════════════════════════════════════
 
 fn target_default() -> i32 {
@@ -112,76 +90,14 @@ fn target_default() -> i32 {
 }
 
 // ════════════════════════════════════════════════════
-// target_name — tag → triple string (also QBE -t flag for v2.0.0)
-// Only TARGET_AMD64_WIN is actually passed to QBE; the other two fatal at
-// cg_module before QBE invocation.
-// ════════════════════════════════════════════════════
-
-fn target_name(t: i32) -> *u8 {
-    if t == TARGET_AMD64_WIN()              { return "amd64_win" as *u8; }
-    if t == TARGET_AMD64_WIN_FREESTANDING() { return "amd64_win_freestanding" as *u8; }
-    if t == TARGET_AMD64_SYSV()             { return "amd64_sysv" as *u8; }
-    if t == TARGET_AMD64_SYSV_FREESTANDING(){ return "amd64_sysv_freestanding" as *u8; }
-    return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
-}
-
-// ════════════════════════════════════════════════════
-// target_qbe_flag — tag → QBE -t flag string
-// v2.1.0: hosted + freestanding both emit MS x64 (D-GUI-12). Only amd64_sysv
-// is a real QBE-different target (ships v2.x M2).
-// ════════════════════════════════════════════════════
-
-fn target_qbe_flag(t: i32) -> *u8 {
-    if t == TARGET_AMD64_WIN()              { return "amd64_win" as *u8; }
-    if t == TARGET_AMD64_WIN_FREESTANDING() { return "amd64_win" as *u8; }
-    if t == TARGET_AMD64_SYSV()             { return "amd64_sysv" as *u8; }
-    if t == TARGET_AMD64_SYSV_FREESTANDING(){ return "amd64_sysv" as *u8; }
-    return "amd64_win" as *u8;  // unreachable; satisfy -Wreturn-type
-}
-
-// ════════════════════════════════════════════════════
-// target_help — multi-line help text for --help CLI
-// v2.4.0 Stage 1: includes status notes per target. Returned as a static
-// C string literal; caller (main.jhyy --help) printf it directly.
-// Mirrors C-side target_help() in compiler/src/target/target_dispatch.c.
+// target_help — --help 的 target 列表
+//
+// 2026-11-05:以前这里写的是 v2.x 时代的版本标记("v2.1.0+, OVMF demo v2.3.0"
+// / "v2.7.0 Phase 2b wire" / "v2.7.1 ship")—— 在 v4.1.3 的二进制里那些标记
+// 对用户零信息量(v2 轴早在 v2.16.0 终结)。现在写**能力**:每个 target 是什么,
+// 以及**能不能链接**。
 // ════════════════════════════════════════════════════
 
 fn target_help() -> *u8 {
-    return "targets:\n  amd64_win                x86_64-w64-mingw32 (default; hosted Windows)\n  amd64_win_freestanding   x86_64-w64-none (UEFI; v2.1.0+, OVMF demo v2.3.0)\n  amd64_sysv               x86_64-linux-none (v2.7.0 Phase 2b wire)\n  amd64_sysv_freestanding  x86_64-linux-none-freestanding (v2.7.1 ship)\n" as *u8;
-}
-
-// ════════════════════════════════════════════════════
-// target_status — short status suffix for a target (v2.4.0 helper)
-// Used by main.jhyy to print "(default)" / "(UEFI)" / "(v2.x M2)" next to
-// each target in error messages. Returns static string.
-// ════════════════════════════════════════════════════
-
-fn target_status(t: i32) -> *u8 {
-    if t == TARGET_AMD64_WIN()              { return "(default; hosted Windows)" as *u8; }
-    if t == TARGET_AMD64_WIN_FREESTANDING() { return "(UEFI; v2.1.0+, OVMF demo v2.3.0)" as *u8; }
-    if t == TARGET_AMD64_SYSV()             { return "(v2.7.0 ship)" as *u8; }
-    if t == TARGET_AMD64_SYSV_FREESTANDING(){ return "(v2.7.1 ship)" as *u8; }
-    return "" as *u8;
-}
-
-// ════════════════════════════════════════════════════
-// target_abi_module — v2.7.0 Phase 2a chokepoint
-//
-// tag → ABI module name (string). cg_module per-target dispatch
-// imports the named module. The mapping is:
-//   TARGET_AMD64_WIN               → "abi_amd64_win"
-//   TARGET_AMD64_WIN_FREESTANDING  → "abi_amd64_win_freestanding"
-//   TARGET_AMD64_SYSV              → "abi_amd64_sysv"
-//   TARGET_AMD64_SYSV_FREESTANDING → "abi_amd64_sysv_freestanding"
-//
-// Phase 2a: 函数已加 + ABI modules 已 ship (Phase 1 commit a9c874d),但
-// cg_module 内 import dispatch 留 Phase 2b (per v2.7.0-plan.md § 2i)。
-// ════════════════════════════════════════════════════
-
-fn target_abi_module(t: i32) -> *u8 {
-    if t == TARGET_AMD64_WIN()              { return "abi_amd64_win" as *u8; }
-    if t == TARGET_AMD64_WIN_FREESTANDING() { return "abi_amd64_win_freestanding" as *u8; }
-    if t == TARGET_AMD64_SYSV()             { return "abi_amd64_sysv" as *u8; }
-    if t == TARGET_AMD64_SYSV_FREESTANDING(){ return "abi_amd64_sysv_freestanding" as *u8; }
-    return "abi_amd64_win" as *u8;  // default (unknown → Win, 跟 v2.6.8 兼容)
+    return "targets:\n  amd64_win                x86-64-w64-mingw32 (default; hosted Windows) - the only target this build can link\n  amd64_win_freestanding   x86-64-w64-none (UEFI; freestanding, no libc) - .s only (--no-link)\n  amd64_sysv               x86-64-linux-none (Linux; SysV ABI) - .s only (--no-link)\n  amd64_sysv_freestanding  x86-64-linux-none-freestanding (Linux; no libc) - .s only (--no-link)\n" as *u8;
 }

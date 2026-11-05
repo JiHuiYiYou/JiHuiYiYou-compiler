@@ -197,9 +197,23 @@ cat test.s
 python scripts/dev/bump_version.py set 4.1.2   # 刷 VERSION + 全仓版本串(hash 置为待填占位)
 make                                           # main.jhyy 的字面量变了 -> 自举产物必须重编
 pwsh -File installer/build.ps1 bundle          # 构建
-python scripts/dev/bump_version.py finalize     # 回填 sha256(scoop hash + winget InstallerSha256)
+python scripts/dev/bump_version.py finalize     # 回填 sha256(scoop/winget)+ **实测产物体积**(FACTS.md § 1 + 两份 README)
 python scripts/dev/bump_version.py check        # 零漂移门(CI 也跑)
 ```
+
+**`finalize` 这一步做两件事**，都只能在**产物就在手边**的时候做：
+
+- **回填 sha256** —— scoop 的 `hash` + winget 的 `InstallerSha256`。
+- **回填产物体积** —— **实测** `installer/build-artifacts/` 里产物多大，就往
+  [`FACTS.md` § 1](../internal/FACTS.md) 与两份 README 的安装表写多大；
+  同时把 FACTS 产物名里的**版本段**刷成当前 `VERSION`（`set` 不碰 FACTS ⇒
+  这一格以前没人管，产物名会停在上一版）。
+  ⇒ 体积从此**不是手打的**：以前 `55 MB` / `28 MB` / `1.9 MB` 全是人写的，
+  打包变了没人知道；而 docs 门 `check_artifact_sizes` 只保证「FACTS 与两份
+  README 一致」，**不保证为真**（它自己的注释原话）。
+
+> ⚠️ **`finalize` 必须跑在 `bundle` 之后** —— 它量的是产物，不是源码里的数字。
+> 跳过它 ⇒ 体积停在上一版的值（`check` 会因 FACTS 的产物名版本对不上而红）。
 
 **顺序不能反**：编译器版本号只能是 `main.jhyy` 里的**字符串字面量** ——
 改成运行时读文件 / 调 extern 需要新增局部变量，而**新增局部变量会移位模块级

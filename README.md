@@ -13,9 +13,12 @@
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![中文](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
 
-[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v413) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
+[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Gotchas](#known-limitations) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v413) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
+
+**[Chinese version →](README.zh-CN.md)** ｜ This page describes **v4.1.3**. The language-spec baseline is **v4.0.0** (locked 2026-10-24); the v4.1.x deltas are in [CHANGELOG.md](CHANGELOG.md).
+
+**Three ways in** — **Use it** → [Install](#install) · [Quick Start](#quick-start) · [CLI](#cli) ｜ **Build it** → [CONTRIBUTING.md](CONTRIBUTING.md) ｜ **Study it** → [Architecture](#architecture) · [language spec](docs/abis/jhyy-lang-spec-v4.0.0.md)
 
 </div>
 
@@ -82,11 +85,18 @@ fn main_jhyy() -> i32 {
 }
 ```
 
+> ℹ️ Two things the tour is not showing: a string literal **is** a `*u8`
+> (NUL-terminated UTF-8 bytes), so no cast is needed; and `extern fn` has **no
+> variadic form** — every C argument is spelled out one by one, and the JHYY-side
+> parameter types are **not checked** against the C signature.
+
 ---
 
 ## Install
 
-**End users (Windows x64)** — grab the installer from
+### End users (Windows x64)
+
+Grab the installer from
 [**GitHub Releases**](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/latest).
 **MSYS2 is not required**: since v4.1.0 the installer bundles a minimal native ucrt64
 toolchain (`<INSTALLDIR>\toolchain\`).
@@ -98,32 +108,57 @@ toolchain (`<INSTALLDIR>\toolchain\`).
 
 Checksums are published alongside the assets as `SHA256.txt`.
 
-**Building from source** — needs MSYS2 + `mingw-w64-ucrt-x86_64-gcc` (the compiler
-*build* host requirement; end users don't need it):
+**VSCode users**: with the extension installed, `.jhyy` files get a ▶ run button in the
+title bar (`Ctrl+F5`). Opening this repo triggers `.vscode/settings.json`, which adds
+`compiler/build/bin` and the MSYS2 ucrt64 path to the integrated terminal — press
+`Ctrl+Shift+B` to compile + run any `.jhyy` file.
+
+### Not on Windows?
+
+**The compiler itself is Windows-only** — `jhyy.exe` is a PE executable, and the
+host must be Windows (or Wine). That is a design decision, not a bug
+([`docs/internal/build.md`](docs/internal/build.md)).
+
+The **output** is not Windows-only: the `amd64_sysv*` targets emit SysV assembly that
+links and runs on Linux. The chain is three steps:
+
+```bash
+# 1. on Windows — emit the .s (a cross target must not be linked)
+./compiler/build/bin/jhyy.exe compile --target=amd64_sysv_freestanding --no-link prog.jhyy -o prog
+#    ⇒ prog.s
+
+# 2. on Linux — link it into a static ELF
+gcc -nostdlib -static -T runtime/linux_elf/link.ld -o prog.elf \
+    runtime/linux_elf/crt0.S prog.s
+
+# 3. run it
+./prog.elf
+```
+
+CI runs exactly this chain on `ubuntu-latest` — see
+[`compiler/tests/bootstrap/sysv_link_run.sh`](compiler/tests/bootstrap/sysv_link_run.sh).
+The Linux runtime calls `main_jhyy` (not `main`) and exits with its return value, so
+the entry convention is the same as on the hosted side — but the link is `-nostdlib`,
+so a freestanding program must not call libc.
+
+### Building from source
+
+Needs MSYS2 + `mingw-w64-ucrt-x86_64-gcc` (the *build host* requirement — end users
+don't need it):
 
 ```bash
 git clone https://github.com/JiHuiYiYou/JiHuiYiYou-compiler.git
 cd JiHuiYiYou-compiler
-make all        # → compiler/build/bin/jhyy.exe (~1.9 MB)
+make all        # → compiler/build/bin/jhyy.exe (~2 MB)
 ```
 
 > [!IMPORTANT]
 > Do NOT use the MinGW `gcc` shipped with Git Bash (`/c/Program\ Files/Git/mingw64/bin/gcc.exe`)
 > — it does not support PE+ linking and fails at link time.
 
-**Docker**:
-
-```bash
-# compiler host — full toolchain (Windows)
-docker run -it msys2/mingw-w64-ucrt-x86_64 bash
-# amd64_sysv target toolchain — link + run the emitted .s on Linux
-# (jhyy.exe is a PE binary: it does NOT run inside this container)
-docker run -it gcc:12 bash
-```
-
-**VSCode users**: opening this repo triggers `.vscode/settings.json` to add
-`compiler/build/bin` and the MSYS2 ucrt64 path to the integrated terminal. Press
-`Ctrl+Shift+B` to compile + run any `.jhyy` file.
+The toolchain story (lookup order, the classic traps, version automation, multi-target
+builds) is in [`docs/internal/build.md`](docs/internal/build.md); the contributor
+workflow is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
@@ -164,8 +199,7 @@ import io;
 extern fn puts(s: *u8) -> i32;
 
 fn main_jhyy() -> i32 {
-    io::std_io_print("hello from the JHYY stdlib
-" as *u8);
+    io::std_io_print("hello from the JHYY stdlib\n");
     puts("and from libc, through extern fn");
     0
 }
@@ -182,17 +216,35 @@ fn main_jhyy() -> i32 {
 | `os` | raw POSIX / Win32 file descriptors + `getenv` |
 | `arena` | bump allocator: `arena_init` / `arena_alloc` / `arena_reset` |
 
-> [!WARNING]
-> **The stdlib is small and young**: no float formatter, no `abs` / `min` / `max`,
-> no `Vec<T>` over element types, and no `print` macro yet. The planned stdlib
-> work is tracked in [FACTS.md § 4](docs/internal/FACTS.md).
+> ℹ️ A string literal is **already** a `*u8` — NUL-terminated UTF-8 bytes placed in
+> `.data`. The `as *u8` cast seen in older examples is redundant. `\n` is the
+> newline escape (the lexer happens to tolerate a raw newline inside a literal,
+> but that is undocumented — don't rely on it).
+
+Known gaps in the stdlib → [Known limitations](#known-limitations).
 
 ### Run the regression suite
 
 ```bash
 python regress.py
-# => 274/274 passed (all with assertions), 0 failed, 20 skipped (of 294 total)
+# => 274 passed, 20 skipped (294 total)
 ```
+
+What those numbers mean — one term, one definition each (the counts themselves live
+in the [Status](#status-v413) table). The tool reports it as
+`passed=274/294 failed=0` and `skipped=20`:
+
+- **total** — every `.jhyy` file in `compiler/tests/examples/` except the
+  `_`-prefixed helper fixtures.
+- **runnable** — the harness runs these and checks a signal for each one.
+- **real assertions** — the signal is an assertion written in the test source.
+- **harness-decided** — the rest: the case expects a compile error
+  (`// EXPECT-ERROR:`), or compares the process exit code.
+- **skipped** — the case carries a `// SKIP:` directive, or is a library module with
+  no entry point.
+
+The assertion-strength audit (`python scripts/dev/audit_test_assertions.py --strict`)
+reports **0 zero-signal** cases: no test passes without something being checked.
 
 ### Verify the self-host closure
 
@@ -225,6 +277,16 @@ With the extension installed, `.jhyy` files get a ▶ run button in the title ba
 | **OS / embedded** | `#[no_std]`, `#[naked]`, `#[link_section]`, `volatile`, inline `asm!`, memory barriers |
 | **Stdlib** | `import mem;` / `fmt` / `io` / `math` / `string` / `vec` / `os` / `arena` — **note: no `std::` prefix** (`import std::vec;` is a compile error) |
 
+The table above mixes very different states of maturity. The four entries below
+are the ones that are easy to misread:
+
+| Feature | State | What that means in practice |
+|---|---|---|
+| `[*]T` (slice) | ✅ usable | a **view** over an array — writes go through to the original, and indexing is **not** bounds-checked |
+| `PhantomData<T>` | ⚠️ type-level only | legal as a struct field; instantiating it is a compile error (`E0050`) |
+| `asm!` | ⚠️ limited | a **single string literal** only — no operand constraints, no clobbers; AT&T syntax, x86-64 only |
+| `Cap<T>` | 🚧 layout only | the 8-byte layout is fixed and testable, but you cannot construct a value yet — real capability semantics land in v4.14 |
+
 Full specification: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md)
 (locked 2026-10-24; it replaces v1.3.0 + 17 v3.x supplements, both archived to git history).
 Known limitations are collected in its **Appendix B**, not scattered through the prose.
@@ -235,33 +297,87 @@ Known limitations are collected in its **Appendix B**, not scattered through the
 
 ```text
 jhyy compile <file.jhyy> [-o output]   compile + link -> .exe
-jhyy build   <file.jhyy> [-o output]   compile only -> .s (no link)
+jhyy build   <file.jhyy> [-o base]     compile only -> .s (no link; -o is a base name, .s appended)
 jhyy run     <file.jhyy>              compile + link + execute
-jhyy dump    <file.jhyy>              ⚠️ not implemented yet (exits 1)
+jhyy dump    <file.jhyy>              print the parsed AST tree (parse only)
 
 flags:
   --target=<triple>  select target (default amd64_win)
-  --no-link          compile to .s only, skip the gcc link (for cross toolchains)
+  --no-link          compile to .s only, skip the gcc link (required for cross targets)
   --help             show help and exit
 ```
 
-Targets: `amd64_win` (default, hosted Windows) · `amd64_win_freestanding` (UEFI) ·
-`amd64_sysv` · `amd64_sysv_freestanding`.
+Targets: `amd64_win` (default, hosted Windows — **the only target this build can
+link**) · `amd64_win_freestanding` (UEFI) · `amd64_sysv` ·
+`amd64_sysv_freestanding` (the latter three produce a `.s` only — link it with
+a toolchain that matches the target).
 
-> [!IMPORTANT]
-> **The command line takes exactly one input file.** Extra `.jhyy` arguments are
-> **silently ignored** — no error, no warning — so `jhyy compile main.jhyy lib.jhyy`
-> compiles **only** `main.jhyy`.
-> Combine files with `import` instead: put `import lib;` in `main.jhyy` and the
-> compiler pulls `lib.jhyy` in along the import graph.
->
-> ⚠️ **There is no `jhyy --version`** — it never existed. Running it prints
-> `unknown command` and exits 1. The version banner is the **first line of
-> `jhyy --help`** (and of `jhyy` with no arguments).
->
-> ✅ `jhyy build` and `jhyy compile --no-link` now produce **byte-identical** `.s`
-> (both apply `#[link_section]`, so the `.section` directives match too). The
-> equivalence is pinned by the `link_section_build` artifact check.
+`jhyy dump` prints the **parsed AST** — one node per line, children indented, every
+line tagged with `@file:line:col`. It stops after parsing, so it shows the *syntax*,
+not the compiled form (use `jhyy build` for the `.s`).
+
+> ℹ️ **Two different "builds".** `jhyy build` means "compile one `.jhyy` file to
+> assembly". `make all` means "build the compiler". They are unrelated — renaming
+> either would be a breaking change.
+
+Command-line quirks (one input file, no `--version`, cross targets, and the rest)
+→ [Known limitations](#known-limitations).
+
+---
+
+## Known limitations
+
+Everything below is a **real, current limitation**, not a roadmap item. The
+authoritative per-item version, with anchors, is the spec's
+[**Appendix B**](docs/abis/jhyy-lang-spec-v4.0.0.md#附录-b未实装--已实装但受限);
+this section is the short index, grouped by whether it will bite you while writing
+code or only while typing commands.
+
+### Affects the code you write
+
+- **String literals are `*u8`** — NUL-terminated UTF-8 in `.data`. Not a slice, not
+  an array: `let s: [*]u8 = "x";` is a type error (write `as [*]u8`).
+- **`extern fn` has no variadic form** — a C function like `printf` must have every
+  argument declared individually, and the declared parameter types are **not checked**
+  against the C signature. A mismatch compiles and misbehaves at runtime.
+- **Function argument types are not checked** — passing an `i32` where a `struct` is
+  expected compiles, and reads the register as a struct at runtime.
+- **Source files are UTF-8.** The lexer tolerates a raw newline inside a string
+  literal; that is undocumented — use `\n`.
+- **`Cap<T>` cannot be constructed** — the 8-byte layout is fixed, but there is no
+  value to make yet.
+- **`PhantomData<T>` cannot be instantiated** (`E0050`) — it is a type-level marker.
+- **Slices are unchecked** — no bounds check on indexing; writes through a slice
+  write through to the original array.
+- **`asm!` is a single string literal** — no operand constraints, no clobbers;
+  AT&T syntax, x86-64 only.
+- **`()` is not accepted in type position** — `let x: () = ();` is a parse error.
+- **Top-level variable initializers must be integer constant expressions** — a
+  non-integer initializer is silently dropped and reads back as `0`.
+- **The stdlib is small and young** — no float formatter, no `abs` / `min` / `max`,
+  no `Vec<T>` over element types, and no `print` macro yet.
+
+### Affects the command line only
+
+- **There is no `jhyy --version`** — it never existed. Running it prints
+  `jhyy: unknown option --version` (plus a `try jhyy --help` hint) and exits 1.
+  The version banner is the **first line of `jhyy --help`** (and of `jhyy` with no
+  arguments — both print the same help).
+- **Exactly one input file.** Extra `.jhyy` arguments are **silently ignored** — no
+  error, no warning — so `jhyy compile main.jhyy lib.jhyy` compiles **only**
+  `main.jhyy`. Combine files with `import` instead: put `import lib;` in
+  `main.jhyy` and the compiler pulls `lib.jhyy` in along the import graph.
+- **Unrecognized options are rejected** — `jhyy compile --foo a.jhyy` reports
+  `compile: unknown option --foo`; it does not mistake the flag for a file name.
+- **Cross targets cannot be linked by this build.** `--target=amd64_sysv` (and the
+  freestanding ones) emit code with that target's ABI, but the bundled linker always
+  produces a **Windows `.exe`** — linking a SysV `.s` with it yields a binary that
+  crashes at the first libc call. The compiler now **refuses** to link a cross
+  target: pass `--no-link` and link the `.s` yourself with a matching toolchain
+  (that is what `runtime/linux_elf/` is for).
+- **`jhyy build` and `jhyy compile --no-link` produce byte-identical `.s`** (both
+  apply `#[link_section]`, so the `.section` directives match too). The
+  equivalence is pinned by the `link_section_build` artifact check.
 
 ---
 
@@ -272,10 +388,10 @@ flowchart TB
     src[".jhyy source"] --> lex["Lexer → Token stream"]
     lex --> parse["Parser → AST"]
     parse --> sema["Sema → annotated AST"]
-    sema --> il["codegen.jhyy<br/>emits QBE-style IL text to memory"]
+    sema --> il["codegen.jhyy<br/>emits IL text to memory<br/>(own format, QBE-style syntax)"]
     il --> sb["codegen_amd64_inmem<br/>lex → parse → emit → peephole"]
     sb --> asm[".s (amd64)"]
-    asm --> ln["as + ld (gcc)"]
+    asm --> ln["as + ld (gcc)<br/>(Windows host only)"]
     ln --> exe[".exe (PE/COFF) / ELF"]
 ```
 
@@ -289,7 +405,8 @@ flowchart TB
 
 **Why no QBE?** QBE was removed in v4.0.0 (post-v2.16.0). The self-written backend is now
 the sole codegen path — that removes a 17K-LOC vendored dependency and tightens the
-iteration loop on codegen itself.
+iteration loop on codegen itself. The **IL text is JHYY's own format**: it borrows QBE's
+*syntax* as a starting point, but no QBE code is vendored, linked, or executed.
 
 ---
 
@@ -303,7 +420,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests (294 .jhyy files + 5 subdirectories) — run by regress.py
+│   │   ├── examples/           integration tests — 294 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -317,21 +434,24 @@ JiHuiYiYou-compiler/
 └── tools/                      cross-repository tools
 ```
 
+> ℹ️ `jhyy_v1.exe.exe` is **not** a typo: `make` regenerates it as a byte-identical
+> copy of `jhyy.exe` on every build, and the double extension is the historical
+> name. Nothing depends on the name — it is a build artifact, not an input.
+
 ---
 
 ## Status (v4.1.3)
 
-In plain terms: **the test suite is green** — every case passes, none fails, and
-every test asserts something that could actually fail. The compiler compiles
-itself to a byte-identical result, and the workaround ledger has **no known
-unfixed compiler bug**. The table below is the machine-readable version;
-[FACTS.md § 2](docs/internal/FACTS.md) is the single source of truth for these
+In plain terms: **the regression suite is green** — every runnable case is checked and
+none fails. The compiler compiles itself to a byte-identical result, and the workaround
+ledger has **no known unfixed compiler bug**. The table below is the machine-readable
+version; [FACTS.md § 2](docs/internal/FACTS.md) is the single source of truth for these
 numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP** (294 total) |
-| Assertion audit | 294 scanned / 274 runnable / 213 real assertions / 0 zero-signal |
+| `regress.py` (regression suite) | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP** (294 total) |
+| Assertion audit | 294 scanned · 274 runnable · 213 real assertions · 0 zero-signal |
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
@@ -345,6 +465,15 @@ numbers.
 **Changelog** — [`CHANGELOG.md`](CHANGELOG.md) has one line per release; the detailed
 per-axis record is the v4 umbrella,
 [`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md).
+
+**What byte-identical does and does not prove.** The closure gate proves that the
+compiler **reproduces itself exactly** — a statement about *generation determinism*,
+not about *semantic correctness* (the classic "trusting trust" gap). Semantic
+correctness is covered separately, by `regress.py`.
+
+**What "no known unfixed compiler bug" means.** The ledger is public and maintained
+([`docs/internal/workarounds.md`](docs/internal/workarounds.md)) — "no known" means no
+*recorded* one, not a proof of absence.
 
 ### What works today, and what doesn't
 

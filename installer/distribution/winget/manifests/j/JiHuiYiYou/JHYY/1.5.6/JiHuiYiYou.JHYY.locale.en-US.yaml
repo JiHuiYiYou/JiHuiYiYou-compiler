@@ -1,3 +1,5 @@
+# Created with winget manifest schema v1.9.0
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
 # winget locale manifest (en-US) - JHYY 1.5.6
 #
 # *** SUPERSEDED in v1.5.9 / v1.5.10 ***
@@ -10,6 +12,7 @@
 #   zh-CN via Locale.zh-CN.wxl; winget locale is for store-style descriptions
 #   which English-first is the common Windows convention).
 
+PackageIdentifier: JiHuiYiYou.JHYY
 PackageVersion: 1.5.6
 PackageLocale: en-US
 Publisher: JiHuiYiYou
@@ -45,5 +48,5 @@ ReleaseNotes: |-
   for the full v1.5.x umbrella changelog.
 ReleaseNotesUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/archive/logs/v1/changelog-v1.5.0.md
 PurchaseUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler
-ManifestType: locale
-ManifestVersion: 1.5.0
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

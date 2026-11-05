@@ -213,6 +213,8 @@ fn node_kind_name(kind: i32) -> *u8 {
     if kind == NODE_ASM_BLOCK()     { return "ASM_BLOCK" as *u8; }
     if kind == NODE_VOLATILE_TYPE() { return "VOLATILE_TYPE" as *u8; }
     if kind == NODE_BUILTIN_FENCE() { return "BUILTIN_FENCE" as *u8; }
+    if kind == NODE_REF_TYPE()      { return "REF_TYPE" as *u8; }
+    if kind == NODE_CONST_DECL()    { return "CONST_DECL" as *u8; }
     if kind == NODE_CLOSURE_LITERAL() { return "CLOSURE_LITERAL" as *u8; }
     return "?" as *u8;
 }

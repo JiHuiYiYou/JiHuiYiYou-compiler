@@ -3400,6 +3400,92 @@ FNV 偏移基（`0xcbf29ce484222325`，量值 ≥ 2⁶³）不再被饱和 ⇒ *
 
 ---
 
+## v4.1.4 — CLI 层说实话:交叉 target 不再静默链出坏二进制 · `--no-link` 全局化 · 未知选项不再当文件名
+
+**日期:** 2026-11-05 · **台账:** W-196 … W-200
+**性质:** **待发布**(change slot —— 还没打 tag / 发产物)。
+
+> 起因:用户把 `jhyy --help` 的输出贴出来问「有没有什么不妥」⇒ 一轮 CLI 审查
+> 挖出 9 处问题(3 处是**真缺陷**——会产出错的东西;6 处是文案 / 死代码)。
+> 本段记这一批。
+
+### 三个真缺陷
+
+| # | 症状 | 台账 |
+|---|---|---|
+| 1 | **`jhyy --target=amd64_sysv compile x.jhyy` 静默产出按 Win64 调用约定的 PE** —— 编译器 **exit 0**、stderr 只有进度行,产物是 192 KB 的 **Windows PE**(MZ 头);跑起来调 libc 时**段错误**(exit 139)。根因:`link_with_gcc` 链的是**宿主 Windows 工具链**(gcc + `runtime.c` + `.exe` 后缀),而 `--target` 只影响**代码生成**的 ABI、不影响链接器 ⇒ SysV ABI 的 .s 被链成 Win64 PE,调用 libc 时参数寄存器错位。⇒ 现在**交叉 target 一律要求 `--no-link`**,拿 .s 去用匹配的工具链链 | W-196 |
+| 2 | **`--no-link` 只能在 `compile` 后面写** —— 顶层只剥 `--target=`,`--no-link` 只在 `cmd_compile` 里解析 ⇒ GNU 风格的 `jhyy --no-link compile x.jhyy` 落到 "unknown command";而 `jhyy build --no-link x.jhyy` 更糟:`build` 不认这个 flag ⇒ 它被当成**文件名** ⇒ "cannot open file"。⇒ 现在 `--no-link` 跟 `--target=` 一样在**顶层**扫描 + 压缩 | W-197 |
+| 3 | **未知选项被当成输入文件名** —— `jhyy compile --foo x.jhyy` 去打开一个叫 "--foo" 的文件,报错只说 "cannot open file"、**不说是哪个文件**。⇒ 现在 compile / build / run 都直接报 "unknown option" + 指引 | W-198 |
+
+### 文案 / 一致性
+
+| # | 改了什么 | 台账 |
+|---|---|---|
+| 4 | **`-o foo.s` 产出 `foo.s.s`** —— `.s` 后缀在三处(`build_il` / `cmd_build` / `cmd_compile`)各自**无条件**追加;`.exe` 那侧早有 `str_ends_with_exe` 的先例(P2-5),`.s` 侧没有 ⇒ 现在统一走 `asm_path_of()`:**后缀已经有了就别再追加** | W-199 |
+| 5 | **`jhyy`(无参数)给的是阉割版 help** —— 没有 targets、没有 `--no-link`、`dump` 那行还不标「未实现」,而且短版里**没告诉**用户 `--help` 有完整版 ⇒ 现在只有**一份** `print_help()`,两条路径都走它 | W-200 |
+| 6 | **`--help` 的 target 列表带 v2.x 时代标记**(`v2.1.0+, OVMF demo v2.3.0` / `v2.7.0 Phase 2b wire` / `v2.7.1 ship`)—— v2 轴早在 v2.16.0 终结,那些标记对用户零信息量 ⇒ 改写**能力**:每个 target 是什么 + **能不能链接** | W-200 |
+| 7 | **`unknown command` 不给任何提示** ⇒ 现在带命令清单 + `jhyy --help` 指引;`unknown target` 的错误消息同样去掉 v2.x 标记,补一句「只有 amd64_win 能被这个 build 链接」 | W-200 |
+| 8 | **`target_dispatch.jhyy` 里 5 个死函数被删**(`target_name` / `target_qbe_flag` / `jh_target_count` / `target_status` / `target_abi_module`)—— 它们带着「Mirrors C-side ... .c」(那文件 v4.0.21 就删了)与「only ... passed to QBE」(QBE 早没了)这类过期注释 | W-200 |
+| 9 | **语言规范 § 16 的 CLI 表订正** —— `build` 那一行写的是「编译 + 链接」(**反了**,`build` 只编译)、`dump` 那一行写的是「打印 AST / 定型 IR」(实现是 stub,exit 1)⇒ 两处都跟实现对不上(v4.1.2 修了 help 里的同一处,规范漏了);顺带补上 `--no-link` 的位置语义、未知选项的拒绝行为、交叉目标必须 `--no-link` 这条 | W-200 |
+
+### 新功能：`jhyy dump` 真的能 dump 了
+
+`jhyy dump <file.jhyy>` 以前是 **stub**（打一行 "not implemented" 然后 exit 1）——
+而 help / 语言规范 / 两份 README 都写着「打印 AST 供调试」⇒ CLI 在说谎。
+现在它**只跑 parse**（lex → parse → 打印），不跑 sema / codegen ⇒ 看的是
+**语法长什么样**，不是「编译成什么样」。
+
+打印形状（**每行一个节点**，子节点缩进一级）：
+
+```
+MODULE @hello.jhyy:3:1 no_std=0 ndecls=1
+  FUNC_DECL @hello.jhyy:3:1 name=main_jhyy nparams=0 extern=0 inline=0 naked=0
+    IDENT @hello.jhyy:3:19 name=i32
+    BLOCK @hello.jhyy:3:1 nstmts=1
+      EXPR_STMT @:4:5
+        INT @hello.jhyy:4:5 value=42 prim=2
+```
+
+- 新模块 `compiler/src0/ast_dump.jhyy`：**单函数大 if 链** —— jhyy 不支持
+  forward reference ⇒「按 kind 分派到小函数」那条路走不通（小函数要回调
+  `ad_node` ⇒ 互相递归）⇒ 跟 codegen 的 `cg_expr` 是同一个形状；
+- `node_kind_name` 补了 **`CONST_DECL` / `REF_TYPE`** 两个漏掉的 kind ⇒
+  以前这两个节点在 dump 里只能打成 `?`；
+- f64 **没有十进制打印器**（jhyy 的 sprintf 只能带一个 i32，且 Win64 的变参
+  约定把浮点放在 XMM ⇒ 不能直接调 C sprintf）⇒ 浮点打**位模式**（hex），
+  精确且不骗人；
+- **空节点不打印**（例如没有 else 的 if、没有 init 的 return）⇒ 少一行噪音。
+
+⇒ ⚠️ **实装 dump 时顺手挖出一个潜伏的 parser bug**：`ast_new_expr_stmt` 的
+**文件名参数**传的是**节点指针**（4 处调用点）⇒ 每个表达式语句节点的
+`loc_filename` 里存着个 *Node 指针（当 C 字符串用就是 UB）。以前没人读那个
+字段 ⇒ 一直没炸；dump 一打印就露馅（位置打成 `@:4:5`，没有文件名）。
+⇒ 4 处全改成传 `(*ex).loc_filename`；**产物的 `.s` 不变**（codegen 只读
+module 的 loc_filename）⇒ 自举闭环 / fixed-point 不受影响。（台账 **W-202**）
+
+### 顺带：第三方包管理的 manifest 修好了（但**没有**提交上游）
+
+用户问「那段是否过时了」⇒ 一查发现：**manifest 本身是坏的**，而且坏了好几年没人
+知道 —— v1.5.5 决策里写的「**只到 schema validate 阶段**」这步**从没做过**。
+
+| # | 坏在哪 | 现在 |
+|---|---|---|
+| 1 | **winget 三件套装反了** —— `.yaml` 里装的是 installer、`.installer.yaml` 里装的是 version；且用的是 1.5.0 旧 schema（`PackageLocale` vs `DefaultLocale`）⇒ `winget validate` 第一句就红 | 换回来 + 现行 schema 1.9.0 + 三件套各自的 `yaml-language-server` 头 ⇒ **本机 `winget validate` 零警告通过** |
+| 2 | **scoop manifest 的脚本用 `//` 注释** —— scoop 的脚本是 **PowerShell** ⇒ `//` 会被**当命令执行** ⇒ 安装报错 | 说明文字挪进 `notes` 字段（scoop 装完显示，不是脚本） |
+| 3 | **scoop 的 `uninstaller` 全是注释** ⇒ `scoop uninstall jhyy` 是**空操作**（程序还在盘上，scoop 以为卸干净了） | 改成真跑 `msiexec /x {UpgradeCode} /quiet` |
+
+⇒ `checkver` / `autoupdate` 的正则对着**线上** tags 页与 SHA256.txt 实测命中 ✓。
+⇒ **上游 PR 仍然没提**（2026-11-05 决定：先不发，把 manifest 修好收工）；
+将来若发：**scoop 先走个人 bucket**，winget 走 winget-pkgs PR。
+⇒ 事实与决定记在 [`FACTS.md` § 4.5](../../../internal/FACTS.md)；台账 **W-203 / W-204**。
+
+### 连带改动
+
+- `regress.py --cross=wsl` 分支加 `--no-link`(跟 `--cross=docker` 分支同一条规矩)——
+  交叉 target 的链接现在被编译器拒绝。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

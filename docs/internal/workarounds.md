@@ -299,31 +299,40 @@
 | [W-168](#w-168) | RESOLVED | `jhyy build` **不解析 `-o`** + **成功时退出码是 2** —— CLI... |
 | [W-169](#w-169) | SUPERSEDED | 「codegen 里禁嵌套 `&&`/`||` 短路」约定 —— QBE 时代遗留,in-mem... |
 | [W-170](#w-170) | RESOLVED | `jhyy build` **不处理 `#[link_section]`** ⇒ 该... |
-| [W-171](#w-171) | RESOLVED | 无符号序比较(`cu*`)emitter 没配 ⇒ 落 `add` 兜底 ⇒ 返回两数之和 |
-| [W-172](#w-172) | RESOLVED | 切片元素赋值整个被丢弃(无 store)+ `let mut` 绑定切片读也是垃圾值 |
-| [W-173](#w-173) | RESOLVED | 顶层 `let` 初始化器只对整数字面量求值 ⇒ 表达式 / f64 / struct 拿不到值 |
-| [W-174](#w-174) | SUPERSEDED | 数组按值传参 ⇒ callee 改到**调用方**数组 —— spec §10.1 措辞与 ABI §3.3 矛盾 |
+| [W-171](#w-171) | RESOLVED | 无符号序比较(`cu*`)在 emitter 里**没配** ⇒ 落 `add` 兜底 ⇒... |
+| [W-172](#w-172) | RESOLVED | 切片元素赋值**整个被丢弃**(无 store)+ `let mut` 绑定切片**读也是垃圾值** |
+| [W-173](#w-173) | RESOLVED | 顶层 `let` 初始化器**只对整数字面量求值** ⇒ 表达式 / f64 / struct... |
+| [W-174](#w-174) | SUPERSEDED | 数组按值传参 ⇒ callee 改到**调用方**数组 —— spec §10.1 措辞与 ABI... |
 | [W-175](#w-175) | RESOLVED | `if/else` 分支块类型规则未入 spec + 报错无「怎么改」指引 |
 | [W-176](#w-176) | SUPERSEDED | stdlib 命名风格不统一 + 「import 后怎么调用」的规则没写进规范 |
 | [W-177](#w-177) | RESOLVED | `std/fmt.jhyy` 的过期注释 —— 「jhyy 不支持 *u8 + i64」 |
-| [W-178](#w-178) | RESOLVED | `-o` 的输出路径**无条件追加 `.exe`** ⇒ `-o game_run.exe` 得到 `game_run.exe.exe` |
-| [W-179](#w-179) | SUPERSEDED | `while` 里的 `continue` 跳过自增 ⇒ 死循环(惯用手写 while 的坑) |
+| [W-178](#w-178) | RESOLVED | `-o` 的输出路径**无条件追加 `.exe`** ⇒ `-o game_run.exe` 得到... |
+| [W-179](#w-179) | SUPERSEDED | `while` 里的 `continue` 跳过自增 ⇒ 死循环（惯用手写 while 的坑） |
 | [W-180](#w-180) | RESOLVED | `&mut [i32; N]` / `&T` **不能索引** ⇒ 「通过引用改数组元素」不可用 |
 | [W-181](#w-181) | SUPERSEDED | 数组 / 切片下标**不做运行时边界检查** ⇒ 越界直接踩内存 |
 | [W-182](#w-182) | SUPERSEDED | 崩溃**没有符号化栈回溯** ⇒ 定位靠手读 `.s` |
-| [W-183](#w-183) | RESOLVED | `jhyy build` 的 fallback 路径 —— **退出码 0 但磁盘上没有 `.s`** |
-| [W-184](#w-184) | DEFERRED | peephole 对 > 4096 字节的 `.s` **整段跳过** ⇒ 真实产物上 peephole 从来没跑过 |
-| [W-185](#w-185) | RESOLVED | 曾:`u32 as i64` 走**符号扩展**(`extsw`);`u32 / u32`、`u32 % u32` 走**有符号** `div`/`rem` |
-| [W-186](#w-186) | RESOLVED | 曾:**整数字面量 ≥ 2⁶³ 被静默截成 `LLONG_MAX`** ⇒ u64 的高位值全变成同一个数 |
-| [W-187](#w-187) | RESOLVED | 曾:有符号 `>>` 发的是**逻辑**右移(`shr`)⇒ 负数右移全错(该发 `sar`) |
-| [W-188](#w-188) | RESOLVED | 曾:`i64` 字面量 ≥ 2⁶³ 静默饱和;`-9223372036854775808i64`(`i64::MIN`)**差 1** |
-| [W-189](#w-189) | RESOLVED | sema 的全局查找会拿到**还没填类型**的同名符号 ⇒ 误报 `undefined variable` |
+| [W-183](#w-183) | RESOLVED | `jhyy build` 的 fallback 路径 —— **退出码 0 但磁盘上没有... |
+| [W-184](#w-184) | DEFERRED | peephole 对 > 4096 字节的 `.s` **整段跳过** —— 真实产物上... |
+| [W-185](#w-185) | RESOLVED | `u32` 的两处语义错 —— `as i64` 走**符号扩展**;`/` 与 `%`... |
+| [W-186](#w-186) | RESOLVED | **整数字面量 ≥ 2⁶³ 被静默截成 `LLONG_MAX`** ⇒ u64... |
+| [W-187](#w-187) | RESOLVED | 有符号 `>>` 发的是**逻辑**右移(`shr`)⇒ 负数右移全错 |
+| [W-188](#w-188) | RESOLVED | `i64` 字面量 ≥ 2⁶³ 静默饱和;`-9223372036854775808i64`(`i6... |
+| [W-189](#w-189) | RESOLVED | sema 的全局查找会拿到**还没填类型**的同名符号 ⇒ 误报 `undefined... |
 | [W-190](#w-190) | RESOLVED | import 模块的**源码缓冲**在 AST 还活着时就被 `free` ⇒ AST 悬垂读 |
-| [W-191](#w-191) | RESOLVED | 模块级整型全局的初值在 IL 数据段里被**截断**(≥10¹⁶)或**拒绝**(负值) |
-| [W-192](#w-192) | RESOLVED | `fixed_point.sh` 的 `-o` 产物名假设停在 **W-178** 之前 ⇒ 自举闭环门**假 FAIL**,或拿**陈旧编译器**当 v3 |
+| [W-191](#w-191) | RESOLVED | 模块级整型全局的初值在 amd64 后端的 **IL 数据段**里被截断 / 拒绝 |
+| [W-192](#w-192) | RESOLVED | `fixed_point.sh` 的 `-o` 产物名假设停在 **W-178** 之前 ⇒... |
 | [W-193](#w-193) | RESOLVED | 事实链**变异测试**把回归数**写死** ⇒ 数一变(加个用例就会变)变异点找不到 ⇒ 门自己变红 |
-| [W-194](#w-194) | RESOLVED | 变异测试的整链组缺摘要时**跳过**却仍报「全部被门抓到」⇒ 门绿而那组一条没验 |
-| [W-195](#w-195) | RESOLVED | `std::fmt` 的**有符号打印族**:`fmt_i64(i64::MIN)` 只打 `-`;`fmt_hex_u32(v ≥ 0x80000000)` 打空串 |
+| [W-194](#w-194) | RESOLVED | 变异测试的**整链组**缺 regress 摘要时「跳过」,收尾却仍报「全部被门抓到」⇒... |
+| [W-195](#w-195) | RESOLVED | `std::fmt` 的**有符号打印族** —— `fmt_i64(i64::MIN)`... |
+| [W-196](#w-196) | RESOLVED | 交叉 target 的链接**静默产出按 Win64 调用约定的 PE** ⇒... |
+| [W-197](#w-197) | RESOLVED | `--no-link` 只在 `compile` 后面认 ⇒ GNU 风格的 `jhyy... |
+| [W-198](#w-198) | RESOLVED | 未知选项被当成输入文件名 ⇒ `jhyy compile --foo x.jhyy` 去打开一个叫... |
+| [W-199](#w-199) | RESOLVED | `-o foo.s` 产出 `foo.s.s` —— `.s` 后缀在三处各自无条件追加 |
+| [W-200](#w-200) | RESOLVED | CLI 帮助有**两份**且不一致;target 列表带 v2.x... |
+| [W-201](#w-201) | RESOLVED | `jhyy dump` 是 **stub** —— help / 语言规范 / 两份 README... |
+| [W-202](#w-202) | RESOLVED | `ast_new_expr_stmt` 的**文件名参数传成了节点指针** ⇒... |
+| [W-203](#w-203) | RESOLVED | winget 三件套**装反了** + 旧 schema 字段 ⇒ `winget... |
+| [W-204](#w-204) | RESOLVED | scoop manifest 的脚本用 `//` 注释 ⇒ **PowerShell... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -14530,3 +14539,322 @@ transitive-import 分支(`npath`)。
 - 用例:`compiler/tests/examples/std_fmt_signed.jhyy`
 - 相关:**W-185**(u32→i64 零扩展 —— 本条**刻意不用**它,见上)、
   **W-186** / **W-188**(i64::MIN 的字面量语义 —— 本条是它在 std 侧的孪生兄弟)
+
+<a id="w-196"></a>
+## W-196: 交叉 target 的链接**静默产出按 Win64 调用约定的 PE** ⇒ 跑起来段错误,编译器却 exit 0
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 交叉 target 一律要求 `--no-link`,否则拒绝链接
+**Filed-by:** 2026-11-05 (用户贴 `jhyy --help` 问「有没有什么不妥」⇒ 一轮 CLI 审查)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_compile` —— 链接前**没有**检查
+`--target` 与**链接器**是否匹配。
+
+**症状(实测 2026-11-05,同一台 Windows 主机、同一份源码):**
+
+| 命令 | 编译器 | 产物 | 跑起来 |
+|---|---|---|---|
+| `jhyy compile pr.jhyy -o pr_win.exe` | exit 0 | Windows PE | 打 `value=42`,exit 0 ✓ |
+| `jhyy --target=amd64_sysv compile pr.jhyy -o pr_sysv.exe` | **exit 0、stderr 只有进度行** | **Windows PE**(MZ 头,192 KB) | **段错误,exit 139** |
+
+⇒ 用户以为自己编了个 Linux 程序,拿到的是一个**按 Win64 调用约定**的 PE。
+
+**根因:** `--target` 只影响**代码生成**的 ABI(`abi_amd64_sysv.jhyy` 走 SysV:
+结构体实参从 `%rdi` 取;Win 走 `%rcx`),而**链接**这一步
+(`link_with_gcc`)链的是**宿主 Windows 工具链**(宿主 gcc + `runtime.c`
++ `.exe` 后缀)⇒ SysV ABI 的 .s 被链成一个 Win64 PE,两边约定不一致
+⇒ 调 libc(尤其变参)时参数寄存器错位 ⇒ 段错误。
+⇒ 而**编译期没有任何检查**,所以是「静默产出错的东西」。
+
+**workaround:** 加 `--no-link`(拿 .s 去用匹配目标的工具链链)——
+`regress.py --cross=docker` 分支一直是这么做的。
+
+**影响范围:** 所有**非 `amd64_win`** 的 target:`amd64_sysv` /
+`amd64_sysv_freestanding` / `amd64_win_freestanding`。
+
+**失效条件:** 链接步骤能按 target 选工具链时(未实现)——在那之前,
+`--no-link` 是交叉 target 的**唯一**正确用法。
+
+**引用:** `compiler/src0/main.jhyy`(`cmd_compile` 的交叉 target 守卫)、
+`compiler/src0/main.jhyy`(`link_with_gcc`)、W-197。
+
+<a id="w-197"></a>
+## W-197: `--no-link` 只在 `compile` 后面认 ⇒ GNU 风格的 `jhyy --no-link compile x.jhyy` 报 unknown command
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — `--no-link` 提到顶层,跟 `--target=` 一样全局生效
+**Filed-by:** 2026-11-05 (CLI 审查)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的顶层 dispatch —— 它的 argv 压缩
+**只剥 `--target=`**;`--no-link` 只在 `cmd_compile` 的参数循环里解析。
+
+**症状(实测 2026-11-05):**
+
+| 写法 | 修前 | 修后 |
+|---|---|---|
+| `jhyy compile --no-link x.jhyy` | ✓ | ✓ |
+| `jhyy --no-link compile x.jhyy` | ✗ `unknown command` | ✓ |
+| `jhyy build --no-link x.jhyy` | ✗ `cannot open file`(**flag 被当成文件名**) | ✓(等价于 `build x.jhyy`) |
+
+⇒ 而 help 把 `--no-link` 放在**全局** `flags:` 段 ⇒ 用户最自然会写的
+GNU 风格(`jhyy --no-link compile x.jhyy`)恰好是失败的那个。
+
+**根因:** 两处解析各管一段:顶层只认 `--target=`,子命令只认 `-o` /
+`--no-link`。⇒ 顶层算 `cmd = argv[1]` 时,`--no-link` 还在 ⇒ 落到
+"unknown command";`build` 那边则是「第一个非 `-o` 的 token 就是输入文件」
+⇒ flag 被当文件名。
+
+**workaround:** 把 `--no-link` 写在子命令**后面**(`jhyy compile --no-link x.jhyy`)。
+
+**影响范围:** `compile` / `build` / `run` 三个子命令的 flag 位置语义。
+
+**失效条件:** 已修 —— `--no-link` 现在由顶层扫描 + 压缩,位置随便放。
+
+**引用:** `compiler/src0/main.jhyy`(顶层 dispatch 的 argv 扫描 / 压缩段)、
+W-196、W-198。
+
+<a id="w-198"></a>
+## W-198: 未知选项被当成输入文件名 ⇒ `jhyy compile --foo x.jhyy` 去打开一个叫 "--foo" 的文件
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 未知选项直接报错,不再被当文件名
+**Filed-by:** 2026-11-05 (CLI 审查)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_compile` / `cmd_build` /
+`cmd_run` 的参数解析 —— 「第一个非 `-o` 的 token 就是输入文件」,
+**没有「未知选项」这个概念**。
+
+**症状(实测 2026-11-05):**
+
+```
+$ jhyy compile --foo hello.jhyy
+cannot open file          # ← 不说是哪个文件
+$ jhyy build --no-link hello.jhyy
+cannot open file          # ← 找的是一个叫 "--no-link" 的文件
+```
+
+**根因:** 参数循环只认 `-o`(及其后继值)与 `--no-link`,其余 token 一律
+当作「还没填的输入文件名」⇒ 拼错 / 不支持的选项**静默变成文件名**,
+错误信息又不带文件名 ⇒ 用户完全看不出是自己选项写错了。
+
+**workaround:** 只能用支持的选项;写错了就看到 "cannot open file"(看不出是哪个)。
+
+**影响范围:** 三个子命令的参数解析;**文件名以 `-` 开头的场景**(极罕见)
+现在也会被当成选项 ⇒ 用 `./-name.jhyy` 写。
+
+**失效条件:** 已修 —— compile / build / run 遇到未识别的 `-` 开头 token
+一律报 `unknown option` + 指引。
+
+**引用:** `compiler/src0/main.jhyy`(三个子命令的参数循环)、W-197。
+
+<a id="w-199"></a>
+## W-199: `-o foo.s` 产出 `foo.s.s` —— `.s` 后缀在三处各自无条件追加
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 统一走 `asm_path_of()`:后缀有了就不追加
+**Filed-by:** 2026-11-05 (CLI 审查)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的三处命名:`build_il` 内部、
+`cmd_build`、`cmd_compile` —— 各自**无条件** `out_buf + ".s"`。
+
+**症状(实测 2026-11-05):**
+
+```
+$ jhyy build hello.jhyy -o out.s        → 产出 out.s.s
+$ jhyy compile --no-link hello.jhyy -o out.s → 产出 out.s.s
+```
+
+⇒ 而 `.exe` 那侧**早就有**先例:`str_ends_with_exe`(P2-5,2026-11-01)——
+`-o game_run.exe` 不会再变成 `game_run.exe.exe`。⇒ `.s` 侧漏了同一条规矩。
+
+**根因:** 三处各自复制了同一份「基名 + `.s`」的公式,没人把
+`.exe` 那侧的「后缀已经有了就别加」搬过来。
+
+**workaround:** `-o` 给**不带** `.s` 的基名(`-o out` ⇒ `out.s`)。
+
+**影响范围:** `build` / `compile --no-link` 的 `-o` 语义;仓内脚本一直用
+不带 `.s` 的基名(所以 CI 从没踩到)。
+
+**失效条件:** 已修 —— `asm_path_of()`:以 `.s` 结尾就原样用,否则追加。
+
+**引用:** `compiler/src0/main.jhyy`(`asm_path_of` / `str_ends_with_s`)。
+
+<a id="w-200"></a>
+## W-200: CLI 帮助有**两份**且不一致;target 列表带 v2.x 标记;target_dispatch 里 5 个死函数
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 合成一份 `print_help()`,target 列表改写能力,死函数删掉
+**Filed-by:** 2026-11-05 (CLI 审查)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的两处 help + `compiler/src0/target_dispatch.jhyy`。
+
+**症状(四组,都是「CLI 在说谎」):**
+
+| # | 症状 |
+|---|---|
+| ① | `jhyy`(无参数)给的是**阉割版** help:没有 targets、没有 `--no-link`、`dump` 那行**还不标「未实现」**,而且**没告诉**用户 `--help` 有完整版 ⇒ 用户最自然的第一步恰好拿到信息最少的那份 |
+| ② | `--help` 的 target 列表带 v2.x 时代标记:`v2.1.0+, OVMF demo v2.3.0` / `v2.7.0 Phase 2b wire` / `v2.7.1 ship` —— v2 轴早在 v2.16.0 终结,那些标记对用户零信息量;`unknown target` 的错误消息里也是同一套 |
+| ③ | `unknown command` 只打一行,不列命令、不提 `--help` |
+| ④ | `target_dispatch.jhyy` 里有 **5 个死函数**(`target_name` / `target_qbe_flag` / `jh_target_count` / `target_status` / `target_abi_module`),注释还是「Mirrors C-side ... compiler/src/target/target_dispatch.c」(那文件 v4.0.21 就删了)与「only TARGET_AMD64_WIN is actually passed to QBE」(QBE 早没了) |
+
+**根因:** ①③ 是**两份** help 各写各的(无参数那条路径是历史遗留的简版);
+② 是 v2.x 时期的文案没跟着版本轴走;④ 是 QBE 时代 / C 侧时代的函数在
+v2.x→v4 的重写后**留在原地没人删**,注释也就跟着一直过期。
+
+**workaround:** 用户侧只能自己记住「`jhyy --help` 才是完整的」。
+
+**影响范围:** 纯 CLI 表层 + `target_dispatch.jhyy` 的源码整洁度;
+**不影响**任何已编译产物的行为(除 help 文本本身)。
+
+**失效条件:** 已修 —— ①③ 合成一份 `print_help()`;② 改写成**能力**描述
+(每个 target 是什么 + 能不能链接);④ 删掉 5 个死函数 + 订正过期注释。
+
+**引用:** `compiler/src0/main.jhyy`(`print_help` / 顶层 dispatch 的错误消息)、
+`compiler/src0/target_dispatch.jhyy`(`target_help`)。
+
+<a id="w-201"></a>
+## W-201: `jhyy dump` 是 **stub** —— help / 语言规范 / 两份 README 都写着「打印 AST 供调试」,实现却只打一行 "not implemented" 就 exit 1
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 真实现:lex → parse → 打印 AST 树(只到 parse)
+**Filed-by:** 2026-11-05 (CLI 审查的续集 —— 用户「dump 要不实装一下呢」)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/main.jhyy` 的 `cmd_dump` —— 以前只有两行 stderr。
+
+**症状:** `jhyy dump x.jhyy` → `cmd_dump: not implemented yet (exits 1)`,exit 1;
+而 `jhyy --help` / 语言规范 § 16 / 两份 README 的 CLI 段都写着
+「dump = 打印 AST / 定型 IR 供调试」⇒ **CLI 在说谎**。
+(v4.1.3 只把 help 改成「NOT IMPLEMENTED」,**没有实装**。)
+
+**根因:** v2.0.0 引入 `cmd_dump` 时就是占位(注释:「cmd_dump: stub for now」),
+一路留着 —— 而 C 侧**从来没有过** ast_dump 文件(全历史 `git log --all --name-only`
+grep 不到)⇒ v0.x→jhyy 翻译时没有东西可翻。
+
+**workaround:** 只能读 `compiler/src0/parser.jhyy` 源码,或者用
+`jhyy build --no-link x.jhyy` 看 .s(那是 codegen **之后**的东西,不是 AST)。
+
+**影响范围:** 想看「语法长什么样」的人 —— 以前**根本没有工具**。
+
+**失效条件:** 已修 —— 新模块 `compiler/src0/ast_dump.jhyy`:
+每个节点一行、子节点缩进一级、带 `@文件:行:列`;**只跑 parse**(不做 sema / codegen)
+⇒ 看的是语法,不是编译结果。
+> ⚠️ 实装它的时候**顺手挖出另一个真缺陷** ⇒ 见 **W-202**。
+
+**引用:** `compiler/src0/ast_dump.jhyy`、`compiler/src0/main.jhyy`(`cmd_dump`)、
+`compiler/src0/ast.jhyy`(`node_kind_name` 补 `CONST_DECL` / `REF_TYPE` 两个漏掉的 kind)。
+
+<a id="w-202"></a>
+## W-202: `ast_new_expr_stmt` 的**文件名参数传成了节点指针** ⇒ 每个表达式语句节点的 `loc_filename` 是个 *Node 指针(当 C 字符串用就是 UB)
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 4 处调用点改成传 `(*ex).loc_filename`
+**Filed-by:** 2026-11-05 (W-201 的 dump 一跑就露出来了)
+**日期:** 2026-11-05
+
+**触发面:** `compiler/src0/parser.jhyy` 的 4 处 `ast_new_expr_stmt` 调用
+(1535 / 2188 / 2233 / 2672)。
+
+**症状:** `jhyy dump` 打印表达式语句时,位置是 `@:4:5` —— **没有文件名**,
+而同一个 AST 里别的节点都带文件名(`@hello.jhyy:4:5`)。
+
+**根因:** `ast_new_expr_stmt(a, loc_filename, loc_line, loc_col, expr)` 的第 2 个参数
+是**文件名**,但 4 处调用都写成了:
+
+```jhyy
+ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex)
+//                                        ^^ 这是**节点指针**,不是文件名
+```
+
+⇒ 每个「表达式语句」节点的 `loc_filename` 字段里存的是个 *Node 指针。
+打印它 ⇒ 读的是**指针的字节**当字符串 ⇒ 指针低位是 0(arena 32 MB 对齐)⇒
+打出来是空串 ⇒ 位置就成了 `@:4:5`。
+
+**为什么以前没炸:** sema / codegen 读 `loc_filename` 的地方全是**类型节点**
+(`(*tn).loc_filename`)或 **module 节点**(`(*module).loc_filename`,给 `.file` 指令用),
+**从不是 EXPR_STMT** ⇒ 这个字段一直是「没人读的垃圾」⇒ 潜伏了不知道多久。
+⇒ 一旦有人打印它(比如这次的 dump),就是 UB。
+
+**workaround:** 以前没有(没人读那个字段)。
+
+**影响范围:** 所有**表达式语句**节点(每个函数体里的每条表达式语句);
+语义上无害(没人读),但类型上是错的。
+
+**失效条件:** 已修 —— 4 处都改成 `(*ex).loc_filename`。
+⇒ 产物的 `.s` **不变**(codegen 只读 module 的 loc_filename)⇒
+自举闭环 / fixed-point 门不受影响(实测 N=10 仍 byte-equal)。
+
+**引用:** `compiler/src0/parser.jhyy`(4 处 `ast_new_expr_stmt`)、
+`compiler/src0/ast.jhyy`(`ast_new_expr_stmt` 的签名)。
+
+<a id="w-203"></a>
+## W-203: winget 三件套**装反了** + 旧 schema 字段 ⇒ `winget validate` 直接红(当年决策要求的「schema validate 阶段」从没做过)
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 换回正确的三件套 + 现行 schema 1.9.0,`winget validate` 零警告
+**Filed-by:** 2026-11-05 (用户「先看一下②」⇒ 第一次跑 `winget validate`)
+**日期:** 2026-11-05
+
+**触发面:** `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/4.1.3/` 的三份 yaml。
+
+**症状:** 本机 `winget validate --manifest <dir>` 第一句就红:
+`Required field missing. [DefaultLocale] File: JiHuiYiYou.JHYY.installer.yaml`。
+
+**根因(两个叠在一起):**
+
+| # | 问题 |
+|---|---|
+| ① | **version manifest 与 installer manifest 装反了** —— `JiHuiYiYou.JHYY.yaml`(该是 version)里装的是 `ManifestType: installer`;`JiHuiYiYou.JHYY.installer.yaml`(该是 installer)里装的是 `ManifestType: version` |
+| ② | **用的是 1.5.0 旧 schema** —— 旧 schema 用 `PackageLocale`,现行 schema 改叫 `DefaultLocale`(且只在 version manifest 里);locale manifest 的 `ManifestType` 也从 `locale` 改成了 `defaultLocale`;三件套还缺 `yaml-language-server: $schema=…` 头(URL 要**钉版本**: `https://aka.ms/winget-manifest.version.1.9.0.schema.json`) |
+
+**为什么这么多年没人发现:** v1.5.5 的决策写的是「**只到 schema validate 阶段**」——
+**这一步从没执行过**(仓里连 `winget validate` 的痕迹都没有)⇒ manifest 一直只是
+「reference」,没人拿去验过 ⇒ 装反了也没人知道。
+
+**workaround:** 没有 —— 只能当「仓内 reference」看,不能真提 PR
+(winget-pkgs 的自动检查会把装反的 manifest 拒掉)。
+
+**影响范围:** 上游 winget-pkgs 的提交(一直没提交,故影响尚未外溢)。
+
+**失效条件:** 已修 —— 三份各自归位 + schema 1.9.0 + 三件套的 schema 头
+⇒ **本机 `winget validate` 零警告通过**(2026-11-05 实测)。
+
+**顺带发现(同轮):** 装反**不是一开始就有的** —— **v1.5.5 是对的**,从 **v1.5.6**
+起装反,一路错到 v4.1.2 ⇒ 是某次复制粘贴时错位的。
+⇒ 五个版本目录全部归位 + 现代化:
+**4.1.1 / 4.1.2 / 4.1.3 三个目录 `winget validate` 零警告通过** ✓;
+**1.5.5 / 1.5.6 仍失败** —— 它们的 `InstallerSha256` 是当年留下的**占位符**
+(`<FILL_AT_RELEASE_TIME_FROM_SHA256.txt>`，那时 release workflow 还没接上),
+而**那两次 release 的资产已经 404** ⇒ sha256 永远填不上 ⇒ 这两个目录
+**天生不可发布** ⇒ 保留原样,已在文件里写明原因(不假装它们有效)。
+
+**引用:** `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/4.1.3/`(三份 yaml)、
+`installer/changelog-template.md`(发布方式那段)。
+
+<a id="w-204"></a>
+## W-204: scoop manifest 的脚本用 `//` 注释 ⇒ **PowerShell 会当命令执行**;`uninstaller` 全是注释 ⇒ `scoop uninstall` 是**空操作**
+
+**状态:** RESOLVED closed 2026-11-05 (v4.1.4) — 说明文字改进 `notes`,uninstaller 改成真跑 msiexec
+**Filed-by:** 2026-11-05 (同 W-203 那轮)
+**日期:** 2026-11-05
+
+**触发面:** `installer/distribution/scoop/jhyy.json` 的 `pre_install` / `post_install` /
+`uninstaller.script` 三个数组。
+
+**症状:**
+
+| # | 现象 |
+|---|---|
+| ① | `pre_install` / `post_install` 的每一行都是 `// …` ⇒ scoop 的脚本是 **PowerShell** ⇒ `//` **不是** PowerShell 注释 ⇒ 会被当命令执行 ⇒ 安装时报 "The term '//' is not recognized" |
+| ② | `uninstaller.script` 也全是注释 ⇒ **`scoop uninstall jhyy` 什么都不做** —— 程序还在盘上,scoop 却以为卸干净了 |
+
+**根因:** 写 manifest 时按 **C / JSON 注释**的直觉写了 `//`,而 scoop 的脚本
+字段是 **PowerShell 脚本**(注释是 `#`)⇒ 语义完全不对。
+
+**workaround:** 没有 —— 只能当 reference 看。
+
+**影响范围:** 真拿这份 manifest 提 scoop PR 的话:① 安装直接失败,② 卸载留残留。
+
+**失效条件:** 已修 —— 说明文字挪进 `notes` 字段(scoop 装完显示,不是脚本),
+`uninstaller.script` 改成真跑 `msiexec /x {FC3FC7FC-…} /quiet`(那个 GUID 是 MSI 的
+**UpgradeCode**,跨版本稳定;per-machine 卸载需管理员)。`checkver` / `autoupdate`
+的正则已对着**线上** tags 页与 SHA256.txt 实测命中 ✓。
+
+**引用:** `installer/distribution/scoop/jhyy.json`、`installer/GUIDS.md`(GUID 的定义)。

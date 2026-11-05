@@ -1532,7 +1532,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             }
             let ex = parse_expr(p, PREC_NONE());
             if ex != (0 as *Node) {
-                let stmt = ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex);
+                let stmt = ast_new_expr_stmt((*p).arena, (*ex).loc_filename, (*ex).loc_line, (*ex).loc_col, ex);
                 if nstmts >= cap {
                     cap = if cap != (0 as i64) { cap * (2 as i64) } else { (4 as i64) };
                     let ns = arena_alloc((*p).arena, cap * (8 as i64));
@@ -2185,7 +2185,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                             parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
                         }
                     }
-                    ifx_s = ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex);
+                    ifx_s = ast_new_expr_stmt((*p).arena, (*ex).loc_filename, (*ex).loc_line, (*ex).loc_col, ex);
                 }
             }
             if ifx_s != (0 as *Node) {
@@ -2230,7 +2230,7 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
                                     parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
                                 }
                             }
-                            ifx_s2 = ast_new_expr_stmt((*p).arena, ex2, (*ex2).loc_line, (*ex2).loc_col, ex2);
+                            ifx_s2 = ast_new_expr_stmt((*p).arena, (*ex2).loc_filename, (*ex2).loc_line, (*ex2).loc_col, ex2);
                         }
                     }
                     if ifx_s2 != (0 as *Node) {
@@ -2669,7 +2669,7 @@ fn parse_expr_stmt(p: *Parser) -> *Node {
                 parser_expect(p, TOKEN_SEMICOLON(), ";" as *u8, &t);
             }
         }
-        return ast_new_expr_stmt((*p).arena, expr, (*expr).loc_line, (*expr).loc_col, expr);
+        return ast_new_expr_stmt((*p).arena, (*expr).loc_filename, (*expr).loc_line, (*expr).loc_col, expr);
     }
     return 0 as *Node;
 }

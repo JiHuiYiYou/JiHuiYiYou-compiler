@@ -1,6 +1,6 @@
 # 编译器架构
 
-> 编译器**只有一份实现**：`compiler/src0/*.jhyy`（**30 个顶层模块 + 8 个 std 模块**，
+> 编译器**只有一份实现**：`compiler/src0/*.jhyy`（**31 个顶层模块 + 8 个 std 模块**，
 > 约 38K 行）。
 > `compiler/src/*.c`（C 端）已于 v4.0.21 删除 —— 仓里不存在「双实现 parity」这回事。
 >
@@ -52,6 +52,7 @@
 | `ffi.jhyy` | extern 声明处理 |
 | `arena.jhyy` | arena 分配器 |
 | `util.jhyy` | 通用工具 |
+| `ast_dump.jhyy` | `jhyy dump` 的 AST 树打印（2026-11-05 新增） |
 | `target_dispatch.jhyy` | `--target=` 分发（4 个三元组） |
 
 ### 后端（自研 amd64）
