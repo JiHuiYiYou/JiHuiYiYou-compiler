@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/discussions
+    about: Ask how the language works, or start a design discussion. No bug report needed.
+  - name: Report a security vulnerability
+    url: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/security/advisories/new
+    about: Report a vulnerability privately. Please do not open a public issue for it.
+  - name: Wiki
+    url: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki
+    about: Guides, tours, and the FAQ — the long-form companion to the README.

@@ -394,6 +394,7 @@ v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版
 
 ## 文档
 
+- **Wiki**(中文)—— README 的长文版:[导览、指南与常见问题](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki/首页)
 - **全仓文档地图** —— 各文档各管什么:[`docs/internal/README.md`](docs/internal/README.md)
 - **语言规范**:[`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md)(锁定)
 - **ABI 白皮书**:[`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md)(锁定)

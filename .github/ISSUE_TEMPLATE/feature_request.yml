@@ -1,0 +1,65 @@
+name: Feature request
+description: Ask for a language feature, a standard-library addition, a target, or a toolchain change.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you file this: the roadmap is public and the current schedule lives
+        in [`docs/internal/FACTS.md`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/docs/internal/FACTS.md).
+        If the feature is already planned, an issue saying so is still useful —
+        it is a vote, and it can change the priority.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The situation you are in, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed syntax or API
+      description: |
+        If you have a concrete shape for it, show it. If you do not, say so —
+        that is a useful answer too.
+      placeholder: |
+        // how it would read in JHYY
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: |
+        Including "the current language already does this" — that is a valid
+        answer and a good one.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Language syntax or semantics
+        - Standard library
+        - Compiler / toolchain / CLI
+        - Target support (a new platform or ABI)
+        - Tooling (VS Code extension, MCP server, installer)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Links, prior discussions, examples of what you are trying to write.
+    validations:
+      required: false

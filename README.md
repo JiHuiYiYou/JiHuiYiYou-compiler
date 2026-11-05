@@ -411,6 +411,7 @@ latest shipped build is `jhyy-lang-4.1.3.vsix`.
 
 ## Docs
 
+- **Wiki** — the long-form companion to this README: [guides, tours, and the FAQ](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/wiki)
 - **All repo docs** — the map of what lives where: [`docs/internal/README.md`](docs/internal/README.md)
 - **Language spec**: [`docs/abis/jhyy-lang-spec-v4.0.0.md`](docs/abis/jhyy-lang-spec-v4.0.0.md) (locked)
 - **ABI whitepaper**: [`docs/abis/jhyy-abi-v4.0.0.md`](docs/abis/jhyy-abi-v4.0.0.md) (locked)

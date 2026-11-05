@@ -1,0 +1,112 @@
+name: Compiler bug report
+description: Something the compiler does wrong — wrong output, a crash, or a diagnostic that does not make sense.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The fastest route to a fix is a **minimal
+        reproducer** — the smallest `.jhyy` file that still shows the problem.
+
+        Two traps worth knowing before you fill this in:
+
+        * **Exit codes**: capture them with a harness or Python `subprocess`, not by
+          reading `$?` in MSYS2 bash — bash truncates exit codes to 8 bits, so an
+          expected code ≥ 256 has to be reduced first (827 → 59, 501 → 245,
+          300 → 44, 1000 → 232).
+        * **Version**: it is the first line of `jhyy --help`. There is no
+          `jhyy --version` flag — it never existed.
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: The complete `.jhyy` source, in a code block.
+      placeholder: |
+        extern fn puts(s: *u8) -> i32;
+
+        fn main_jhyy() -> i32 {
+            puts("Hello, world!");
+            0
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command line
+      description: The exact command that reproduces it.
+      placeholder: ./compiler/build/bin/jhyy.exe run repro.jhyy
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Output, diagnostics, crash — whatever you saw.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: exit-code
+    attributes:
+      label: Exit code
+      description: The process exit code, if the run terminated.
+      placeholder: "1"
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of `jhyy --help`.
+      placeholder: jhyy 4.x.y
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provenance
+    attributes:
+      label: Compiler provenance
+      description: Which compiler produced the behaviour you are reporting.
+      options:
+        - Released binary (from GitHub Releases / the installer)
+        - Self-hosted build (a compiler that compiled itself)
+        - Built from source with `make`
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target
+    options:
+        - amd64_win (default, hosted Windows)
+        - amd64_win_freestanding (UEFI)
+        - amd64_sysv
+        - amd64_sysv_freestanding
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: |
+        Anything that helps: what you expected the language to do, links to
+        discussions, related issues.
+    validations:
+      required: false

@@ -10,6 +10,7 @@ first patch lands.
 - [Code of conduct](#code-of-conduct)
 - [I have a question](#i-have-a-question)
 - [Reporting a bug](#reporting-a-bug)
+- [Reporting a security vulnerability](#reporting-a-security-vulnerability)
 - [Suggesting a change](#suggesting-a-change)
 - [Development setup](#development-setup)
 - [Pull request process](#pull-request-process)
@@ -21,6 +22,9 @@ first patch lands.
 ## Code of conduct
 
 Be respectful. Assume good faith. Technical disagreement is not personal conflict.
+
+The full text — what that means in practice, and how to report a violation — is
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 ## I have a question
 
@@ -48,6 +52,15 @@ Open an issue and include:
 > `$?` in MSYS2 bash: bash truncates exit codes to 8 bits (`value & 0xFF`), so an
 > expected code ≥ 256 has to be reduced before you compare it (827→59, 501→245,
 > 300→44, 1000→232).
+
+## Reporting a security vulnerability
+
+**Do not open a public issue for it.** Use the private advisory form:
+
+**→ https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/security/advisories/new**
+
+What counts as a vulnerability, what to include, and what happens after you report
+one are all in [`SECURITY.md`](SECURITY.md).
 
 ## Suggesting a change
 
