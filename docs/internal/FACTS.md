@@ -83,6 +83,7 @@
 | SysV ABI | `sysv-abi` | 链 + 跑 + 比 `// EXPECT:` | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_link_run.sh` |
 | SysV 跨实现对拍 | `sysv-cross` | jhyy ↔ gcc 能否互调（W-104） | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_abi_cross.sh` |
 | 发布：版本 == tag | `release-version` | `VERSION` 文件与 tag 不符 ⇒ 拒发 | release.yml · 内联 pwsh |
+| 发布：CI 绿 | `release-ci-green` | **手动发布**路径下，对应 tag 的 CI run 必须是 success（tag 路径由 ci.yml 的 `needs:` 保证；手动路径此前完全绕开 CI ⇒「门没跑就发」在机制上可行） | release.yml · 内联 pwsh（GitHub API） |
 | 发布：产物与提交版同源 | `release-anchor` | release 自己那次 make 编出的 jhyy.exe 与**提交进仓的那份**对同一份 src0 产出的 `.s` 逐字节相同（比 `.s` 不比 `.exe` ⇒ 跨 toolchain 不假阳性） | release.yml · `bash compiler/tests/bootstrap/artifact_fresh_check.sh` |
 | 发布：构建产物 | `release-build` | Burn bundle + MSI + `.vsix` 构建成功 | release.yml · `pwsh -File installer/build.ps1 bundle` |
 | 发布：SHA256 | `release-sha256` | `SHA256.txt` 与产物逐一对得上 | release.yml · 内联 pwsh |

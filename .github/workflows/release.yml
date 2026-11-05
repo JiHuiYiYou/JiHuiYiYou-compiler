@@ -107,6 +107,7 @@ jobs:
     # job 级声明会**整体替换**默认权限集 ⇒ 这里列出来的就是全部。
     permissions:
       contents: write   # 创建 GitHub Release
+      actions: read     # `release-ci-green` 门要查 tag 的 CI run(手动发布路径)
     # 30 → 40。**实测(2026-10-18 run 39099930527,dry-run 全绿):4 分 49 秒**
     # (05:15:30 → 05:20:19),其中 WiX bundle + MSI + vsix 打包是最大一块。
     # 留 40 分钟是有意的余量:job 被超时砍掉会留下半套 artifacts,而 GitHub
@@ -191,6 +192,60 @@ jobs:
             exit 1
           }
           Write-Host "[OK] VERSION file matches the tag"
+
+      - name: Assert the tag's CI run was green (manual publish path)
+        # 只有**手动发布**这条路需要这道断言:
+        #
+        #   · workflow_call(tag 路径)—— ci.yml 的 release job **needs**
+        #     build-and-test + vscode-ext + sysv ⇒ 三道 job 全绿才轮得到它
+        #     (那条 needs 是**真强制点**,2026-11-03 审计补的)。
+        #   · workflow_dispatch(手动)—— **完全绕开 ci.yml** ⇒ 此前只有
+        #     release.yml 自己的门在跑,sysv / vscode-ext / build-and-test
+        #     一道都没跑过 ⇒「门没跑就发」在机制上是可能的(2026-11-05 审计)。
+        #
+        # ⇒ 手动发布时用 GitHub API 查:**对应 tag 的 CI run 是不是 success**。
+        #   把约定变成断言 —— 仓里的规矩:门不许有后门。
+        #
+        # ⚠️ dry-run **不查**:那条路的用途是「验证发布链本身能不能跑通」,
+        #    版本号可能是个还没建过 tag 的假设值 ⇒ 本来就没有对应的 CI run。
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == false
+        shell: pwsh
+        run: |
+          # gate: release-ci-green
+          #
+          # ⚠️ **script body is ASCII-only on purpose** (repo rule): Windows
+          #   PowerShell 5.1 reads a BOM-less .ps1 with the ANSI code page ⇒
+          #   non-ASCII here turns into mojibake and then a **ParserError**
+          #   (CI uses pwsh/UTF-8, so this only explodes locally).
+          #   The Chinese explanation lives in the YAML comments above.
+          $tag = "v$($env:JHY_VERSION)"
+          $headers = @{
+              Authorization = "Bearer $env:GITHUB_TOKEN"
+              Accept        = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs?event=push&branch=$tag&per_page=20"
+          Write-Host "[release-ci-green] querying CI runs for tag: $tag"
+          try {
+              $resp = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
+          } catch {
+              Write-Host "::error::failed to query CI runs: $($_.Exception.Message)"
+              exit 1
+          }
+          $runs = @($resp.workflow_runs | Where-Object { $_.head_branch -eq $tag })
+          if ($runs.Count -eq 0) {
+              Write-Host "::error::tag $tag has no CI run -- a release whose gates never ran must not ship."
+              Write-Host "::error::Push the tag first (ci.yml's push trigger runs build-and-test + vscode-ext + sysv),"
+              Write-Host "::error::or use dry_run=true if you only want to test the release chain itself."
+              exit 1
+          }
+          $latest = $runs | Sort-Object -Property created_at -Descending | Select-Object -First 1
+          Write-Host "[release-ci-green] latest run: id=$($latest.id) status=$($latest.status) conclusion=$($latest.conclusion) sha=$($latest.head_sha)"
+          if ($latest.status -ne "completed" -or $latest.conclusion -ne "success") {
+              Write-Host "::error::CI run for tag $tag is not green (status=$($latest.status) conclusion=$($latest.conclusion)) -- refusing to release."
+              exit 1
+          }
+          Write-Host "[OK] CI run for tag $tag is green"
 
       - name: Setup MSYS2 + toolchain
         uses: msys2/setup-msys2@v2

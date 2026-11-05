@@ -114,6 +114,9 @@ don't restate those numbers anywhere else.
 
 1. One PR does one thing.
 2. Run the gates. **A gate that wasn't run is a gate that didn't pass.**
+   Every CI job on the PR has to be green — including the SysV ABI job, which
+   is the only runner that can *execute* those six tests (`windows-latest`
+   skips them, so a green `windows-latest` run does not cover them).
 3. Summarize the change in the commit message, and add a `Co-Authored-By` trailer
    for any AI assistant that contributed code to the change.
 4. If you touched the documentation, keep the facts in sync — see

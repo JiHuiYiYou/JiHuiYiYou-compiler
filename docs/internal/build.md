@@ -229,6 +229,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-too
 ⚠️ **新加一道门要改两处**：workflow 里给它一个 `# gate: <id>` 标记，
 并在 `FACTS.md` § 2.2 加一行 —— 少任何一边，门 `docs-facts` 会红。
 
+### 发布链的两条路径，和各自的强制点
+
+> 「发版」有两个入口，**强制力完全不同** —— 混着记就会以为两者一样。
+
+| 路径 | 谁跑的 | 强制点 |
+|---|---|---|
+| **tag 路径**（正常发版） | `ci.yml` 的 `release` job（`needs: build-and-test + vscode-ext + sysv`） | **真强制点**：三道 job 全绿才轮得到它跑 —— 一道红 ⇒ release job 直接不启动（2026-11-03 审计补的 `sysv`；此前 release 只 needs 两个 ⇒ SysV ABI 门红了照发不误） |
+| **手动路径**（`workflow_dispatch`） | 本文件同仓的 `release.yml` | 2026-11-05 补：门 `release-ci-green` 用 GitHub API 查**对应 tag 的 CI run 是不是 success**。此前这条路径**完全绕开 `ci.yml`** ⇒ `sysv` / `vscode-ext` / `build-and-test` 一道都没跑过，「门没跑就发」在机制上可行 |
+
+⚠️ **手动路径的 dry-run 不查 CI**：那条路的用途是「验证发布链本身能不能跑通」，
+版本号可能是个**还没建过 tag** 的假设值 ⇒ 本来就没有对应的 CI run。
+
+⚠️ **`main` 的保护 ≠ 发版的保护**：`main` 上的 required status check 是
+**仓库设置**（GitHub 侧），而 `enforce_admins` 是关的 ⇒ **管理员可以绕过**
+（push 时 GitHub 会回显 "Bypassed rule violations"）。发版链的门是 **workflow
+里的 `needs:`** ⇒ 那是真强制点，与仓库设置无关。**别把 main 的绿灯当成
+「发得出去」的保证** —— 保证它的是 tag 路径的 `needs:`。
+
 ---
 
 ## 排障
