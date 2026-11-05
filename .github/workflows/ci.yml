@@ -785,7 +785,14 @@ jobs:
   # docker 分支(`regress.py:377-441`)的 Stage 1(Windows 侧编译)在 Linux 上
   # 本来就可用。`runtime/linux_elf/crt0.S` 与 `link.ld` 都已在仓里。
   sysv:
-    name: SysV ABI (6 tests windows-latest can never run)
+    # ⚠️ 2026-11-05:`name` 改成 job id(`sysv`)—— **required status check 用的是
+    #   job 的显示名**,而它要当稳定 id 用(分支保护的 contexts 引用它)。
+    #   显示名一改,分支保护里的 context 就不再上报 ⇒ 所有 PR 永久卡在
+    #   "Expected — Waiting for status to be reported"。
+    #   ⇒ 这道门是 **SysV ABI 门**:那 6 个 SysV ABI 测试 + W-104 跨实现对拍
+    #   **在 windows-latest 上永远 SKIP** ⇒ 唯一能跑它们的 job 就是这个
+    #   (ubuntu-latest)。绿灯不覆盖它们 ⇒ 别拿 windows-latest 的绿当全绿。
+    name: sysv
     runs-on: ubuntu-latest
     needs: build-and-test
     timeout-minutes: 15
@@ -854,7 +861,11 @@ jobs:
   #   ④ 前导零规则认 0-9                  → 红
   #   ⑤ 整数 scope 改成 oct               → 红
   vscode-ext:
-    name: VSCode extension grammar self-check
+    # ⚠️ 2026-11-05:`name` 改成 job id(`vscode-ext`)—— 理由同 `sysv` 那个:
+    #   **required status check 用显示名** ⇒ 它要当稳定 id 用。
+    #   这道门是 **VSCode 扩展的 grammar 自检**:扩展的 grammar 必须命中
+    #   语言的真实规则(不是扩展自己那份副本)。
+    name: vscode-ext
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -895,6 +906,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write   # 创建 GitHub Release
+      # ⚠️ 2026-11-05:**被调用的 reusable workflow 只能「降级」权限,不能提权**
+      #   ⇒ 它请求的权限必须是这里的**子集**,否则 GitHub 报
+      #   "Invalid workflow file" ⇒ **本 workflow 整个 run startup_failure**
+      #   (连 ci.yml 自己的 job 都不会跑;actionlint / PyYAML 全绿也照样炸 ——
+      #    它不是 YAML 问题,是权限模型问题)。
+      #   release.yml 的门 `release-ci-green` 要用 GitHub API 查 tag 的 CI run
+      #   ⇒ 需要 actions: read ⇒ 必须**在这里**(调用方)先给。
+      actions: read     # release-ci-green 门查 CI run
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ github.ref_name }}

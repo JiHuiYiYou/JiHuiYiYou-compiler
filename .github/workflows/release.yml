@@ -107,6 +107,11 @@ jobs:
     # job 级声明会**整体替换**默认权限集 ⇒ 这里列出来的就是全部。
     permissions:
       contents: write   # 创建 GitHub Release
+      # ⚠️ 2026-11-05:被调用的 reusable workflow **只能降级权限,不能提权** ——
+      #   这里请求的权限必须是**调用方**(ci.yml 的 `release` job)给的子集,
+      #   否则 GitHub 判「Invalid workflow file」⇒ 调用方整个 run
+      #   **startup_failure**(2026-11-05 实测踩过:actionlint 全绿也照样炸)。
+      #   ⇒ `actions: read` 必须同时在 ci.yml 那边给上(那边已加)。
       actions: read     # `release-ci-green` 门要查 tag 的 CI run(手动发布路径)
     # 30 → 40。**实测(2026-10-18 run 39099930527,dry-run 全绿):4 分 49 秒**
     # (05:15:30 → 05:20:19),其中 WiX bundle + MSI + vsix 打包是最大一块。
