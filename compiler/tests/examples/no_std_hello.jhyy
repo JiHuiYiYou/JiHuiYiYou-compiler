@@ -25,10 +25,6 @@
 // 这样「编出来的码算错了」也会被抓到,而不是只验「进程没崩」。
 //
 // EXPECT: 42
-// SKIP-STAGE0: C 端 stage0(jhyy_stage0.exe)是 v1.x 时代的 **C 端**编译器,
-//   它的链接行里**没有 no_std 分支** ⇒ 编得过但链接失败(`ld returned 5`)。
-//   本测试验的正是 no_std 的链接行 ⇒ 必须跑在 jhyy.exe(生产 binary)上。
-//   (用 `// SKIP:` 笼统跳过会让它在**两条腿上都不跑** —— 那才是真的没人验。)
 #[no_std]
 fn main() -> i32 {
     let a: i32 = 20;

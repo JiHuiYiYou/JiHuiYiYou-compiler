@@ -12,8 +12,12 @@ compiler/build/bin/*
 #                                         `baseline_match = None  # 不再判定 match`
 #                                         让读出来的值从未参与任何判定。
 # bin/ 下现存的跟踪文件只有两个,都是「有角色」的:
+#   .gitkeep         目录占位
 #   jhyy.exe         gen-0 bootstrap 种子(自举链起点)
-#   jhyy_stage0.exe  C 端 bootstrap
+# ⚠️ 2026-11-05:此处此前还列着 `jhyy_stage0.exe`(C 端 bootstrap)—— 它已随
+#    `compiler/src/` 于 v4.0.21 整体删除,现在**不再被跟踪**
+#    (`git ls-files compiler/build/bin/` 只有 .gitkeep + jhyy.exe)
+#    ⇒ 下面那条 `!compiler/build/bin/jhyy_stage0.exe` carveout 也是死的,已删。
 _*.txt
 !compiler/src0/bootstrap/v1.0/_W002_rename_map.txt
 _*.py
@@ -62,9 +66,13 @@ compiler/tests/examples/_tmp_jhyy_home/
 *.o
 *.exe
 # v4.1.3 (2026-10-30):qbe/ 整个目录删除 —— 补完 v4.0.0 就该做完的事
-# (per docs/internal/build.md §"QBE 工具链完全移除":「qbe/ git rm 41 files;
-# qbe.exe mirror 删」)。当时留下 qbe.exe 的理由是「C 端 bootstrap 还需要它」,
-# 而 compiler/src/ 已于 v4.0.21 整体删除 ⇒ 那条理由不再成立。
+# (per docs/archive/logs/v2/changelog-v2.13.0.md § v2.16.0「QBE 工具链完全移除」:
+# 「qbe/ git rm 41 files; qbe.exe mirror 删」;现状见
+# docs/internal/architecture.md § 1「没有 QBE 进程」)。当时留下 qbe.exe 的理由是
+# 「C 端 bootstrap 还需要它」,而 compiler/src/ 已于 v4.0.21 整体删除 ⇒ 那条理由
+# 不再成立。
+# ⚠️ 2026-11-05:此处原先引用的是 `docs/internal/build.md §"QBE 工具链完全移除"`
+#    —— **build.md 里没有这一节**(全文零处 QBE)⇒ 悬空引用,已改指真实出处。
 # 最后的使用者 scripts/dev/bench/self_host_bench.sh 的 C 段也早已是坏的
 # (对不存在的 main.il 跑 qbe ⇒ exit 1 + 0 字节产物),已一并删除。
 *.ilk
@@ -106,9 +114,10 @@ tmp/
 
 # 关键编译器二进制例外 — 上方 *.exe 通配会清掉这些，git clean -fdX 前必须保留
 # v1.0.0 self-host 闭环依赖此 5 个 binary (v1.3.7 commit 0f32977 删 jhyy_v1.exe,canonical 统一到 .exe.exe)
-# v1.4.4 新增 jhyy_stage0.exe: C 端 stage-0 bootstrap binary (per v1.4.0 umbrella plan § Sprint v1.4.4)
+# ⚠️ 2026-11-05:此处此前还留着 v1.4.4 加的 `jhyy_stage0.exe` carveout ——
+#    它已随 `compiler/src/` 于 v4.0.21 整体删除,那个文件不再存在 ⇒ carveout 是死的,
+#    已连同上面那行说明一起删(留着会让「bin/ 下跟踪哪些文件」又对不上)。
 !compiler/build/bin/jhyy.exe
-!compiler/build/bin/jhyy_stage0.exe
 # v4.0.8:jhyy_v1.exe.exe 不再 track —— 它改由 `make` 从 jhyy.exe 生成
 # (曾是 git 里的静态快照,3 天就跟本体脱钩,导致 fixed_point 的
 #  `v1 != v2 -> re-baseline` 恒真。见 Makefile 的 v4.0.8 说明。

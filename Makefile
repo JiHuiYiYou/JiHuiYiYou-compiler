@@ -182,7 +182,31 @@ $(BIN_DIR)/jhyy.exe: $(SRC0_DIR)/main.jhyy $(SRC0_DIR)/*.jhyy $(JHY_RUNTIME_O) $
 	@# 的二进制,拿它跟提交进仓的旧产物比会挡住每一次正常的源码修改(踩过)。
 	@# 所以先用 git 判断 src0/runtime 是否与 HEAD 一致;不一致就跳过并说明。
 	@echo "STRICT_TOOLCHAIN=$(STRICT_TOOLCHAIN)"
-	@if git diff --quiet HEAD -- $(SRC0_DIR) $(RUNTIME_DIR) 2>/dev/null; then \
+	@#
+	@# ⚠️ **三态,不是两态**(2026-11-05 修;此前是「clean / dirty」两态,
+	@# 第三种情况被**误报成 dirty**):
+	@#
+	@#   ① clean      —— 有 HEAD 且 src0/runtime 与 HEAD 一致 ⇒ 跑字节级漂移检查
+	@#   ② dirty      —— 有 HEAD 但 src0/runtime 改过了 ⇒ 新产物本就该不同,跳过
+	@#   ③ **无 HEAD** —— 非 git 工作树(例如从 GitHub codeload tarball 解压)
+	@#                   或仓库还没有任何提交 ⇒ **没有参照物**,字节级检查无意义
+	@#
+	@# ③ 此前走的是 ② 的分支:`git diff` 在没有 .git 的树上退出码是 129,
+	@# 于是打印「src0/runtime 与 HEAD 有改动」—— **明明一处没改,只是没有
+	@# .git**。两种病因两种药,混在一起报 = 下一个人去查错方向。
+	@#
+	@# ⚠️ ③ 里「跳过」不是放水:上面的自举闭环(迭代到不动点)已经证过
+	@# 「装出去的那份产物 == 不动点」;③ 只是**没有 git 参照物**可比。
+	@# 若要一条 tarball 也拦得住的判据,那得随 tarball 分发一份 manifest
+	@# (提交态的 sha 清单)—— 本仓目前没有 ⇒ 记在这里,别假装有。
+	@#
+	@# 判据用 `git rev-parse --verify HEAD`(不是 `git rev-parse --git-dir`):
+	@# 前者在「不是仓库」与「仓库但还没有任何提交(unborn HEAD)」两种情况下
+	@# 都失败 —— 后者 `git diff HEAD` 同样会炸,又落回误报。
+	@if ! git rev-parse --verify HEAD >/dev/null 2>&1; then \
+	  echo "  (无 HEAD 可比(非 git 工作树,例如从 tarball 解压)—— 字节级漂移检查没有参照物,跳过)"; \
+	  echo "     注意:这不是「源码有改动」—— 是**根本没有 git 元数据**,两种状态。"; \
+	elif git diff --quiet HEAD -- $(SRC0_DIR) $(RUNTIME_DIR) 2>/dev/null; then \
 	  if ! cmp -s $@ $(BIN_DIR)/_boot_new.exe; then \
 	    echo "TOOLCHAIN-DRIFT (W-117): 重新编出的 jhyy.exe 与提交进仓的那份不同。"; \
 	    echo "  本机工具链: $$($(CC) --version 2>/dev/null | head -1)"; \

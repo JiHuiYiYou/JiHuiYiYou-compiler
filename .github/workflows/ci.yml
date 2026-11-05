@@ -55,8 +55,12 @@
 # 测试都不会红。详见下面 build 步的注释与 workarounds.md 的 W-117 条目。
 #
 # Windows runner (windows-latest) — 跟开发机一致 (Windows 10 + MSYS2 bash +
-# gcc + QBE + runtime)。其他 OS 留给未来扩展 (per `docs/plans/v2/v2.0.0-os-prep.md`
-# amd64_sysv target 之后)。
+# gcc + runtime)。
+# ⚠️ 2026-11-05:此处此前还列着 **QBE** —— QBE 工具链已于 v4.0.0 完全移除
+# (docs/internal/architecture.md § 1「没有 QBE 进程」;qbe/ 目录 v4.1.3 整体删除),
+# 现行 CI 只装 gcc + binutils + runtime ⇒ 列着它就是列着一条不存在的工具链。
+# 其他 OS 留给未来扩展 (per `docs/archive/plans/v2-v3/v2.0.0-os-prep.md`
+# amd64_sysv target 之后 —— 该文件已随 v2/v3 计划归档搬过家)。
 #
 # 不做 (per `feedback_auto_push_after_commit.md`):
 #   - 不自动 push / tag — 保留人工 review
@@ -213,42 +217,17 @@ jobs:
         shell: msys2 {0}
         run: |
           # gate: artifact-fresh
+          #
+          # ⚠️ 2026-11-05:这段判据原先是**本 step 里的一段内联 shell** ——
+          # 现在抽成了 `compiler/tests/bootstrap/artifact_fresh_check.sh`,
+          # 因为 **release job 自己那次 `make` 重建也要做同一道对拍**
+          # (见 release.yml 的 `release-anchor` 门)。「同一道判据写两遍」
+          # = 两套实现必然分叉 —— Makefile 顶部记着 C 端/jhyy 端两套实现
+          # 分叉的旧账(W-127/128/129 就是分叉出来的,C 侧的 W-133 至今没同步
+          # ⇒ stage0 编译**静默错值**)。⇒ 一份实现,两处调用。
           set -e
-          AF=tmp/artifact_fresh
-          rm -rf "$AF"; mkdir -p "$AF"
+          bash compiler/tests/bootstrap/artifact_fresh_check.sh
           BIN=compiler/build/bin/jhyy.exe
-          SRC=compiler/src0/main.jhyy
-
-          # 提交进仓那份(不是 make 刚编出来的)
-          if ! git show "HEAD:$BIN" > "$AF/committed.exe" 2>/dev/null; then
-            echo "::error::仓里没有 $BIN —— bootstrap 种子没了,fresh clone 无法自举"; exit 1
-          fi
-          chmod +x "$AF/committed.exe"
-          echo "提交版 sha: $(sha256sum "$AF/committed.exe" | cut -c1-16)"
-          echo "现编版 sha: $(sha256sum "$BIN" | cut -c1-16)"
-
-          # 两者各自编 src0,比 .s。`! -s` 守卫是 W-086 那一类:编译器静默
-          # exit 0 但不产 .s,那时 cmp 会因为文件缺失而给出误导性的「不同」。
-          for who in committed fresh; do
-            exe="$AF/committed.exe"; [ "$who" = fresh ] && exe="$BIN"
-            if ! timeout 300 "$exe" compile "$SRC" --no-link -o "$AF/$who" > "$AF/$who.log" 2>&1; then
-              echo "::error::$who 版编译器编 src0 失败(见 $AF/$who.log)"; tail -5 "$AF/$who.log"; exit 1
-            fi
-            if [ ! -s "$AF/$who.s" ]; then
-              echo "::error::$who 版没产出 .s —— 门无法判定"; exit 1
-            fi
-            echo "  $who.s $(wc -c < "$AF/$who.s") B  sha $(sha256sum "$AF/$who.s" | cut -c1-16)"
-          done
-
-          if cmp -s "$AF/committed.s" "$AF/fresh.s"; then
-            echo "  ✅ 提交产物对当前源码的行为与现编产物一致 —— fresh clone 的自举链是完整的"
-          else
-            echo "::error::提交产物与当前源码不同步 —— fresh clone 拿到的是落后的编译器"
-            echo "::error::修法:make(同机同 toolchain 逐字节可复现)然后 git add $BIN"
-            echo "--- 首个差异 ---"
-            diff "$AF/committed.s" "$AF/fresh.s" | head -20 | sed 's/^/    /'
-            exit 1
-          fi
 
           # 这道门看不见的那一类:codegen 中性的 src0 改动。用 git 层的信息点出来,
           # **不阻断** —— 它只是一个「你可能忘了」提示,而唯一能确定判定的信号
@@ -591,7 +570,7 @@ jobs:
             echo "$OUT"
             echo '```'
             echo ""
-            echo "**规避模式红 = 有新缺陷**;全量模式的红 = 已知缺陷(W-185/W-186)。"
+            echo "**红 = 有新缺陷**(W-185/W-186/W-187 已真修 ⇒ 已知缺陷清单已清空,规避模式当前不规避任何东西 ⇒ 规避 ≡ 全量)。"
           } >> "$GITHUB_STEP_SUMMARY"
           # 顺带跑自检(亚秒级)—— 它证明「注入的错误」与「坏源码」都能被抓到。
           "$PY" bench/difftest.py --selftest

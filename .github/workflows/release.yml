@@ -1,34 +1,46 @@
-# GH Actions release workflow — JHYY installer (v1.5.5+)
+# GH Actions release workflow — JHYY installer
 #
-# Triggers:
-#   1. push tag matching `v*` (e.g. v1.5.5, v1.5.5-rc1)
-#   2. workflow_dispatch (manual; for dry-run / RC validation without tag push)
+# 入口(实际的 `on:` 见下):
+#   1. **workflow_call** —— 由 ci.yml 的 `release` job 调用(需要 build-and-test +
+#      vscode-ext + sysv 三个 job 全绿)。**这条路才是正常发版走的路。**
+#   2. **workflow_dispatch**(手动)—— 验证发布链本身能不能跑通(dry-run 首选)。
+#      手动路径在 `dry_run=false` 时**也会**建 Release(见「Create GitHub Release」
+#      那一步的注释)—— 那是给「CI 已经绿了、只是手动重发一遍」用的。
+#   ⚠️ **「push tag 直接触发本文件」不是入口** —— tag push 触发的是 ci.yml,
+#      再由它以 reusable workflow 的方式调本文件(2026-10-18 改的)。
+#      在那之前,tag push 的 run **无法 `needs:` 别的 workflow** ⇒ 门没过也能发布
+#      —— 实测 v3.4.2 / v4.0.0-rc1 / v4.0.1 / v4.0.2 / v4.0.6 五次 tag push 全挂,
+#      最后一个真实 release 停在 2026-09-08 的 v3.2.0。
 #
-# Per-sprint scope (v1.5.5):
-#   - Build jhyy.exe from src0 via stage-0 chain (make stage0 + make)
-#   - Run gated regress (must pass; release gate)
-#   - Build Burn bundle + MSI + VSCode ext via installer/build.ps1
-#   - Generate SHA256.txt + release notes (from changelog-template.md)
-#   - Upload 4 assets + create GitHub Release
+# 这个 job 做什么:
+#   - 用 `make` 编 jhyy.exe(**jhyy 自己编 src0**;v4.0.21 起没有 `make stage0`)
+#   - 对拍「提交进仓的那份」与「本次编出来的那份」—— 比 `.s` 不比 `.exe`
+#     (门 `release-anchor`)
+#   - 跑 gated regress(必须过;门 `regress`)
+#   - 构建 Burn bundle + MSI + `.vsix`(installer/build.ps1)
+#   - 生成 SHA256.txt + release notes(模板 + 每版自己的说明文件)
+#   - 传产物 + 建 GitHub Release
 #
-# Out of scope (per plan):
-#   - Code signing (Authenticode) — deferred to v2.x
-#   - Cross-platform installer (Linux/macOS) — deferred to v2.x
-#   - Multi-Windows-version matrix — single windows-latest runner
+# 不做:
+#   - 代码签名(Authenticode)—— 未排期
+#   - 跨平台安装包(Linux/macOS)—— 未排期
+#   - 多 Windows 版本矩阵 —— 只有 windows-latest
 #
-# Why windows-latest + MSYS2: matches ci.yml + local dev env. Both must
-# produce the same binary SHA; release workflow re-runs regress baseline.
+# 为什么 windows-latest + MSYS2:与 ci.yml + 开发机一致。
+# ⚠️ **两边的 `.exe` sha 必然不同** —— `.exe` 是 (源码 × 编译器 × host gcc 版本)
+#   的函数,runner 镜像滚动、gcc 会变 ⇒ 跨 toolchain 比 `.exe` 是假阳性
+#   (W-117 那条 TOOLCHAIN-DRIFT 就是这么来的)。真正必须相等的是**行为**:
+#   两份编译器对同一份源码产出的 `.s` 逐字节相同 —— 由门 `release-anchor` 守
+#   (与 ci.yml 的 `artifact-fresh` **同一个脚本**)。
 #
-# qbe.exe source: vendored copy of QBE compiler source under qbe/. Built by
-# the "Build qbe.exe" step below. Historical gitlink was dangling (no
-# .gitmodules) — see W-025 for the v1.5.5 vendoring fix.
+# Reference: docs/archive/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
+#   ⚠️ 原写的是 `docs/plans/v1/...` —— v1 的计划已随归档搬到 docs/archive/plans/v1/。
 #
-# Reference: docs/plans/v1/v1.5.0任务清单 + 概要设计.md § Sprint v1.5.5
-#
-# 2026-10-30:原文件头有一段「qbe.exe source: vendored copy of QBE compiler
-# source under qbe/. Built by the "Build qbe.exe" step below.」—— **那个 step
-# 早就不存在了**,qbe/ 目录也已整体删除(v4.0.0 就该删完,2026-10-30 补完)。
-# 留着这段会让人以为发版还依赖 QBE。
+# ⚠️ 2026-11-05:本文件头此前还有一段「qbe.exe source: vendored copy of QBE
+#   compiler source under qbe/...」—— **QBE 工具链 v4.0.0 已完全移除、qbe/ 目录
+#   v4.1.3 整体删除**(见 docs/internal/architecture.md § 1)。
+#   2026-10-30 曾经在这里记过一笔「那段已删除」—— **它其实还留在文件里**
+#   (注释在自证删除时删漏了),2026-11-05 才真删。
 name: JHYY Installer Release
 
 # 2026-10-18:本文件从「tag push 直接触发」改成 **reusable workflow**。
@@ -86,13 +98,15 @@ concurrency:
   group: ${{ github.workflow }}-release-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: write   # create Release
-
 jobs:
   build-and-release:
     name: Build installer + create GitHub Release
     runs-on: windows-latest
+    # ⚠️ 权限**只写在这里**(2026-11-05):原先写在 **workflow 级** ⇒ 本 workflow
+    # 的每一个 job 都拿到 `contents: write`,包括那些只需要读代码的步骤。
+    # job 级声明会**整体替换**默认权限集 ⇒ 这里列出来的就是全部。
+    permissions:
+      contents: write   # 创建 GitHub Release
     # 30 → 40。**实测(2026-10-18 run 39099930527,dry-run 全绿):4 分 49 秒**
     # (05:15:30 → 05:20:19),其中 WiX bundle + MSI + vsix 打包是最大一块。
     # 留 40 分钟是有意的余量:job 被超时砍掉会留下半套 artifacts,而 GitHub
@@ -266,6 +280,26 @@ jobs:
           make STRICT_TOOLCHAIN=0
           echo "jhyy.exe sha: $(sha256sum compiler/build/bin/jhyy.exe | cut -d' ' -f1)"
           ls -la compiler/build/bin/jhyy.exe
+
+      - name: Assert shipped compiler matches the committed one (release-anchor)
+        shell: msys2 {0}
+        run: |
+          # gate: release-anchor
+          # 2026-11-05:release 自己这次 `make` 重建,此前**从来没跟提交进仓的那份
+          # 对拍过** —— 唯一能抓「工具链一换,编译器静默变成另一个」(W-117)的
+          # 那道判据,在**最该生效的那次构建**上不存在。
+          #
+          # ⚠️ 为什么不是把 `make STRICT_TOOLCHAIN=1` 打开:
+          #   那条比的是 `.exe` **字节**,而 `.exe` 是 (源码 × 编译器 × host gcc
+          #   版本) 的函数 ⇒ 跨 toolchain 比必假阳性(runner 的 gcc 16.2.0 vs
+          #   提交那份编出来的 gcc 15.2.0)⇒ 打开它 = **每次发版都红**,
+          #   红到最后没人看 = 门作废(这正是它当初被关掉的原因)。
+          # 这里比的是**行为**:两份编译器对同一份 src0 产出的 `.s` 逐字节相同
+          # ⇒ 与 host gcc 无关 ⇒ 跨 toolchain 仍然是判据。
+          #
+          # 与 ci.yml 的 `artifact-fresh` **同一个脚本** —— 同一道判据写两遍
+          # = 两套实现必然分叉(见 Makefile 顶部那段旧账)。
+          bash compiler/tests/bootstrap/artifact_fresh_check.sh
 
       - name: Run regress (gated — must PASS)
         shell: msys2 {0}

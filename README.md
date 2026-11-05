@@ -43,7 +43,8 @@ systems language meant to be good enough to host a kernel. It is deliberately
 
 - **Self-hosting** — the compiler compiles itself; the closure is verified by iteration to a
   fixed point (`.s` byte-identical across generations).
-- **Native output** — direct amd64 code emission; PE/COFF (Windows) and ELF (Linux) binaries.
+- **Native output** — direct amd64 code emission; PE/COFF executables on Windows, and SysV
+  assembly that links into ELF binaries on Linux (the compiler itself runs on Windows only).
 - **OS-ready** — `extern fn` FFI on the C ABI, `enum` + `match`, `#[no_std]`, `#[naked]`,
   inline `asm!`, `#[link_section]`, `volatile`, memory barriers, `defer`.
 

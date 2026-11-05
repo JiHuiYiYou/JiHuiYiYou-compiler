@@ -375,19 +375,15 @@ def run_test(
     # (xmm_pressure_9args.jhyy)摘掉该指令之后就没有任何 test 再用它**,
     # 而 QBE 本身已于 v2.16.0 从编译器移除 ⇒ 这段逻辑与 `--self-backend`
     # 一起成了死代码,删掉。
-    # 2026-10-15 (CI 修复):SKIP-STAGE0 —— 只在 `jhyy_stage0.exe`(C 端 bootstrap)
-    # 上跳过。存在的理由:`regress.py --all` 拿 jhyy.exe 与 jhyy_stage0.exe 两个
-    # binary 做 gated,而 stage0 是 **C 端编译器**,它的 parser 早于 V3-B / V3-C,
-    # 不认 `&mut` / `Cap<T>` / `#[naked]` / `asm!` / `volatile` 这些语法。
-    # 这些测试在 jhyy.exe(生产 binary)上必须跑 —— 它们验的是自举后端的行为,
-    # 而自举后端**只有 jhyy.exe 这条腿在验**。
-    #
-    # ⚠️ 原先还有一条与它镜像的 SKIP-QBE(「默认跳,opt进才跑」),但那个指令
-    # 自 2026-10-15 起已无使用者、QBE 也已移除 ⇒ 2026-10-30 连同它的
-    # 支持一起删了。**本条(默认跑,只有 stage0 跳)仍有效** ——
-    # 笼统的 SKIP 不该代替它。
-    # 会让这些测试在**两条腿上都不跑**,那才是真的没人验。
-    skip_stage0_reason = None
+    # 2026-11-05:紧接着删掉的还有 **SKIP-STAGE0** directive 的支持
+    # (「只在 `jhyy_stage0.exe` 上跳过」)—— 它比 SKIP-QBE 活得久,但**前提
+    # 早已消失**:`jhyy_stage0.exe`(C 端编译器)已于 v4.0.21 随 `compiler/src/`
+    # 整体删除,`regress.py` 的 gated binary 列表也只剩 jhyy.exe 一个
+    # ⇒ 那条判定(`basename(binary) == "jhyy_stage0.exe"`)永远为假
+    # = 死代码。测试文件头上挂着的 `// SKIP-STAGE0:` 同时删掉 —— 它们从来没
+    # 生效过(判定不可达),留着只会在「C 端还在」这层幻觉上再叠一层。
+    # ⚠️ 笼统的 `// SKIP:` 不能代替它:SKIP 是**不跑**,bug 哪天被修好了它也不
+    #    会吭声 ⇒ 标记永久失真。要表达「这条腿上不跑」用 XFAIL(真跑 + XPASS 反噬)。
     # v1.5.6: SETENV directive — 解析 // SETENV: KEY=VALUE 行, 注入到
     # _build_subprocess_env() 返回的 env. 测试用: 验证 jh_gcc_path() 在不同
     # env 状态下的探测行为 (Priority 1 JHY_GCC / Priority 2 JHYY_HOME).
@@ -423,9 +419,6 @@ def run_test(
         m_skip = re.search(r"//\s*SKIP\s*:\s*(.+)", src)
         if m_skip:
             skip_reason = m_skip.group(1).strip()
-        m_s0 = re.search(r"//\s*SKIP-STAGE0\s*:\s*(.+)", src)
-        if m_s0:
-            skip_stage0_reason = m_s0.group(1).strip()
         # Skip library files (no main entry) — 用剥掉注释的源码判定,
         # 否则注释里提到 `fn main_jhyy` 会让一个没有 main 的文件被当成可跑测试。
         #
@@ -447,10 +440,6 @@ def run_test(
                 setenv_overrides[key] = val
     except UnicodeDecodeError:
         pass
-
-    # SKIP-STAGE0 判定放在所有声明之后 —— binary 参数在这里可用,变量也已初始化。
-    if skip_stage0_reason is not None and os.path.basename(binary) == "jhyy_stage0.exe":
-        return (True, None, None, f"skipped (stage0-only: {skip_stage0_reason})")
 
     if not has_main:
         # Library file: skip (no standalone run possible)

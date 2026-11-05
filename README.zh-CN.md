@@ -39,7 +39,8 @@ JHYY(机会翼游)是一门自研的、静态类型的、表达式导向的编�
 **设计目标**:
 
 - **自举** —— 编译器编译自己;闭环由「迭代到不动点」验证(跨代 `.s` 逐字节相同)。
-- **原生产物** —— 直接发射 amd64 机器码;PE/COFF(Windows)与 ELF(Linux)二进制。
+- **原生产物** —— 直接发射 amd64 机器码;Windows 上出 PE/COFF 可执行文件,Linux 上出可链成
+  ELF 的 SysV 汇编(**编译器本身只在 Windows 上跑**)。
 - **面向 OS** —— `extern fn` 走 C ABI 的 FFI、`enum` + `match`、`#[no_std]`、`#[naked]`、
   内联 `asm!`、`#[link_section]`、`volatile`、内存屏障、`defer`。
 

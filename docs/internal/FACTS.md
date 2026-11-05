@@ -60,10 +60,10 @@
 | 门 | id | 查什么 | 在哪跑 · 跑什么 |
 |---|---|---|---|
 | 自举闭环（构建期） | `selfhost` | jhyy.exe 能把自己编成同一个东西（迭代到不动点）；产物与提交进仓的那份逐字节对照（发布者视角） | ci.yml · build-and-test · `make` |
-| 提交产物同步 | `artifact-fresh` | 提交进仓的那份 jhyy.exe 对当前源码的**行为** == 现编产物（比 `.s`，不比 `.exe`） | ci.yml · build-and-test · 内联 shell |
+| 提交产物同步 | `artifact-fresh` | 提交进仓的那份 jhyy.exe 对当前源码的**行为** == 现编产物（比 `.s`，不比 `.exe`） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_fresh_check.sh` |
 | 全量回归 | `regress` | 每个用例的退出码 / stdout 断言 | ci.yml · build-and-test · `python regress.py --all` |
 | 回归事实对拍 | `regress-facts` | § 2.1 的数 == 本轮**实测**数（缺摘要即红） | ci.yml · build-and-test · `python scripts/dev/check_regress_facts.py tmp/regress-summary.json` |
-| 断言强度 | `assert-strength` | 每个用例都有能失败的断言（零信号即红） | ci.yml · build-and-test · `python scripts/dev/audit_test_assertions.py --strict` |
+| 断言强度 | `assert-strength` | 每个用例都有能失败的断言（零信号即红）**＋ 指令 ⇄ 读点对照**（测试里用到的每条指令都必须在 harness 里有读点；harness 里解析了却没登记的指令 ⇒ 死指令，红） | ci.yml · build-and-test · `python scripts/dev/audit_test_assertions.py --strict` |
 | 产物级门 | `artifact-checks` | **18 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
 | 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
 | 运行时性能 | `perf` | 静态指标硬门（指令数 / 访存 / 帧大小 / chkstk；墙钟只报告） | ci.yml · build-and-test · `python scripts/dev/bench/runtime_perf.py --ci` |
@@ -83,6 +83,7 @@
 | SysV ABI | `sysv-abi` | 链 + 跑 + 比 `// EXPECT:` | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_link_run.sh` |
 | SysV 跨实现对拍 | `sysv-cross` | jhyy ↔ gcc 能否互调（W-104） | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_abi_cross.sh` |
 | 发布：版本 == tag | `release-version` | `VERSION` 文件与 tag 不符 ⇒ 拒发 | release.yml · 内联 pwsh |
+| 发布：产物与提交版同源 | `release-anchor` | release 自己那次 make 编出的 jhyy.exe 与**提交进仓的那份**对同一份 src0 产出的 `.s` 逐字节相同（比 `.s` 不比 `.exe` ⇒ 跨 toolchain 不假阳性） | release.yml · `bash compiler/tests/bootstrap/artifact_fresh_check.sh` |
 | 发布：构建产物 | `release-build` | Burn bundle + MSI + `.vsix` 构建成功 | release.yml · `pwsh -File installer/build.ps1 bundle` |
 | 发布：SHA256 | `release-sha256` | `SHA256.txt` 与产物逐一对得上 | release.yml · 内联 pwsh |
 | 发布：release notes | `release-notes` | 没填的占位符 ⇒ 拒发 | release.yml · 内联 pwsh |

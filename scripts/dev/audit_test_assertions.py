@@ -113,8 +113,43 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
+# ── 指令的**权威名单** + 「读点」对照(2026-11-05)────────────────────
+#
+# 为什么要有这道检查:2026-11-05 审计发现 `// SKIP-STAGE0:` 在 10 个测试文件头上
+# 挂了两年多,而它在 harness 里的读点判定是
+# `basename(binary) == "jhyy_stage0.exe"` —— 该 binary 已于 v4.0.21 随
+# `compiler/src/` 整体删除 ⇒ **判定永远不可达** ⇒ 那条指令从来没跳过过任何东西,
+# 却一直让人以为「这个测试在 C 端那条腿上是被跳过的」。
+#
+# ⇒ **没人跑的分支是最容易腐烂的分支**。一条**没有可达读点**的指令 = 死指令,
+#   而死指令会伪装成「有保护」—— 比没有保护更糟。
+#
+# 这道检查抓三件事:
+#   ① harness 解析了某条指令,但它**没登记**在本名单里(白名单漂移)
+#      —— SKIP-STAGE0 当年就栽在这里:本文件的旧白名单里压根没有它,
+#         而 harness 里有(不可达的)读点 ⇒ 两边对不上,谁也没发现。
+#   ② 测试文件里用了某条指令,但 harness 里**没有读点** ⇒ 断言静默失效
+#   ③ 名单里的某条指令**一个使用者都没有** ⇒ 读点是死代码(会腐烂)
+#      —— 这条只**告警**不判红:项目有意保留空转的机制(AVOID_KNOWN 空集、
+#         XFAIL 目前 0 个使用者),留着是为了下一个缺陷来了直接用。
+#
+# ⚠️ 名单的**唯一真相源在这里** —— harness 那边不要另写一份。
+CANONICAL_DIRECTIVES = ("EXPECT", "EXPECT-ERROR", "EXPECT-OUT", "XFAIL", "SKIP", "SETENV")
+
+# harness 里解析指令的地方(只读,不改)
+HARNESS_FILES = ("mcp-jhyy/jhyy_regress.py", "regress.py")
+
+# 指令名出现在**正则字面量**里才算读点 —— 注释里提到一个指令名不算。
+# (2026-10-30 删掉 SKIP-QBE 支持之后,本文件的旧白名单里还留着它 ⇒ 白名单漂移;
+#  2026-11-05 清掉。)
+RE_REGEX_LITERAL = re.compile(r"""r(['"])(.*?)\1""", re.S)
+RE_LITERAL_DIRECTIVE = re.compile(r"//\\s\*\s*([A-Z][A-Z0-9-]*)")
+
+# 按长度降序 ⇒ "EXPECT-ERROR" 先于 "EXPECT" 命中(命中哪个不影响结果 ——
+# directive_source 只决定「这一行是不是一条指令」,真正的解析由各自的正则做)。
 RE_DIRECTIVE_TAIL = re.compile(
-    r'^\s*(EXPECT|EXPECT-ERROR|EXPECT-OUT|XFAIL|SKIP|SKIP-QBE|SETENV)')
+    r"^\s*(" + "|".join(sorted((re.escape(n) for n in CANONICAL_DIRECTIVES),
+                               key=len, reverse=True)) + r")")
 
 
 def _comment_tail(line: str) -> str:
@@ -285,6 +320,115 @@ def _main_body(src: str) -> str:
     return m.group(1) if m else ""
 
 
+def _harness_read_points() -> tuple[set[str], set[str]]:
+    """(harness 真正解析的指令, harness 里出现但没登记的指令)。
+
+    「读点」= **正则字面量**里出现了该指令名 —— 只认这个,因为注释里提到
+    一个指令名不构成读点(旧白名单里那个 `SKIP-QBE` 就是这么漂移的:
+    它的支持 2026-10-30 就删了,白名单里却一直留着)。
+    """
+    parsed: set[str] = set()
+    for rel in HARNESS_FILES:
+        p = ROOT / rel
+        if not p.is_file():
+            continue
+        src = p.read_text(encoding="utf-8", errors="replace")
+        for _q, lit in RE_REGEX_LITERAL.findall(src):
+            for m in RE_LITERAL_DIRECTIVE.finditer(lit):
+                parsed.add(m.group(1))
+    unregistered = {n for n in parsed if n not in CANONICAL_DIRECTIVES}
+    return parsed, unregistered
+
+
+def _directive_users() -> dict[str, list[str]]:
+    """每条指令被哪些测试文件使用(按 directive_source 的口径 = 与 harness 同源)。"""
+    users: dict[str, list[str]] = {}
+    for p in sorted(EXAMPLES.rglob("*.jhyy")):
+        try:
+            raw = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        dsrc = directive_source(raw)
+        for name in CANONICAL_DIRECTIVES:
+            if re.search(r"//\s*" + re.escape(name) + r"\s*[:=]", dsrc):
+                users.setdefault(name, []).append(p.name)
+    return users
+
+
+def _unknown_directive_users() -> dict[str, list[str]]:
+    """以已知指令为前缀、但不在名单里的「家族成员」指令 —— 被哪些文件用了。
+
+    例:`SKIP-STAGE0`(以 `SKIP` 为前缀)/ `EXPECT-ED`(以 `EXPECT` 为前缀)。
+    这类指令是最危险的一种:**名字长得像一条真指令**,于是读代码的人以为
+    它有保护 —— 而它既没登记、也没有读点 ⇒ 什么都不会发生。
+    """
+    out: dict[str, list[str]] = {}
+    for p in sorted(EXAMPLES.rglob("*.jhyy")):
+        try:
+            raw = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        dsrc = directive_source(raw)
+        for m in re.finditer(r"//\s*([A-Z][A-Z0-9-]*)\s*[:=]", dsrc):
+            name = m.group(1)
+            if name in CANONICAL_DIRECTIVES:
+                continue
+            if any(name.startswith(c) for c in CANONICAL_DIRECTIVES):
+                out.setdefault(name, []).append(p.name)
+    return out
+
+
+def check_directive_read_points() -> tuple[list[str], list[str]]:
+    """指令 ⇄ 读点 对照 —— 返回 (问题, 告警)。问题非空 = 判红。"""
+    problems: list[str] = []
+    warnings: list[str] = []
+
+    parsed, unregistered = _harness_read_points()
+
+    # ① harness 解析了、但没登记 ⇒ 白名单漂移(SKIP-STAGE0 当年就栽在这里)
+    for name in sorted(unregistered):
+        problems.append(
+            f"harness 解析了指令 `{name}`,但它没登记在 CANONICAL_DIRECTIVES 里 "
+            f"⇒ 白名单漂移(要么补登记,要么把 harness 里那段死代码删掉)")
+
+    # ② 名单里的指令,harness 里必须真的解析它
+    for name in CANONICAL_DIRECTIVES:
+        if name not in parsed:
+            problems.append(f"指令 `{name}` 登记在案,但 harness 里没有读点(死登记)")
+
+    users = _directive_users()
+
+    # ③ 测试用了、但没有读点 ⇒ 断言静默失效
+    for name, files in sorted(users.items()):
+        if name not in parsed:
+            shown = ", ".join(files[:3]) + (" …" if len(files) > 3 else "")
+            problems.append(
+                f"指令 `{name}` 被 {len(files)} 个测试文件使用({shown}),"
+                f"但 harness 里没有读点 ⇒ 这些断言**静默失效**")
+
+    # ④ 有读点但零使用者 ⇒ 死代码(只告警:项目有意保留空转的机制)
+    for name in CANONICAL_DIRECTIVES:
+        if name in parsed and name not in users:
+            warnings.append(
+                f"指令 `{name}` 在 harness 里有读点,但没有任何测试使用 ⇒ 死代码"
+                f"(读点会腐烂;若确要保留空转机制,忽略这条)")
+
+    # ⑤ 「家族成员」检查 —— 专打 `SKIP-STAGE0` 那种形态。
+    #   一条以已知指令为前缀的变体(`SKIP-XXX` / `EXPECT-XXX`),既不在名单里、
+    #   harness 里也没有读点 ⇒ 它**什么都不是**:不报错、不跳过、不生效,
+    #   却让人以为「这个测试有保护」。
+    #   ⚠️ 只按「已知指令的前缀」判,不用「全大写 + 冒号」泛判 ——
+    #   后者会把 `// NOTE: ...` 这类散文注释也拖进来(实测仓里目前 0 处,
+    #   但那是运气,不是设计)。
+    for name, files in sorted(_unknown_directive_users().items()):
+        problems.append(
+            f"指令 `{name}` 被 {len(files)} 个测试文件使用({', '.join(files[:3])}),"
+            f"但它既不在 CANONICAL_DIRECTIVES 里、harness 里也没有读点 ⇒ 它什么都不是"
+            f"(若这是想写的注释,别用「全大写 + 冒号」的指令形态)")
+
+    return problems, warnings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -301,6 +445,10 @@ def main() -> int:
 
     files = sorted(p for p in EXAMPLES.rglob("*.jhyy") if not p.name.startswith("_"))
     results = [classify(p) for p in files]
+
+    # 指令 ⇄ 读点 对照(2026-11-05)—— 与断言强度同门(`assert-strength`),
+    # 因为它守的是同一件事的两面:**判据必须真的被执行**。
+    dir_problems, dir_warnings = check_directive_read_points()
 
     buckets: dict[str, list[dict]] = {}
     for r in results:
@@ -327,6 +475,12 @@ def main() -> int:
             if k in buckets:
                 print(f"  {k:24s} {len(buckets[k]):3d}")
         print(f"\n零信号违规合计: {len(violations)}")
+        if dir_problems:
+            print(f"--- 指令 ⇄ 读点对照: {len(dir_problems)} 条问题 ---")
+            for msg in dir_problems:
+                print(f"    [PROBLEM] {msg}")
+        for msg in dir_warnings:
+            print(f"    [WARN] {msg}")
         if violations:
             print("\n--- crash-only(只验「进程没崩」)---")
             for r in buckets.get("crash-only", []):
@@ -361,8 +515,11 @@ def main() -> int:
                 return 1
             print(f"baseline OK: crash-only {got} <= {allowed}")
 
-    if args.strict and violations:
-        print(f"FAIL: {len(violations)} 个测试零信号", file=sys.stderr)
+    if args.strict and (violations or dir_problems):
+        detail = f"{len(violations)} 个测试零信号"
+        if dir_problems:
+            detail += f" + {len(dir_problems)} 条指令 ⇄ 读点对照问题"
+        print(f"FAIL: {detail}", file=sys.stderr)
         return 1
     return 0
 

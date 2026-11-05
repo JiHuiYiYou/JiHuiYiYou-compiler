@@ -15,7 +15,7 @@
 #   powershell -File installer\build.ps1 bundle     # build jhyy-installer-*.exe (v1.5.3)
 #
 # Env vars:
-#   JHY_VERSION    installer version (default: git describe, fallback 1.8.3-dev)
+#   JHY_VERSION    installer version (default: git describe, fallback: repo VERSION file)
 #   SKIP_VSIX      1 to skip vscode-ext pack (v1.5.4+)
 #
 # Exit codes:
@@ -61,7 +61,8 @@ function _split_rc_suffix($verIn, [ref]$suffixOut) {
 #   for MSI — strip git suffix and use only major.minor.build.
 #   RC tag (e.g. v1.5.5-rc1) has -rcN suffix — extract separately so MSI version
 #   stays numeric ("1.5.5") while display name + filename keep "-rc1" suffix.
-#   Override via $env:JHY_VERSION = "1.8.3" for release builds.
+#   Override via $env:JHY_VERSION = "<version>" for release builds
+#   (release.yml passes the tag version; the VERSION file is the repo-side truth).
 $JHY_VERSION_RC_SUFFIX = ""
 if (-not $env:JHY_VERSION) {
     try {
@@ -91,7 +92,24 @@ if (-not $env:JHY_VERSION) {
         $env:JHY_VERSION = $verIn
     }
 }
-if (-not $env:JHY_VERSION) { $env:JHY_VERSION = "1.8.3" }
+# Fallback when git describe fails (e.g. building from a source tarball with no
+# tags): read the repo's VERSION file -- the single source of truth for the
+# version number (scripts/dev/bump_version.py; release.yml's release-version
+# gate compares it against the tag).
+# ⚠️ 2026-11-05: the previous fallback was a hardcoded "1.8.3" => a build from a
+#    tarball (no git tags) got stamped with a version from three years ago and
+#    nothing complained. A wrong version number on the installer is worse than a
+#    failed build.
+if (-not $env:JHY_VERSION) {
+    $versionFile = Join-Path $PSScriptRoot ".." "VERSION"
+    if (Test-Path $versionFile) {
+        $env:JHY_VERSION = ((Get-Content $versionFile -Raw -Encoding utf8).Trim() -replace '^v', '')
+        Write-Host "[build.ps1] version from VERSION file: $env:JHY_VERSION"
+    } else {
+        Write-Host "[WARN] no version detected and no VERSION file found -- using 0.0.0"
+        $env:JHY_VERSION = "0.0.0"
+    }
+}
 # Display version includes RC suffix for filenames + display names.
 # MSI ProductVersion (passed via -d JHY_VERSION) must stay numeric (no "-rc1").
 $JHY_VERSION_DISPLAY = "$($env:JHY_VERSION)$JHY_VERSION_RC_SUFFIX"
@@ -147,7 +165,7 @@ switch ($Target) {
         exit 0
     }
     "compiler" {
-        Write-Host "[build.ps1] === compiler MSI build (v1.5.4 + v4.0.0 QBE removed) ==="
+        Write-Host "[build.ps1] === compiler MSI build (QBE removed in v4.0.0) ==="
         # 1. prepare bin/ payload (jhyy.exe; qbe.exe removed in v4.0.0)
         $binDir = "installer/build-artifacts/bin"
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
@@ -421,21 +439,29 @@ switch ($Target) {
         } else {
             Write-Host "[build.ps1] compiler MSI is up to date, reusing it."
         }
-        # 1a. v1.8.3: ensure .NET 8 Desktop Runtime exe is downloaded for
-        #     Bundle chain. Source: official MS dotnetcli mirror.
+        # 1a. ensure the .NET 8 Desktop Runtime exe is present for the Bundle chain.
+        #     Source: official MS dotnetcli mirror.
         #     Path: installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe
-        #     Why 8.0.30: latest 8.0 LTS patch as of 2026-08-29 (verified via
-        #     https://dotnetcli.azureedge.net/dotnet/Runtime/8.0/latest.version).
-        #     If the file exists from a previous build, skip download (CI caching).
-        $dotnet8Exe = "installer/build-artifacts/dotnet/dotnet-runtime-8.0.30-win-x64.exe"
+        #     Why 8.0.30: 8.0 LTS patch, pinned as of 2026-08-29.
+        #
+        # 2026-11-05: the sha256 of this download was verified NOWHERE -- the only
+        #     success criterion was "the file exists" => a truncated download or a
+        #     tampered CDN response would land inside the shipped bundle unnoticed.
+        #     The expected sha256 is pinned below (version controlled) and asserted
+        #     with Get-FileHash on BOTH paths: the fresh download AND the CI-cache
+        #     hit (the cache path never downloaded anything, so it never verified
+        #     anything either).
+        $dotnet8Version = "8.0.30"
+        $dotnet8Exe = "installer/build-artifacts/dotnet/dotnet-runtime-$dotnet8Version-win-x64.exe"
+        $dotnet8Sha256 = "e40f199c6d5584aff0554c01163c3c8d9ccf6bec3a577e4d967e41070772a1c1"
         $dotnet8Dir = Split-Path -Parent $dotnet8Exe
         if (-not (Test-Path $dotnet8Exe)) {
             if (-not (Test-Path $dotnet8Dir)) {
                 New-Item -ItemType Directory -Path $dotnet8Dir -Force | Out-Null
             }
-            Write-Host "[build.ps1] downloading .NET 8 Desktop Runtime 8.0.30 (~28MB)..."
+            Write-Host "[build.ps1] downloading .NET 8 Desktop Runtime $dotnet8Version (~28MB)..."
             try {
-                Invoke-WebRequest -Uri "https://dotnetcli.azureedge.net/dotnet/Runtime/8.0.30/dotnet-runtime-8.0.30-win-x64.exe" `
+                Invoke-WebRequest -Uri "https://dotnetcli.azureedge.net/dotnet/Runtime/$dotnet8Version/dotnet-runtime-$dotnet8Version-win-x64.exe" `
                                   -OutFile $dotnet8Exe `
                                   -UseBasicParsing `
                                   -ErrorAction Stop
@@ -452,6 +478,16 @@ switch ($Target) {
         } else {
             Write-Host "[OK] .NET 8 runtime already cached: $dotnet8Exe"
         }
+        # Integrity check -- runs on both paths (see the note above).
+        $dotnet8Actual = (Get-FileHash -Path $dotnet8Exe -Algorithm SHA256).Hash.ToLower()
+        if ($dotnet8Actual -ne $dotnet8Sha256) {
+            Write-Host "[ERROR] .NET 8 runtime sha256 mismatch"
+            Write-Host "  expected: $dotnet8Sha256"
+            Write-Host "  actual  : $dotnet8Actual"
+            Write-Host "  delete that file and re-run (it is downloaded fresh)."
+            exit 1
+        }
+        Write-Host "[OK] .NET 8 runtime sha256 verified: $dotnet8Actual"
         # 2. build Burn bundle via wix build - outputs .exe
         #   -ext <Bal.dll> for WixStandardBootstrapperApplication
         #   bindpath msi/ -> jhyy-compiler-*.msi payload
