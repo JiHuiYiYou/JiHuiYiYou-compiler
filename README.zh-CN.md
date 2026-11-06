@@ -431,7 +431,7 @@ JiHuiYiYou-compiler/
 | 基准套件 | 9 道题 · 4 个覆盖轴 —— [已发布快照](bench/baseline/RESULTS-2026-11-04.md)(jhyy 与 gcc 的墙钟对比;**代码生成质量的地板是 gcc `-O0`**,不是及格线) |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
-| `artifact_checks.sh` | **18 PASS / 0 FAIL** |
+| `artifact_checks.sh` | **19 PASS / 0 FAIL** |
 | `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
 | ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.3.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |

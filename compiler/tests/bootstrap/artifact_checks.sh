@@ -926,6 +926,42 @@ EOF
     ok "program_icon(编出来的 exe 带 $n 个图标)"
 }
 
+# 2026-11-06:`jhyy run` 这条路径**回归门完全没覆盖** ——
+# regress.py 是**直接跑编出来的 .exe**的,不经过 `jhyy run` ⇒ exe 路径的
+# 构造、子进程的启动、退出码的透传、用户 stderr 的去向,**全都没有门**。
+# 代价实测过:2026-11-06 把 str_concat_at 改成逐字节时,一个「隐式 NUL 终止」
+# 被打破 ⇒ exe 路径变成堆垃圾 ⇒ `jhyy run` 全线失败(exit -1)——
+# 而**全量回归是绿的**。这道门补上这个覆盖。
+check_run_cmd() {
+    hdr "jhyy run 端到端:退出码透传 + 用户的 stderr 看得见"
+    [ -x "$JHYY_EXE" ] || { skip "run_cmd" "jhyy.exe 不存在"; return; }
+
+    cat > "$WORK/runme.jhyy" <<'EOF'
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+fn main_jhyy() -> i32 {
+    let _e = jh_fputs_stderr("RUN-STDERR-MARKER\n" as *u8);
+    return 42;
+}
+EOF
+    local out rc
+    out=$("$JHYY_EXE" run "$WORK/runme.jhyy" 2>&1)
+    rc=$?
+    # 退出码:子进程的 42 必须原样透传。
+    if [ "$rc" != "42" ]; then
+        bad "run_cmd" "jhyy run 的退出码是 $rc(期望 42)—— 子进程没被正确启动,或退出码没透传"
+        return
+    fi
+    # 用户的 stderr 必须看得见(修复前它进了管道却从没人读 ⇒ 整个被吞掉)。
+    case "$out" in
+        *RUN-STDERR-MARKER*) : ;;
+        *)
+            bad "run_cmd" "用户的 stderr 看不见(输出里没有 RUN-STDERR-MARKER)—— stderr 被吞掉了"
+            return
+            ;;
+    esac
+    ok "run_cmd(jhyy run 退出码 42 ✓,用户的 stderr 可见 ✓)"
+}
+
 # ════════════════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1356,6 +1392,7 @@ want sysv_arg_spill  && check_sysv_arg_spill
 want many_functions   && check_many_functions
 want compiler_icon    && check_compiler_icon
 want program_icon     && check_program_icon
+want run_cmd          && check_run_cmd
 
 echo
 echo "=== artifact_checks 结果: $PASS_N PASS / $KNOWN_N KNOWN-FAIL / $FAIL_N FAIL / $SKIP_N SKIP ==="
