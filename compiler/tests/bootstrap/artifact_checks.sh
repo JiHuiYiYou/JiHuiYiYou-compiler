@@ -163,8 +163,27 @@ badenv() {
     FAIL_N=$((FAIL_N+1)); FAILED+=("$1(env)")
 }
 
-# skip <id> <原因> —— 没跑成,什么都没验到。不算绿,单独计数并在汇总里点名。
-skip() { printf "  ⏭  SKIP %s (%s)\n" "$1" "$2"; SKIP_N=$((SKIP_N+1)); SKIPPED+=("$1"); }
+# skip <id> <原因> —— 没跑成,什么都没验到。
+#
+# ⚠️ 2026-11-06 真修:**必须红**。
+#   此前本函数只递增 SKIP_N,而退出码只看 FAIL_N ⇒ check 没跑成时脚本打印
+#   「✅ 无 FAIL、无 UNEXPECTED-PASS。」并 exit 0 —— **门在什么都没验的状态下
+#   报绿**。脚本自己的注释写着「不算绿」,行为却相反。
+#   与 badenv 同义(环境/编译失败 ⇒ 什么都没验到 ⇒ 红),SKIP_N 只保留给
+#   汇总里点名「哪几道没跑」;`FAILED` 的 "(env)" 标记正是红项表里列的
+#   三种合法红来源之一。
+#
+#   可达性(实测,别照抄旧数字):真正**会触发**的只有 `objdump 不在 PATH`
+#   那一条(check_asm_before_ret)—— 实测 objdump 缺失时该门 exit 0 并打印
+#   「✅ 无 FAIL」,改后 exit 1。其余 15 处 `[ -x "$JHYY_EXE" ]` 守卫实际
+#   不可达:脚本开头已用 `[ -f "$JHYY_EXE" ] || exit 2` 硬退出,且 MSYS2/NTFS
+#   上 `-x` 对普通文件几乎恒真。留它们是冗余保险,本函数改成红**主要是**
+#   为了「skip 这个概念本身不能再是绿的」。
+skip() {
+    printf "  ❌ FAIL %s (环境/编译失败,什么都没验到)\n    %s\n" "$1" "$2"
+    SKIP_N=$((SKIP_N+1)); SKIPPED+=("$1")
+    FAIL_N=$((FAIL_N+1)); FAILED+=("$1(env)")
+}
 
 # ════════════════════════════════════════════════════════════════════════════
 # 7. W-107 / W-120 — 函数数 / temp id 越界时,编译器是否仍然产出**正确**的代码
@@ -961,6 +980,10 @@ selftest() {
           bad some_new_check "随便什么失败"
     _case "环境/编译失败 → FAIL(红),不查登记" 1 0 \
           badenv selftest_probe "编译失败:..."
+    # 2026-11-06:skip 与 badenv 同义(都红)。此前 skip 只进 SKIP_N、退出码只看
+    # FAIL_N ⇒ check 没跑成时门报绿。这条用例锁住「skip 必须红」。
+    _case "没跑成(skip)→ FAIL(红),不查登记" 1 0 \
+          skip selftest_probe "objdump 不在 PATH"
     _case "已登记却通过 → UNEXPECTED-PASS(红)" 1 0 \
           ok "selftest_probe(.text.boot 已出现在产物里)"
     _case "未登记却通过 → PASS(绿)" 0 0 \
@@ -973,7 +996,7 @@ selftest() {
         echo "  ❌ 自检 $st_fail 条不符 —— 分类逻辑本身坏了,门已失真"
         exit 1
     fi
-    echo "  ✅ 8/8 分类用例通过 —— 四种红与两种绿都能正确触发"
+    echo "  ✅ 9/9 分类用例通过 —— 四种红与两种绿都能正确触发"
     exit 0
 }
 
