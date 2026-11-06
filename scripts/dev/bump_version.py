@@ -582,9 +582,20 @@ def cmd_check() -> int:
         if data and data.get("hash") == PENDING_SHA:
             pending.append(f"{rel(SCOOP_JSON)}: hash 还没回填(finalize)")
 
+    # winget manifest —— **当前版本必须有一份**。
+    #
+    # ⚠️ 2026-11-06 真修:此前这段是 `if wini.is_file():` ⇒ 目录不存在就整段
+    #   跳过,连 pending 都不报 ⇒ 「VERSION 对应的 winget manifest 不存在」
+    #   这道零漂移门**照样报绿**。现在缺目录 = problem(硬红)。
+    #   (sha256 还是占位 ⇒ 仍是 pending —— 那是发版流程的正常中间态。)
     wdir = ROOT / WINGET_BASE / version
     wini = wdir / "JiHuiYiYou.JHYY.yaml"
-    if wini.is_file():
+    if not wini.is_file():
+        problems.append(
+            f"{rel(wini)}: 不存在 —— 当前 VERSION 必须有一份 winget manifest"
+            f"(bump_version.py set 会从上一版目录整份拷过来)"
+        )
+    else:
         m = re.search(r"(?m)^\s*InstallerSha256:\s*(\S+)", read_text(wini))
         if m and m.group(1) == PENDING_SHA:
             pending.append(f"{rel(wini)}: InstallerSha256 还没回填(finalize)")
