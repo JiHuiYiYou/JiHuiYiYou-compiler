@@ -271,6 +271,13 @@ fn str_copy(dst: *u8, src: *u8, cap: i64) -> i64 {
 // ⚠️ 2026-11-06 真修:宽度改逐字节(见 str_copy 的说明),并加上容量上限 ——
 //   此前这个函数**没有 cap 参数**,调用方想传也传不了 ⇒ 一个 966 字符的
 //   import 名就能把 malloc(1024) 的路径缓冲写穿(实测:0xC0000374 堆损坏)。
+//
+// ⚠️ **必须补结尾 NUL**。旧实现每个字节用 `*i32` 读写(4 字节)⇒ 拷一个
+//   1 字符的串("\"" = '"' + 0)会**顺带把后面 3 个字节也写成 0** ⇒
+//   字符串**意外地**被终止了。改成逐字节后这个「隐式终止」没了 ⇒
+//   紧跟其后的 strlen 会一路读进堆垃圾(实测:`jhyy run` 的 exe 路径变成
+//   「k???C:\...\err_run.exe<源文件内容>」⇒ CreateProcess 失败,exit -1)。
+//   ⇒ 本函数现在自己写 NUL(位置 = dst[off+lim] ≤ dst[cap-1],在界内)。
 fn str_concat_at(dst: *u8, off: i64, src: *u8, cap: i64) -> i64 {
     let n = strlen(src);
     let mut room = cap - (1 as i64) - off;
@@ -284,6 +291,8 @@ fn str_concat_at(dst: *u8, off: i64, src: *u8, cap: i64) -> i64 {
         (*d_p) = (*s_p) as u8;
         i = i + (1 as i64);
     }
+    let nul_p = (dst as i64 + off + lim) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
     return off + lim;
 }
 
