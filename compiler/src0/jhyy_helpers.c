@@ -792,6 +792,20 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap);
    ⇒ 失败时才能打出"用的是哪份 gcc"。 */
 static char g_gcc_cmd_prefix[1100];
 
+/* ⚠️ 2026-11-06 新增:jh_run 是否**强制**捕获 stderr。
+ *
+ * 默认口径(jh_run 内部按命令行自己判):只有 gcc 链接行捕获 stderr
+ * (调用方要把它当 "gcc stderr:" 打出来)。
+ *
+ * windres 这类「调用方要读 jh_run_get_output() 的诊断」的调用点用这个标志
+ * 显式置 1 —— 它不是 gcc 链接行,但同样需要拿到子进程的 stderr。
+ *
+ * 其它命令(主要是 `jhyy run` 跑的用户自己的程序)⇒ **不捕获**,stderr 直接
+ * 继承父进程 —— 此前它们进了管道却从没人读,等于把用户程序的错误信息
+ * 整个吞掉(W-045 只把 stdout 放行了,stderr 留在管道里,半个修复)。
+ */
+static int g_jh_force_capture_stderr = 0;
+
 /* v4.1.0: 保证子进程有一份**可写**的临时目录。
  *
  * 为什么需要:gcc / collect2 在 TMPDIR / TMP / TEMP **全 unset** 时,
@@ -1031,19 +1045,39 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     if (!wbuf) { HeapFree(GetProcessHeap(), 0, cmd_buf); return -1; }
     MultiByteToWideChar(CP_ACP, 0, cmd_buf, -1, wbuf, wlen);
 
-    /* W-045: anonymous pipe to capture child stderr (and stdout). */
+    /* W-045: anonymous pipe to capture child stderr (and stdout).
+     *
+     * ⚠️ 2026-11-06 真修:**只对需要捕获的命令建管道**。
+     *   此前**所有**子进程的 stderr 都进管道。`cmd_run` 跑的是**用户自己的
+     *   程序**,它从不调用 jh_run_get_output ⇒ **用户程序的 stderr 被整个
+     *   吞掉** —— 程序里的错误信息一个字都看不见。W-045 当初把 stdout 放行
+     *   了、stderr 仍留在管道里,是个半个修复。
+     *
+     *   判据(与同文件里已有的「这是不是 gcc 链接行」同源):
+     *     · 命令行以 g_gcc_cmd_prefix 开头 ⇒ gcc 链接行 ⇒ 捕获
+     *       (调用方要把它当 "gcc stderr:" 打出来)
+     *     · 调用点显式置了 g_jh_force_capture_stderr ⇒ 捕获
+     *       (windres:调用方要读 jh_run_get_output() 的诊断)
+     *     · 其它 ⇒ 不捕获,stderr 直接继承父进程,原样透传
+     */
+    int capture_stderr = g_jh_force_capture_stderr ||
+        (g_gcc_cmd_prefix[0] != '\0' &&
+         strncmp(cmd_line, g_gcc_cmd_prefix, strlen(g_gcc_cmd_prefix)) == 0);
+
     HANDLE hReadPipe = NULL, hWritePipe = NULL;
     SECURITY_ATTRIBUTES sa;
     ZeroMemory(&sa, sizeof(sa));
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
     sa.lpSecurityDescriptor = NULL;
-    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        HeapFree(GetProcessHeap(), 0, cmd_buf);
-        return -1;
+    if (capture_stderr) {
+        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+            HeapFree(GetProcessHeap(), 0, cmd_buf);
+            return -1;
+        }
+        /* Read end must NOT be inherited by child. */
+        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
     }
-    /* Read end must NOT be inherited by child. */
-    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -1058,7 +1092,7 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
        Capture stderr for gcc/cc1/qbe error diagnostics; let stdout/stdin pass
        through so the user sees the program output and stdin still works for
        interactive programs (dungeon_game etc). */
-    si.hStdError = hWritePipe;
+    si.hStdError = capture_stderr ? hWritePipe : GetStdHandle(STD_ERROR_HANDLE);
     si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
     si.dwFlags |= STARTF_USESTDHANDLES;
@@ -1069,13 +1103,15 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     BOOL ok = CreateProcessW(NULL, wbuf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
     HeapFree(GetProcessHeap(), 0, wbuf);
     /* Parent no longer needs write end; close so ReadFile can finish. */
-    CloseHandle(hWritePipe);
+    if (hWritePipe) CloseHandle(hWritePipe);
     if (!ok) {
-        CloseHandle(hReadPipe);
+        if (hReadPipe) CloseHandle(hReadPipe);
         HeapFree(GetProcessHeap(), 0, cmd_buf);
         return -1;
     }
     /* Drain the pipe until the child has exited AND the pipe is empty.
+     *
+     * (只有 capture_stderr 为真时才有管道可 drain。)
      *
      * ⚠️ 2026-11-06 真修(这是**死锁**,不是观感问题):
      *   旧实现在「avail > 0」时读,一旦管道空了就直接去
@@ -1091,7 +1127,7 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
      *     2) **捕获缓冲满了也要继续 drain** —— 否则子进程写了超过
      *        jh_run_outcap 字节时会以同样的方式死锁。多余的字节丢弃并计数。
      */
-    {
+    if (capture_stderr) {
         DWORD avail = 0;
         int dropped = 0;
         for (;;) {
@@ -1161,7 +1197,7 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
     }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    CloseHandle(hReadPipe);
+    if (hReadPipe) CloseHandle(hReadPipe);
     /* W-132: 链接结束(图标资源对象只在**链接期间**需要)⇒ 删掉它。
        只在「这条命令确实带了图标对象」时删 —— jh_run 还被 windres 和用户程序
        复用,不能误删别人的文件。 */
@@ -1733,7 +1769,11 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
        CreateProcessA 自己解析 quoted path,路径带空格也安全(W-038 同款理由)。
        C 侧 main.c:522 用的是 system() —— 那边的 windres 是 PATH 解析的裸名
        (不以引号开头),所以没踩到这个坑;这里用的是绝对路径,必须走 jh_run。 */
+    /* windres 不是 gcc 链接行,但本调用点要读它的诊断(下面 jh_run_get_output)
+       ⇒ 强制捕获 stderr。 */
+    g_jh_force_capture_stderr = 1;
     int rc = jh_run(cmd);
+    g_jh_force_capture_stderr = 0;
     DeleteFileA(tmp_ico);
     DeleteFileA(tmp_rc);
     if (rc != 0) {
