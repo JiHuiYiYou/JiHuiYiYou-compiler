@@ -47,7 +47,7 @@
 
 | Slot | Change |
 |---|---|
-| v4.1.4 | CLI tells the truth: linking a cross target is refused instead of silently producing a broken Windows PE; `--no-link` now works anywhere on the command line; unknown options are rejected instead of being treated as file names; `jhyy` and `jhyy --help` print the same help; `jhyy dump` now prints the parsed AST tree instead of being a stub; the winget and scoop manifests are fixed and pass local validation (the upstream PRs are still not filed) |
+| v4.1.4 | CLI tells the truth: linking a cross target is refused instead of silently producing a broken Windows PE; `--no-link` now works anywhere on the command line; unknown options are rejected instead of being treated as file names; `jhyy` and `jhyy --help` print the same help; `jhyy dump` now prints the parsed AST tree instead of being a stub; the winget and scoop manifests are fixed and pass local validation (the upstream PRs are still not filed); the gates stop being green by construction — a check that could not run is now a failure, the release path pins the ref and refuses to publish an artifact that differs from the tagged source, `SHA256.txt` is actually verified, and the SysV gate runs the `sysv_mixed_int_float` (W-127) guard it had been silently skipping |
 | v4.4.0 (stage 1) | Register allocator + safety net (byte-identical output); stage 2 is the emit layer consuming registers |
 | v4.2.1 | Frame size computed from what the function actually needs (the hard-coded 8192-byte reserve is gone) ⇒ ~41% runtime |
 | v4.2.0 | Runtime performance gate lands in CI (hard gate on static metrics, wall-clock only reported) + `bench.sh` timer really fixed |
