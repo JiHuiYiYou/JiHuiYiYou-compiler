@@ -561,7 +561,15 @@ switch ($Target) {
         # SHA256.txt in one go for local smoke testing.
         & $script:PsExe -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot/scripts/gen-sha256.ps1"
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[WARN] SHA256 generation failed (build still succeeded)"
+            # 2026-11-06: SHA256.txt generation is now FATAL (was a warning +
+            # exit 0). Rationale: the release publishes SHA256.txt as an asset
+            # and scoop's autoupdate.hash.url points at that same file, so a
+            # bundle shipped without a matching manifest breaks `sha256sum -c`
+            # for every user -- while every gate stayed green. The release
+            # side (release.yml "Verify SHA256.txt content") also hard-fails
+            # on a missing/mismatching entry.
+            Write-Host "[ERROR] SHA256 generation failed -- refusing to publish artifacts with no checksum manifest"
+            exit 1
         }
         exit 0
     }
