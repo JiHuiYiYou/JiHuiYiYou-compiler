@@ -1075,37 +1075,73 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
         HeapFree(GetProcessHeap(), 0, cmd_buf);
         return -1;
     }
-    /* Drain pipe into outbuf (until EOF). */
+    /* Drain the pipe until the child has exited AND the pipe is empty.
+     *
+     * ⚠️ 2026-11-06 真修(这是**死锁**,不是观感问题):
+     *   旧实现在「avail > 0」时读,一旦管道空了就直接去
+     *   WaitForSingleObject(INFINITE)。匿名管道缓冲是 4 KB ⇒ 子进程写满
+     *   之后阻塞在 WriteFile,父进程阻塞在 WaitForSingleObject ⇒ 两侧
+     *   谁也不再动。**实测触发门槛:子进程往 stderr 写超过 4096 字节**
+     *   (3893 字节 → exit 0;4122 字节 → 永久挂起)。
+     *   旧代码里 WaitForSingleObject 之后那段「补 drain」救不了:子进程
+     *   根本没能退出。
+     *
+     *   要改两处,不是一处:
+     *     1) 只要子进程还活着就持续 drain(轮询循环);
+     *     2) **捕获缓冲满了也要继续 drain** —— 否则子进程写了超过
+     *        jh_run_outcap 字节时会以同样的方式死锁。多余的字节丢弃并计数。
+     */
     {
         DWORD avail = 0;
-        while (jh_run_outlen + 1 < jh_run_outcap &&
-               PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-            DWORD to_read = (DWORD)((jh_run_outcap - 1 - jh_run_outlen));
-            if (to_read > avail) to_read = avail;
-            DWORD got = 0;
-            if (ReadFile(hReadPipe, jh_run_outbuf + jh_run_outlen, to_read, &got, NULL) && got > 0) {
-                jh_run_outlen += (int)got;
-                jh_run_outbuf[jh_run_outlen] = '\0';
-            } else {
+        int dropped = 0;
+        for (;;) {
+            if (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                DWORD got = 0;
+                if (jh_run_outlen + 1 < jh_run_outcap) {
+                    DWORD to_read = (DWORD)((jh_run_outcap - 1 - jh_run_outlen));
+                    if (to_read > avail) to_read = avail;
+                    if (ReadFile(hReadPipe, jh_run_outbuf + jh_run_outlen, to_read, &got, NULL) && got > 0) {
+                        jh_run_outlen += (int)got;
+                        jh_run_outbuf[jh_run_outlen] = '\0';
+                        continue;
+                    }
+                } else {
+                    /* 捕获缓冲已满:照样读,保证子进程不会卡在写满的管道上;
+                       多余的字节丢掉并计数。 */
+                    char scratch[4096];
+                    DWORD want = (DWORD)sizeof(scratch);
+                    if (want > avail) want = avail;
+                    if (ReadFile(hReadPipe, scratch, want, &got, NULL) && got > 0) {
+                        dropped += (int)got;
+                        continue;
+                    }
+                }
+                break;  /* ReadFile 失败或读到 0 ⇒ 管道已关闭 */
+            }
+            /* 此刻管道里没数据:子进程是否已经退出?退出了再做最后一次 peek。 */
+            if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) {
+                if (PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) continue;
                 break;
+            }
+            Sleep(1);
+        }
+        if (dropped > 0) {
+            /* 说清楚被截断了,而不是给用户看一份莫名其妙的半截日志。 */
+            char note[128];
+            int n = snprintf(note, sizeof(note),
+                             "\n[jhyy] stderr capture truncated: %d byte(s) dropped "
+                             "(capture buffer is %d bytes)\n",
+                             dropped, (int)jh_run_outcap);
+            if (n < 0) n = 0;
+            if (n > (int)sizeof(note) - 1) n = (int)sizeof(note) - 1;
+            if (jh_run_outlen + n < jh_run_outcap) {
+                memcpy(jh_run_outbuf + jh_run_outlen, note, (size_t)n);
+                jh_run_outlen += n;
+                jh_run_outbuf[jh_run_outlen] = '\0';
             }
         }
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
-    /* Drain any remaining bytes written between last PeekNamedPipe and child exit. */
-    {
-        DWORD avail = 0;
-        while (jh_run_outlen + 1 < jh_run_outcap &&
-               PeekNamedPipe(hReadPipe, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-            DWORD to_read = (DWORD)((jh_run_outcap - 1 - jh_run_outlen));
-            if (to_read > avail) to_read = avail;
-            DWORD got = 0;
-            if (ReadFile(hReadPipe, jh_run_outbuf + jh_run_outlen, to_read, &got, NULL) && got > 0) {
-                jh_run_outlen += (int)got;
-                jh_run_outbuf[jh_run_outlen] = '\0';
-            } else { break; }
-        }
-    }
     DWORD exit_code = 0;
     GetExitCodeProcess(pi.hProcess, &exit_code);
     /* v4.1.0 护栏 A(之二): gcc 链接失败 ⇒ 把"用的是哪份 gcc、从哪一级解析来的"
