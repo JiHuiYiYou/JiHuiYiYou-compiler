@@ -47,8 +47,8 @@
 
 | 项 | 值 |
 |---|---|
-| `python regress.py` | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP**（294 total） |
-| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 294 · 可跑 274 · 真断言 213 · literal-return-ok 8 · expect-error 53 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **277 PASS + 0 XFAIL + 0 failed + 20 SKIP**（297 total） |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 297 · 可跑 277 · 真断言 214 · literal-return-ok 8 · expect-error 53 · skipped 6 · library 14 · **零信号 0** |
 | 产物级门数 | `artifact-checks` —— **19 道**（`check_*` 函数数） |
 
 ### 2.2 CI 门（完整清单）

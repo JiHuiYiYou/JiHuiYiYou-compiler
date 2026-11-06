@@ -1,0 +1,22 @@
+// 2026-11-06:循环变量就叫 "i" 时的 for-in-slice。
+//
+// 修前编译器**空指针写**崩溃(0xC0000005 ACCESS_VIOLATION,零输出):
+// slice 版 for 的反糖是 `for <合成下标> in 0..len { let <用户变量> = slice[<合成下标>]; … }`,
+// 而合成下标固定叫 "i" ⇒ 用户写 `for i in slice` 时,用户的循环变量与合成
+// 下标**同作用域重名** ⇒ symtab_insert 返回 null ⇒ ast_new_let(sym=null)
+// ⇒ sema 写 (*sym).type_ptr ⇒ 崩。
+//
+// (同一条路径上 W-150 已修过另外 5 处 null-sym 站点,这两处漏了。)
+//
+// 现在:合成下标按 "i" → "__jhyy_i" → "__jhyy_i2" 依次试,插成功为止
+// ⇒ 用户的变量名永远不会被占用,零能力损失。
+//
+// EXPECT: 60
+fn main_jhyy() -> i32 {
+    let s: [*]i32 = &[10, 20, 30];
+    let mut sum: i32 = 0;
+    for i in s {
+        sum = sum + i;
+    }
+    return sum;
+}

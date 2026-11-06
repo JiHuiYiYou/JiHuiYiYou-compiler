@@ -227,12 +227,12 @@ Known gaps in the stdlib → [Known limitations](#known-limitations).
 
 ```bash
 python regress.py
-# => 274 passed, 20 skipped (294 total)
+# => 277 passed, 20 skipped (297 total)
 ```
 
 What those numbers mean — one term, one definition each (the counts themselves live
 in the [Status](#status-v413) table). The tool reports it as
-`passed=274/294 failed=0` and `skipped=20`:
+`passed=277/297 failed=0` and `skipped=20`:
 
 - **total** — every `.jhyy` file in `compiler/tests/examples/` except the
   `_`-prefixed helper fixtures.
@@ -420,7 +420,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests — 294 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
+│   │   ├── examples/           integration tests — 297 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -450,8 +450,8 @@ numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (regression suite) | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP** (294 total) |
-| Assertion audit | 294 scanned · 274 runnable · 213 real assertions · 0 zero-signal |
+| `regress.py` (regression suite) | **277 PASS + 0 XFAIL + 0 failed + 20 SKIP** (297 total) |
+| Assertion audit | 297 scanned · 277 runnable · 214 real assertions · 0 zero-signal |
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |

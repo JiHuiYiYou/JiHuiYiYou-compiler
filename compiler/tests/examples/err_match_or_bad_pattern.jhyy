@@ -1,0 +1,17 @@
+// 2026-11-06:OR 模式的**第一个** pattern 非法时的解析路径。
+//
+// 修前编译器**空指针解引用**崩溃(0xC0000005):parse_pattern 的错误路径返回
+// null(错误已报、error_count 已加),而 OR 循环下一轮直接 `(*pat).loc_filename`
+// ⇒ 崩在 error_count 的干净退出**之前**。
+//
+// 同一文件里「简单 arm 拿到 null pattern」那一路本来就干净(报错 ⇒ 退出码 1)
+// ⇒ 只有 OR 循环这一处是缺口。
+//
+// EXPECT-ERROR: "unexpected token"
+fn main_jhyy() -> i32 {
+    let x: i32 = 5;
+    match x {
+        ) | _ => 0,
+    }
+    return 1;
+}

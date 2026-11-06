@@ -218,11 +218,11 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 274 passed, 20 skipped (294 total)
+# => 277 passed, 20 skipped (297 total)
 ```
 
 这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v413)那张表里)。
-工具自己报的是 `passed=274/294 failed=0` 与 `skipped=20`:
+工具自己报的是 `passed=277/297 failed=0` 与 `skipped=20`:
 
 - **total** —— `compiler/tests/examples/` 下除 `_` 前缀的辅助 fixture 外的每一个
   `.jhyy` 文件。
@@ -398,7 +398,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试 —— 294 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
+│   │   ├── examples/           集成测试 —— 297 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -426,8 +426,8 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py`(回归套件) | **274 PASS + 0 XFAIL + 0 failed + 20 SKIP**(294 total) |
-| 断言强度审计 | 扫 294 · 可跑 274 · 真断言 213 · 零信号 0 |
+| `regress.py`(回归套件) | **277 PASS + 0 XFAIL + 0 failed + 20 SKIP**(297 total) |
+| 断言强度审计 | 扫 297 · 可跑 277 · 真断言 214 · 零信号 0 |
 | 基准套件 | 9 道题 · 4 个覆盖轴 —— [已发布快照](bench/baseline/RESULTS-2026-11-04.md)(jhyy 与 gcc 的墙钟对比;**代码生成质量的地板是 gcc `-O0`**,不是及格线) |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |

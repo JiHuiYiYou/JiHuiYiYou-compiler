@@ -100,6 +100,30 @@ fn parse_int_literal(start: *u8, length: i64) -> i64 {
     return strtoll(start, 0 as *u8, 0 as i32);
 }
 
+// parse_int_literal_checked: 解析整数字面量 + **溢出检查**。
+//
+//   为什么不能直接用 parse_int_literal:它是 strtoll,**量值 ≥ 2^63 时按 C 标准
+//   饱和到 LLONG_MAX** ⇒ 同一个字面量在**表达式**位置(W-186/W-188 已经换成
+//   带检查的 jh_parse_int_literal)和**数组长度 / match 模式**位置语义不同:
+//   `sizeof([i32; 99999999999999999999])` 曾算出 **-4**,而且**零诊断**
+//   (实测:编译成功、产出 exe、跑出来是错值)。
+//
+//   越界口径与表达式路径一致(只查 64 位族):32 位族(无后缀默认 i32)今天就是
+//   静默截断,突然改成报错会砸掉一批「能编译的程序」。
+fn parse_int_literal_checked(p: *Parser, start: *u8, length: i64,
+                             loc_lf: *u8, loc_ll: i32, loc_lc: i32) -> i64 {
+    let mut bits: i64 = 0;
+    let flags = jh_parse_int_literal(start, length, 0 as i32, (&bits) as *i64);
+    // bit0 = ≥ 2^64(任何类型都装不下);bit1 = ≥ 2^63(i64 装不下)
+    if (flags & 3) != (0 as i32) {
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: integer literal out of range\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        return 0 as i64;
+    }
+    return bits;
+}
+
 // ════════════════════════════════════════════════════
 // Parser state（pre 字段平铺避免 nested struct，plan § 1.5 bug #5）
 // ════════════════════════════════════════════════════
@@ -664,7 +688,19 @@ fn parse_type(p: *Parser) -> *Node {
         parser_expect(p, TOKEN_SEMICOLON(), "; in array type" as *u8, &t);
         let mut count_t = empty_token();
         parser_expect(p, TOKEN_INT(), "array size" as *u8, &count_t);
-        let count_val = parse_int_literal(count_t.start, count_t.length);
+        // ⚠️ 2026-11-06 真修:数组长度曾用**会饱和**的 parse_int_literal ⇒
+        //   `[i32; 99999999999999999999]` 的长度变成 9223372036854775807 ⇒
+        //   乘 4 时 i64 溢出 ⇒ sizeof 变成 **-4**,**零诊断**(实测:编译成功、
+        //   跑出来是错值)。⇒ 用带检查的解析 + 元素数上限。
+        let count_val = parse_int_literal_checked(p, count_t.start, count_t.length,
+                                                  body_loc_lf, body_loc_ll, body_loc_lc);
+        // 元素数上限 2^32-1:count × sizeof(T) 在任何现实的 T 下都不会溢出 i64
+        // (2^32-1 × 8 = 2^35)。⇒ 这条挡住「长度本身合法、乘法溢出」那一类。
+        if count_val > (4294967295 as i64) {
+            jh_print_loc_stderr(body_loc_lf, body_loc_ll, body_loc_lc);
+            jh_fputs_stderr("error: array size too large\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+        }
         let count_node = ast_new_int((*p).arena, body_loc_lf, body_loc_ll, body_loc_lc,
                                      count_val, PRIM_I32());
         parser_expect(p, TOKEN_RBRACKET(), "] in array type" as *u8, &t);
@@ -1013,7 +1049,8 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     // ── TOKEN_INT 分支 ──
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = parse_int_literal(t.start, t.length);
+        let val = parse_int_literal_checked(p, t.start, t.length,
+                                           loc_lf, loc_ll, loc_lc);
         return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
     }
 
@@ -1062,7 +1099,8 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     if t.kind == TOKEN_MINUS() {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
-        let val = parse_int_literal(t.start, t.length);
+        let val = parse_int_literal_checked(p, t.start, t.length,
+                                           loc_lf, loc_ll, loc_lc);
         return ast_new_int((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
     }
 
@@ -1241,7 +1279,8 @@ fn parse_pattern(p: *Parser) -> *Node {
     // ── TOKEN_INT 分支 ──
     if t.kind == TOKEN_INT() {
         parser_advance(p, &t);
-        let val = parse_int_literal(t.start, t.length);
+        let val = parse_int_literal_checked(p, t.start, t.length,
+                                           loc_lf, loc_ll, loc_lc);
         let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, val, PRIM_I32());
         // v1.6.x: literal range pattern `1..10` → wrap as NODE_PATTERN_RANGE
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
@@ -1289,7 +1328,8 @@ fn parse_pattern(p: *Parser) -> *Node {
     if t.kind == TOKEN_MINUS() {
         parser_advance(p, &t);  // consume '-'
         parser_expect(p, TOKEN_INT(), "integer after - in pattern" as *u8, &t);
-        let val = parse_int_literal(t.start, t.length);
+        let val = parse_int_literal_checked(p, t.start, t.length,
+                                           loc_lf, loc_ll, loc_lc);
         let lo = ast_new_pattern_lit((*p).arena, loc_lf, loc_ll, loc_lc, -val, PRIM_I32());
         // v1.6.x: literal range pattern `-3..-1` → wrap as NODE_PATTERN_RANGE
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
@@ -2326,12 +2366,22 @@ fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
             parser_push_scope(p);
             let mut mx_pat: *Node = parse_pattern(p);
             // OR pattern — left-associative loop on `|` (跟 parse_match 一致)
+            //
+            // ⚠️ 2026-11-06 真修:pattern 解析失败时 parse_pattern 返回 **null**
+            //   (错误已报、error_count 已加)⇒ 下一个 token 恰好是 `|` 时,
+            //   下面 `(*mx_pat).loc_filename` 就是**空指针解引用** ⇒ 0xC0000005,
+            //   而且发生在 error_count 的干净退出**之前**。
+            //   触发:`match 5 { ) | _ => 0 }`。
+            //   ⇒ 与「简单 arm 拿到 null pattern」同样的处理(那一路本来就干净):
+            //   消费掉 `|`,不再组 OR 结点;错误已记 ⇒ driver 在 parse 之后就停。
             while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
                 parser_advance(p, &t);
+                if mx_pat == (0 as *Node) { continue; }
                 let rloc_lf = (*mx_pat).loc_filename;
                 let rloc_ll = (*mx_pat).loc_line;
                 let rloc_lc = (*mx_pat).loc_col;
                 let right = parse_pattern(p);
+                if right == (0 as *Node) { continue; }
                 mx_pat = ast_new_pattern_or((*p).arena, rloc_lf, rloc_ll, rloc_lc, mx_pat, right);
             }
             parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
@@ -2766,12 +2816,18 @@ fn parse_match(p: *Parser) -> *Node {
         let mut pat: *Node = parse_pattern(p);
         // v1.3.7: OR pattern — left-associative loop on `|`.
         // v1.4.6: parser_advance(p) → parser_advance(p, &t) — 修 &t 缺参 UB。
+        //
+        // ⚠️ 2026-11-06 真修:pattern 解析失败返回 **null** 时,下一轮循环里
+        //   `(*pat).loc_filename` 是**空指针解引用** ⇒ 0xC0000005
+        //   (触发:`match 5 { ) | _ => 0 }`)。⇒ 消费掉 `|` 并跳过组 OR。
         while parser_check(p, TOKEN_PIPE()) != (0 as i32) {
             parser_advance(p, &t);
+            if pat == (0 as *Node) { continue; }
             let rloc_lf = (*pat).loc_filename;
             let rloc_ll = (*pat).loc_line;
             let rloc_lc = (*pat).loc_col;
             let right = parse_pattern(p);
+            if right == (0 as *Node) { continue; }
             pat = ast_new_pattern_or((*p).arena, rloc_lf, rloc_ll, rloc_lc, pat, right);
         }
         parser_expect(p, TOKEN_FATARROW(), "=>" as *u8, &t);
@@ -3296,12 +3352,42 @@ fn parse_for(p: *Parser) -> *Node {
         //    `for i in 0..slice.len { let x = slice[i]; body }` ──
         let slice = first_expr;
         parser_push_scope(p);
-        let i_sym = symtab_insert((*p).current_scope, "i" as *u8, SYM_VAR(),
-                                  0 as *u8, 0 as i32, (*p).scope_depth);
-        // bind x BEFORE body parse so prefix_ident doesn't auto-insert x (which would
-        // collide with our injected `let x = slice[i]` later)
+        // ⚠️ 2026-11-06 真修:**合成下标的名字不能与用户的循环变量重名**。
+        //   修前合成下标固定叫 "i",且**先插它** ⇒ 用户写 `for i in slice` 时,
+        //   第二次 symtab_insert(同 scope 重名)返回 **null** ⇒
+        //   ast_new_let(sym=null) ⇒ sema 写 (*sym).type_ptr ⇒ **空指针写**
+        //   ⇒ 0xC0000005 —— **合法输入让编译器直接崩**。
+        //   ⇒ 改成:先插用户的循环变量,合成下标按 "i" → "__jhyy_i" → "__jhyy_i2"
+        //   依次试,插成功为止 ⇒ 用户的变量名永远不会被占用(能力零损失)。
+        //
+        //   bind x BEFORE body parse so prefix_ident doesn't auto-insert x (which would
+        //   collide with our injected `let x = slice[i]` later)
         let x_sym = symtab_insert((*p).current_scope, vname, SYM_VAR(),
                                   0 as *u8, 0 as i32, (*p).scope_depth);
+        if x_sym == (0 as *Sym) {
+            jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+            jh_fputs_stderr("error: cannot bind loop variable (symbol table full)\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+            parser_pop_scope(p);
+            return 0 as *Node;
+        }
+        let mut i_sym: *Sym = symtab_insert((*p).current_scope, "i" as *u8, SYM_VAR(),
+                                             0 as *u8, 0 as i32, (*p).scope_depth);
+        if i_sym == (0 as *Sym) {
+            i_sym = symtab_insert((*p).current_scope, "__jhyy_i" as *u8, SYM_VAR(),
+                                  0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        if i_sym == (0 as *Sym) {
+            i_sym = symtab_insert((*p).current_scope, "__jhyy_i2" as *u8, SYM_VAR(),
+                                  0 as *u8, 0 as i32, (*p).scope_depth);
+        }
+        if i_sym == (0 as *Sym) {
+            jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+            jh_fputs_stderr("error: cannot allocate the synthetic loop index (symbol table full)\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
+            parser_pop_scope(p);
+            return 0 as *Node;
+        }
         parser_expect(p, TOKEN_LBRACE(), "{ after for-in slice" as *u8, &t);
 
         let mut stmts: *u8 = 0 as *u8;
