@@ -48,7 +48,12 @@
 //             parse_expr_stmt）+ parse_pattern + inline block in if/while/for/func
 //   commit 4（下次）：parse_expr 完整 Pratt + ParseRule 表 + init_rules
 
-import ffi;
+import ffi;// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+extern fn jh_depth_check() -> i32;
+extern fn jh_depth_reset() -> i32;
+// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+
 
 // v0.9 wip commit 2.20 / Task #52: SYM_CONST 由 symtab.jhyy 统一定义
 //   (跟 SYM_VAR/SYM_FN/SYM_TYPE 同列)。parser.jhyy 通过 `import symtab` 可见,
@@ -58,6 +63,7 @@ import lexer;
 import arena;
 import symtab;
 import ast;
+
 
 // W-128 (2026-10-24 真修):整数字面量求值 —— 支持 `0o`(八进制)/ `0b`(二进制)前缀。
 //
@@ -953,6 +959,20 @@ fn parse_type(p: *Parser) -> *Node {
 }
 
 // ════════════════════════════════════════════════════
+// parse_expr:表达式解析的**递归深度守卫**。
+//
+// ⚠️ 2026-11-06:parse_expr 是递归下降的,而自举后端**每一帧都巨大**
+//   (1 个 IL temp = 1 个 8 字节栈槽)⇒ 实测每层约 44 KB。
+//   改前 jhyy.exe 的栈预留只有 64 MB ⇒ **约 1500 层嵌套括号 层就把栈打爆**
+//   (实测 0xC00000FD STATUS_STACK_OVERFLOW —— 进程直接死掉,零输出)。
+//
+// ⇒ 深度上限把「进程崩溃」变成「一条编译错误」。
+//
+//   判定用的是**栈用量**而不是层数(C 侧 jh_depth_check 取自己的栈地址与
+//   基准比):因为 parse_expr 与 infer_type / cg_expr 是**互相递归**的,而 jhyy 的
+//   sema 是 single-pass(函数定义必须 precede 所有 uses)⇒「wrapper 包一层」
+//   那种写法根本不成立(两个方向都是前向引用)。
+//   阈值只在 C 侧 JH_DEPTH_LIMIT 一处 ⇒ 单一事实源。
 // parse_expr: 完整 Pratt 表达式（commit 4）
 // 对应 C 端 parser.c:612-967（parse_expr + 12 prefix_* + 6 infix_*）
 //
@@ -1432,7 +1452,27 @@ fn parse_fence_block(p: *Parser, loc_lf: *u8, loc_ll: i32, loc_lc: i32,
     return ast_new_builtin_fence((*p).arena, loc_lf, loc_ll, loc_lc, kind);
 }
 
+// parse_expr:表达式解析的**递归深度守卫**。
+//
+// ⚠️ 2026-11-06:递归深度上限。
+//
+// 本编译器是递归下降的,而自举后端**每一帧都巨大**(1 个 IL temp =
+// 1 个 8 字节栈槽)⇒ 实测每层 44 KB,而 jhyy.exe 的栈预留只有 64 MB
+// ⇒ **约 1500 层嵌套就爆栈**(实测 0xC00000FD STATUS_STACK_OVERFLOW,
+// 进程直接死掉,零输出)。
+//
+// ⇒ 深度上限把「进程崩溃」变成「一条编译错误」。
+// 计数器在 C 侧(jh_depth_enter / jh_depth_exit):Parser 结构体有**硬编码的字节数**(PARSER_SIZE())和「字段顺序逐字一致」的约定,加字段要同步改四处,漏一处就是内存损坏。
+// 增减只发生在这个 wrapper 的一层 ⇒ 出口必然平衡
+// (jhyy 的 defer **不覆盖隐式返回**,所以不能用 defer —— 规范 § 6.1 / 附录 B)。
+
 fn parse_expr(p: *Parser, min_prec: i32) -> *Node {
+    //   栈槽)⇒ 实测每层约 44 KB、jhyy.exe 的栈预留只有 64 MB ⇒ 约 1500 层
+    //   嵌套括号就爆栈(实测 0xC00000FD STATUS_STACK_OVERFLOW,零输出)。
+    if jh_depth_check() != (0 as i32) {
+        (*p).error_count = (*p).error_count + (1 as i32);
+        return 0 as *Node;
+    }
     let mut t = empty_token();
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;
@@ -4181,6 +4221,8 @@ fn parse_module_attributes(p: *Parser, is_no_std: *i32) -> i32 {
 }
 
 fn parser_parse(p: *Parser) -> *Node {
+    // 2026-11-06:每个被编译的文件开始前把深度计数归零(兜底)。
+    let _z = jh_depth_reset();
     let mut t = empty_token();
     parser_peek(p, &t);
     let loc_lf = t.loc_filename;

@@ -1486,7 +1486,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // different .exe sha). .il + .s byte-equal still hold since these flags
     // only affect the post-IL link step.
     //
-    // v4.0.7 (W-097): `-Wl,--stack,67108864` = 64 MB 栈预留。
+    // v4.0.7 (W-097): `-Wl,--stack,...` = 栈预留。
     // 自举后端的 1-to-1 栈槽模型(每个 IL temp 一个 8B 槽,per L4 § 3.3)
     // 让 temp 数最多的函数帧巨大 —— 实测 codegen__cg_expr 242 KB
     // (gcc 编同一函数只要 7.6 KB,因为 gcc 用寄存器)。而 cg_expr / parse_expr /
@@ -1496,8 +1496,21 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     //   parser__parse_expr       local_max= 2482 →  20 KB 帧
     // 默认 1 MB 栈下,编 main.jhyy 时 cg_expr 递归几层就 ___chkstk_ms 失败
     // → SIGSEGV(gdb bt: #0 ___chkstk_ms #3 codegen.cg_expr #5 codegen.cg_expr)。
-    // 64 MB 足够 main.jhyy 全量自举的递归深度。
-    let d26_flags = " -g0 -Wl,--build-id=none -Wl,--stack,67108864 " as *u8;
+    //
+    // 2026-11-06:64 MB → **256 MB**。理由(实测,不是估的):
+    //   64 MB 时,一项 **200 长的加法链**就把编译器自己的栈打爆
+    //   (0xC00000FD;一层链约 366 KB —— parse/sema/codegen 三趟各走一遍)。
+    //   ⇒ 64 MB 不只是「自举够用」,它还**限制了编译器能编的表达式深度**。
+    //   256 MB ⇒ 爆栈点约 700 层,配合 jhyy_helpers.c 的深度守卫
+    //   (128 MB 阈值 ≈ 350 层就拦下并报错)⇒ 今天能编的全都还能编,
+    //   而「恶意输入把编译器打死」变成了一条编译错误。
+    //   栈预留只是**虚拟地址**的预留(不是提交量)⇒ 运行时成本约等于 0。
+    //
+    // ⚠️ 这条 flag 有**一代滞后**:jhyy.exe 是上一代编译器链接的 ⇒ 改了这里
+    //   要**再编一轮**才体现在产物里(实测:改完第一轮还是 64 MB,第二轮才
+    //   变成 256 MB)。CI 从提交进仓的锚点起编 ⇒ 锚点的栈预留就是它自己
+    //   那一代 flag 的值 ⇒ 与本地产物一致(artifact-fresh 门不会红)。
+    let d26_flags = " -g0 -Wl,--build-id=none -Wl,--stack,268435456 " as *u8;
     pos = str_concat_at(cmd_buf, pos, d26_flags, 16384 as i64);
     pos = str_concat_at(cmd_buf, pos, lq, 16384 as i64);
     pos = str_concat_at(cmd_buf, pos, temp_asm, 16384 as i64);    // W-048: ASCII

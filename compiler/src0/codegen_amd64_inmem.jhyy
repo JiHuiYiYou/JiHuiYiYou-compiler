@@ -24,7 +24,10 @@
 //   JHY_WRITE_IL 未设 → 调 codegen_amd64_run_text(text, len, asm_path, t)
 //   返回 0 = 写 .s 成功, 非 0 = 失败
 
-import codegen_amd64_state;        // cg_state_init / cg_state_set_target / cg_state_set_frame_max_temp / cg_compute_global_max_temp / cg_compute_per_fn_max_temps
+import codegen_amd64_state;// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+extern fn jh_depth_overflowed() -> i32;
+// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+        // cg_state_init / cg_state_set_target / cg_state_set_frame_max_temp / cg_compute_global_max_temp / cg_compute_per_fn_max_temps
 import codegen_amd64_lexer;        // lex_il / lex_il_count
 import codegen_amd64;              // parse_and_emit (24-way dispatch)
 import codegen_amd64_regalloc;     // regalloc_clear_global
@@ -136,6 +139,14 @@ fn codegen_amd64_run_text(text: *u8, len: i64, asm_path: *u8, target_tag: i32,
     }
     // W-130:address-holder bitmap 越界 / C 桥哨兵 → 标记被丢弃 ⇒
     // emit_loadsub 走 slot direct path ⇒ **静默产出错代码**。同样响亮失败。
+    // 2026-11-06:递归深度超限 ⇒ 同样**响亮失败**(别写出坏的 .s 再报错)。
+    //   ⚠️ 这一条**必须**在生产路径(in-mem)上也有 —— 只加在 file-path
+    //   路径上会让守卫触发后仍然 exit 0(静默错代码)。
+    if jh_depth_overflowed() != (0 as i32) {
+        jh_fputs_stderr("jhyy error: recursion depth limit exceeded -- refusing to emit silently-wrong code" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        return 1 as i32;
+    }
     if cg_state_get_holds_overflow(state_buf) != (0 as i32) {
         jh_fputs_stderr("jhyy error: address-holder bitmap overflow — refusing to emit silently-wrong code (W-130)" as *u8);
         jh_fputs_stderr("

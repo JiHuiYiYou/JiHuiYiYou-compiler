@@ -25,7 +25,10 @@
 //   - C `int64_t` `%zu` → jhyy i64 单 sprintf "%d" 多次
 //   - C `SemaLocal locals[256]` → jhyy `*u8` arena_alloc + offset
 
-import arena;
+import arena;// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+extern fn jh_depth_check() -> i32;
+// 2026-11-06:递归深度守卫(见 jhyy_helpers.c 的说明)。
+
 import util;
 import symtab;
 import types;
@@ -61,6 +64,7 @@ fn VARIANT_DESC_SIZE() -> i64 { return 24 as i64; }
 //   Sym 指针可能不同 (但 name 相同)。v0 端 sema.c 用 strcmp(name) 是对的,
 //   jhyy 端之前用指针 == 永远不命中 → "enum has no variant" 误报。
 //   match_exhaustive.jhyy byte-equal 5/7 → 6/7 的根因修复 (commit 2.12a)。
+
 fn var_name_eq_v1(a: *Sym, b: *Sym) -> i32 {
     if a == (0 as *Sym) {
         return 1 as i32;  // a NULL: 非 0 = 不等
@@ -972,7 +976,39 @@ fn sema_mark_pattern_variants(pat: *Node, variants_buf: *u8, nv: i64) -> i32 {
     return 0 as i32;
 }
 
+// infer_type:类型推导的**递归深度守卫**。
+//
+// ⚠️ 2026-11-06:infer_type 是递归下降的,而自举后端**每一帧都巨大**
+//   (1 个 IL temp = 1 个 8 字节栈槽)⇒ 实测每层约 24 KB。
+//   改前 jhyy.exe 的栈预留只有 64 MB ⇒ **约 2700 层嵌套 层就把栈打爆**
+//   (实测 0xC00000FD STATUS_STACK_OVERFLOW —— 进程直接死掉,零输出)。
+//
+// ⇒ 深度上限把「进程崩溃」变成「一条编译错误」。
+//
+//   判定用的是**栈用量**而不是层数(C 侧 jh_depth_check 取自己的栈地址与
+//   基准比):因为 infer_type 与 infer_type / cg_expr 是**互相递归**的,而 jhyy 的
+//   sema 是 single-pass(函数定义必须 precede 所有 uses)⇒「wrapper 包一层」
+//   那种写法根本不成立(两个方向都是前向引用)。
+//   阈值只在 C 侧 JH_DEPTH_LIMIT 一处 ⇒ 单一事实源。
+// infer_type:类型推导的**递归深度守卫**。
+//
+// ⚠️ 2026-11-06:递归深度上限。
+//
+// 本编译器是递归下降的,而自举后端**每一帧都巨大**(1 个 IL temp =
+// 1 个 8 字节栈槽)⇒ 实测每层 24 KB,而 jhyy.exe 的栈预留只有 64 MB
+// ⇒ **约 2700 层嵌套就爆栈**(实测 0xC00000FD STATUS_STACK_OVERFLOW,
+// 进程直接死掉,零输出)。
+//
+// ⇒ 深度上限把「进程崩溃」变成「一条编译错误」。
+// 计数器在 C 侧(jh_depth_enter / jh_depth_exit):SemaContext 结构体同样有硬编码的字节数与「字段顺序逐字一致」的约定(main.jhyy 的结构体字面量要同步改)。
+// 增减只发生在这个 wrapper 的一层 ⇒ 出口必然平衡
+// (jhyy 的 defer **不覆盖隐式返回**,所以不能用 defer —— 规范 § 6.1 / 附录 B)。
+
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
+    if jh_depth_check() != (0 as i32) {
+        (*ctx).error_count = (*ctx).error_count + (1 as i32);
+        return type_void(ta);
+    }
     if n == (0 as *Node) { return type_void(ta); }
     if (*n).type_ptr != (0 as *u8) { return (*n).type_ptr as *Type; }
 

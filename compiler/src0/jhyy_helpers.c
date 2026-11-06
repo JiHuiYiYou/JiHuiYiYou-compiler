@@ -1215,6 +1215,84 @@ __attribute__((used)) int jh_run(const char *cmd_line) {
 }
 #endif
 
+/* ════════════════════════════════════════════════════════════════════
+ * 2026-11-06:递归深度守卫(解析器 / 语义分析器 / codegen 共用一个)
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * 为什么需要:本编译器是递归下降的,而自举后端**每一帧都巨大**
+ * (1 个 IL temp = 1 个 8 字节栈槽)⇒ 实测每层 parse_expr 约 44 KB、
+ * infer_type 约 24 KB、cg_expr 约 242 KB。
+ * 改前 jhyy.exe 的栈预留是 64 MB ⇒ 实测**一项 200 长的加法链**就把栈打爆
+ * (0xC00000FD STATUS_STACK_OVERFLOW —— 进程直接死掉,零输出);150 项正常。
+ * 一层链约 366 KB(parse + sema + codegen 三趟都走一遍)。
+ *
+ * ⇒ 加深度上限,把「进程崩溃」变成「一条编译错误」。
+ *
+ * 为什么判定用**栈用量**而不是层数:parse_expr / infer_type / cg_expr 是
+ * **互相递归**的,而 jhyy 的 sema 是 single-pass —— **函数定义必须 precede
+ * 所有 uses** ⇒「wrapper 包一层」那种写法根本不成立(两个方向都是前向引用);
+ * 「计数器」方案又有「某个出口忘了减」的泄漏风险。栈用量判定两样都不需要:
+ * .jhyy 侧只在递归函数的**顶部**调一次本函数,C 侧拿自己的栈地址
+ * (它就落在调用者的帧里)与基准比 ⇒ 差值 = 这些帧占了多少栈。
+ *
+ * 为什么阈值在 C 侧而不是 Parser / SemaContext 结构体里:那两个结构体都有
+ * **硬编码的字节数**(PARSER_SIZE() 那种)和「字段顺序必须逐字一致」的约定
+ * ⇒ 加一个字段要同步改结构体声明 + 字节数函数 + 每个结构体字面体,
+ * 漏一处就是**内存损坏**。
+ *
+ * 阈值 128 MB:栈预留已从 64 MB 提到 256 MB(main.jhyy 的 d26_flags)⇒
+ * 爆栈点约 700 层,而阈值约 350 层就拦下 ⇒ **今天能编的全都还能编**
+ * (改前 200 层就崩),同时把崩溃变成一条编译错误。
+ */
+/* 栈用量上限(字节)。256 MB 栈预留的一半 —— 留足余量:
+   一层表达式约 366 KB ⇒ 128 MB ≈ 350 层;爆栈点约 700 层。 */
+#define JH_DEPTH_LIMIT (128 * 1024 * 1024)
+
+/* 历史最深的栈位置(地址最小的那次)与 sticky 的超限标志。 */
+static long long g_jh_min_sp = 0;
+static int g_jh_depth_overflow = 0;
+
+/* 递归深度检查:用**栈用量**判定,不用计数器。
+ *
+ * 为什么不用计数器:parse_expr / infer_type / cg_expr 是互相递归的,而 jhyy 的
+ * sema 是 single-pass(函数定义必须 precede 所有 uses)⇒ 「wrapper 包一层」
+ * 根本不成立(两个方向都是前向引用)。而且计数器还有「某个出口忘了减」
+ * 的泄漏风险。
+ *
+ * 本函数在 .jhyy 侧被递归函数在**顶部**调用一次:它自己的栈地址就在调用者
+ * 的帧里 ⇒ 两次调用之间的地址差 = 这几层的帧高之和 ⇒ 直接对应「栈用量」。
+ *
+ * 返回 1 = 超限(调用方要报错并中止),0 = 正常。 */
+__attribute__((used)) int jh_depth_check(void) {
+    char probe;
+    long long sp = (long long)(void *)&probe;
+    /* 基准 = **第一次**调用的栈地址(= 最外层那一帧)。
+       ⚠️ 不能用「历史最深点」当基准:那是**运行中**的值,而本函数在检查前
+       会先把它更新成当前值 ⇒ 差值恒为 0 ⇒ 永远不会触发。
+       栈向下生长 ⇒ 嵌套越深 sp 越小 ⇒ (基准 - sp) 就是「这些帧占了多少栈」。 */
+    if (g_jh_min_sp == 0) { g_jh_min_sp = sp; return 0; }
+    if (g_jh_min_sp - sp > (long long)JH_DEPTH_LIMIT) {
+        g_jh_depth_overflow = 1;
+        fprintf(stderr,
+                "jhyy error: recursion uses more than %lld bytes of stack "
+                "-- refusing to crash the compiler\n",
+                (long long)JH_DEPTH_LIMIT);
+        return 1;
+    }
+    return 0;
+}
+
+/* 本次编译里有没有撞过深度上限(codegen 在写 .s 之前查它)。 */
+__attribute__((used)) int jh_depth_overflowed(void) { return g_jh_depth_overflow; }
+
+/* 归零 —— 每个被编译的文件开始前调一次。 */
+__attribute__((used)) int jh_depth_reset(void) {
+    g_jh_min_sp = 0;
+    g_jh_depth_overflow = 0;
+    return 0;
+}
+
+
 /* v2.4.0: jh_setenv — set env var in current process. On Windows this uses
    SetEnvironmentVariableA so the value is in the Win32 env block that
    CreateProcessW inherits (NULL env block → child gets parent's env). On
