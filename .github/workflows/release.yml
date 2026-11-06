@@ -70,6 +70,19 @@ on:
         description: 'Release version (e.g. 1.5.5, 1.5.5-rc1)'
         required: true
         type: string
+      # ⚠️ 2026-11-06 新增:手动路径**默认检出被发布版本对应的 tag**
+      #   (缺省 = v<version>)。此前这个 workflow 的 Checkout **没有 ref**,
+#   检出的是 dispatch UI 里选中的 ref(默认 main)⇒
+      #   「VERSION 文件 == tag」那道断言读的是 **main 的** VERSION,
+      #   而产物也是 **main 的**代码,却挂到 **tag** 上 ——
+      #   ⇒ 发布的产物与 tag 指向的源码不一致(SECURITY.md 的 in-scope)。
+      #   留一个显式的 ref 入口是为了「重发某个历史 commit」这种需求;
+      #   填了非 tag 的 ref 时,release-ci-green 的 head_sha 比对会拦下。
+      ref:
+        description: 'Git ref to build (default: v<version>, i.e. the tag itself)'
+        required: false
+        type: string
+        default: ''
       dry_run:
         description: 'Dry-run (skip upload + release creation)'
         type: boolean
@@ -168,6 +181,20 @@ jobs:
         uses: actions/checkout@v4
         with:
           # (原注释提到 qbe/ 是 vendored QBE source —— 已于 2026-10-30 整体删除)
+          #
+          # ⚠️ 2026-11-06 真修:**必须钉 ref**。
+          #   此前没有 ref: ⇒ 手动路径检出的是 dispatch UI 选中的分支
+          #   (默认 main)。后果:「VERSION 文件 == tag」断言读的是 main 的
+          #   VERSION(而不是 tag 那棵树),构建的也是 main 的代码,产物却挂到
+          #   tag 上 ⇒ **发布的产物与 tag 指向的源码不一致**。
+          #   (SECURITY.md 的 in-scope:「release asset differs from what the
+          #   tagged source produces」。)
+          #
+          #   三条路径:
+          #     workflow_call      → inputs.tag(ci.yml 传进来的 tag)
+          #     workflow_dispatch  → inputs.ref;缺省 = v<version>(= 该版本的 tag)
+          #   tag 不存在 ⇒ checkout 自己失败(比事后断言早)。
+          ref: ${{ inputs.tag || inputs.ref || format('v{0}', inputs.version) }}
           fetch-depth: 0  # for git describe / tag detection
 
       # ⚠️ 这一步**必须在 Checkout 之后** —— VERSION 是仓里的文件,
@@ -250,7 +277,19 @@ jobs:
               Write-Host "::error::CI run for tag $tag is not green (status=$($latest.status) conclusion=$($latest.conclusion)) -- refusing to release."
               exit 1
           }
-          Write-Host "[OK] CI run for tag $tag is green"
+          # ⚠️ 2026-11-06 真修:**CI 跑过的 commit 必须就是本次要发的 commit**。
+          #   此前只验「这个 tag 名下存在某个绿的 CI run」,从不比对 sha ——
+          #   而 head_sha 只被 Write-Host 打印过。配合 Checkout 的 ref 钉子,
+          #   这两条合起来把「手动发布 = 重发被 CI 验过的那个 commit」变成断言。
+          $builtSha = (git rev-parse HEAD).Trim()
+          Write-Host "[release-ci-green] building commit: $builtSha"
+          if ($latest.head_sha -ne $builtSha) {
+              Write-Host "::error::CI run for tag $tag ran on sha $($latest.head_sha) but this build is $builtSha."
+              Write-Host "::error::The green CI run must be the exact commit being released -- refusing to release."
+              Write-Host "::error::Either re-point 'ref' at the tagged commit, or re-run CI for $builtSha."
+              exit 1
+          }
+          Write-Host "[OK] CI run for tag $tag is green AND ran on the commit being released"
 
       - name: Setup MSYS2 + toolchain
         uses: msys2/setup-msys2@v2
@@ -417,21 +456,62 @@ jobs:
         shell: pwsh
         run: |
           # gate: release-sha256
-          Get-Content installer/SHA256.txt
-          Write-Host ""
-          Write-Host "Expected files:"
-          foreach ($f in @(
-            "installer/build-artifacts/jhyy-installer-$env:JHY_VERSION_DISPLAY.exe",
-            "installer/build-artifacts/jhyy-compiler-$env:JHY_VERSION_DISPLAY.msi",
-            "installer/build-artifacts/jhyy-lang-$env:JHY_VERSION_DISPLAY.vsix"
-          )) {
-            if (Test-Path $f) {
-              $info = Get-Item $f
-              Write-Host "  $($info.Name) ($($info.Length) bytes)"
-            } else {
-              Write-Host "  [MISSING] $f"
-            }
+          #
+          # 2026-11-06 real fix: this step used to only PRINT SHA256.txt and
+          # list the expected artifacts. There was no hash comparison and no
+          # code path that could set a non-zero exit code -- the "gate" was
+          # green by construction. It now recomputes each hash and compares
+          # it against the declared value, and fails the release on any
+          # missing file / missing entry / mismatch.
+          #
+          # The declared hash must be produced by gen-sha256.ps1, never by
+          # this step -- otherwise the check would compare a file against
+          # itself.
+          $ErrorActionPreference = "Stop"
+          $shaFile = "installer/SHA256.txt"
+          if (-not (Test-Path $shaFile)) {
+              Write-Host "::error::$shaFile is missing -- refusing to release."
+              exit 1
           }
+          $declared = @{}
+          foreach ($line in (Get-Content $shaFile)) {
+              if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$') {
+                  $declared[$Matches[2].Trim()] = $Matches[1].ToLower()
+              }
+          }
+          Write-Host "[release-sha256] $($declared.Count) entries declared in $shaFile"
+          $expected = @(
+              "installer/build-artifacts/jhyy-installer-$env:JHY_VERSION_DISPLAY.exe",
+              "installer/build-artifacts/jhyy-compiler-$env:JHY_VERSION_DISPLAY.msi",
+              "installer/build-artifacts/jhyy-lang-$env:JHY_VERSION_DISPLAY.vsix"
+          )
+          $bad = 0
+          foreach ($f in $expected) {
+              $name = Split-Path -Leaf $f
+              if (-not (Test-Path $f)) {
+                  Write-Host "  [MISSING] $f"
+                  $bad++
+                  continue
+              }
+              if (-not $declared.ContainsKey($name)) {
+                  Write-Host "  [NO ENTRY] $name is not listed in $shaFile"
+                  $bad++
+                  continue
+              }
+              $actual = (Get-FileHash -Path $f -Algorithm SHA256).Hash.ToLower()
+              if ($actual -ne $declared[$name]) {
+                  Write-Host "  [MISMATCH] $name declared=$($declared[$name]) actual=$actual"
+                  $bad++
+                  continue
+              }
+              $info = Get-Item $f
+              Write-Host "  [OK] $name ($($info.Length) bytes) $actual"
+          }
+          if ($bad -gt 0) {
+              Write-Host "::error::$bad release artifact(s) failed the SHA256 check -- refusing to release."
+              exit 1
+          }
+          Write-Host "[OK] every release artifact matches SHA256.txt"
 
       - name: Generate release notes from template
         shell: pwsh
