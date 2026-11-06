@@ -82,6 +82,15 @@ def _facts_numbers() -> dict[str, int]:
             "ERR: FACTS.md 里找不到断言审计三件套"
             "(`\u626b\u63cf N \u00b7 \u53ef\u8dd1 N \u00b7 \u771f\u65ad\u8a00 N \u00b7`)"
             " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
+    # 产物级门数(2026-11-06 补):变异点原来**把门数写死**成 18 ⇒ 门数一变
+    # (18 → 19)变异点就找不到 ⇒ **2 个变异漏网**,CI 直接红(实测)。
+    # ⇒ 与其它数一样,从 FACTS.md 现场读。
+    ac = re.search(r"artifact-checks` —— \*\*(\d+) 道\*\*", text)
+    if not ac:
+        raise SystemExit(
+            "ERR: FACTS.md 里找不到产物级门数"
+            "(`artifact-checks` —— **N 道**)"
+            " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
     return {
         "pass": int(m.group(1)),
         "skip": int(m.group(2)),
@@ -89,12 +98,14 @@ def _facts_numbers() -> dict[str, int]:
         "scanned": int(a.group(1)),
         "runnable": int(a.group(2)),
         "assertions": int(a.group(3)),
+        "artifact_checks": int(ac.group(1)),
     }
 
 
 _N = _facts_numbers()
 _P, _S, _T = _N["pass"], _N["skip"], _N["total"]
 _SC, _RN, _RA = _N["scanned"], _N["runnable"], _N["assertions"]
+_AC = _N["artifact_checks"]
 
 # ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
 # ⚠️ **模板必须与门面里那几行逐字一致** —— 门面改了措辞或分隔符,这里要跟着改,
@@ -154,12 +165,12 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         f"# => {_P} passed, {_S + 1} skipped ({_T} total)")]),
     ("artifact_checks 门数", [(
         "README.md",
-        "| `artifact_checks.sh` | **18 PASS / 0 FAIL** |",
-        "| `artifact_checks.sh` | **14 PASS / 0 FAIL** |")]),
+        f"| `artifact_checks.sh` | **{_AC} PASS / 0 FAIL** |",
+        f"| `artifact_checks.sh` | **{_AC - 4} PASS / 0 FAIL** |")]),
     ("artifact_checks 门数（中文门面）", [(
         "README.zh-CN.md",
-        "| `artifact_checks.sh` | **18 PASS / 0 FAIL** |",
-        "| `artifact_checks.sh` | **16 PASS / 0 FAIL** |")]),
+        f"| `artifact_checks.sh` | **{_AC} PASS / 0 FAIL** |",
+        f"| `artifact_checks.sh` | **{_AC - 3} PASS / 0 FAIL** |")]),
     # (e) 产物尺寸:FACTS § 1 声明 vs 两份 README
     ("产物尺寸（安装器）", [(
         "README.md",
