@@ -334,7 +334,7 @@ jobs:
           # 顺带关掉 regress 里的 wire-only SKIP:这里显式列出 5 个名字,
           # 少编出一个就在本步失败,而不是悄悄进到下游。
           mkdir -p tmp/sysv_il
-          TESTS="sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic"
+          TESTS="sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic sysv_mixed_int_float"
           missing=0
           for t in $TESTS; do
             src="compiler/tests/examples/$t.jhyy"
@@ -789,7 +789,7 @@ jobs:
     #   job 的显示名**,而它要当稳定 id 用(分支保护的 contexts 引用它)。
     #   显示名一改,分支保护里的 context 就不再上报 ⇒ 所有 PR 永久卡在
     #   "Expected — Waiting for status to be reported"。
-    #   ⇒ 这道门是 **SysV ABI 门**:那 6 个 SysV ABI 测试 + W-104 跨实现对拍
+    #   ⇒ 这道门是 **SysV ABI 门**:那 7 个 SysV ABI 测试 + W-104 跨实现对拍
     #   **在 windows-latest 上永远 SKIP** ⇒ 唯一能跑它们的 job 就是这个
     #   (ubuntu-latest)。绿灯不覆盖它们 ⇒ 别拿 windows-latest 的绿当全绿。
     name: sysv
@@ -818,11 +818,21 @@ jobs:
           uname -a
           gcc --version | head -1
           ls -la tmp/sysv_il/
-            # 7 份一份都不能少(6 个 sysv 测试 + 1 个 ABI 对拍 caller)——
-            # 少了就是上游 emit 步出了问题,不能当成通过。
+            # 7 份一份都不能少(7 个 sysv 测试)——少了就是上游 emit 步出了问题,
+            # 不能当成通过。
+            #
+            # ⚠️ 2026-11-06 真修:此前这里是 **6** 个,断言也是 `-eq 6`,而上面
+            #   那条注释却写着「7 份一份都不能少」—— 注释与断言自相矛盾。
+            #   少掉的是 `sysv_mixed_int_float`:它是 **W-127 的回归门**
+            #   (MS x64 共享位置计数器 vs SysV 两个独立 bank,实参编号规则相反)。
+            #   regress.py 的 _SYSV_TEST_NAMES 有 7 个、CI 的 TESTS 只有 6 个 ⇒
+            #   **这个守卫的 SysV 那一半从来没跑过**,而 CI 全绿。
+            #   本地实测(2026-11-06,MSYS2 + docker gcc:12):该用例在
+            #   amd64_sysv_freestanding 下 EXIT=170,与 //EXPECT:170 一致 ⇒
+            #   加上它不会让 CI 常红。
             n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
-            echo "收到 $n 份 regress 用例 .s(期望 6)"
-            [ "$n" -eq 6 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            echo "收到 $n 份 regress 用例 .s(期望 7)"
+            [ "$n" -eq 7 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
             m=$(ls tmp/sysv_abi/*.s 2>/dev/null | wc -l)
             echo "收到 $m 份 ABI 对拍用 .s(期望 3:small caller / MEMORY caller / MEMORY callee)"
             [ "$m" -eq 3 ] || { echo "::error::ABI 对拍 .s 缺失,拒绝报绿"; exit 1; }
@@ -895,7 +905,7 @@ jobs:
   # 以 `needs: build-and-test` 调用 —— 这是 `needs:` 能跨文件生效的唯一途径,
   # 且零代码重复。
   # ⚠️ `sysv` **必须**在 needs 里(2026-11-03 审计补):
-  # 那 6 个 SysV ABI 测试 + W-104 跨实现对拍在 windows-latest 上永远 SKIP
+  # 那 7 个 SysV ABI 测试 + W-104 跨实现对拍在 windows-latest 上永远 SKIP
   # (`--cross=auto → resolved=none`)⇒ **唯一能跑它们的 job 是 sysv**。
   # 而此前 release 只 needs build-and-test + vscode-ext ⇒ SysV ABI 门红了
   # 照发不误 ⇒ 那道门对「能不能发版」毫无约束力(与「恒红且被忽略的步骤
