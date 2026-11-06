@@ -217,47 +217,74 @@ fn read_file(path: *u8) -> *u8 {
     return buf;
 }
 
-// store_byte_i32: 写 i32 值到 *u8 位置（按 1 byte 存）
+// store_byte_i32: 写 **1 字节** 到 *u8 位置。
+//
+// ⚠️ 2026-11-06 真修:此前写的是 **4 字节** ——
+//   `let pi = p as *i32; (*pi) = val;` 走的是 i32 的 store 语义
+//   (汇编 `movl %eax,(%r8)`)。全仓 20+ 个调用点里绝大多数本意只写 1 字节
+//   (写结尾 NUL),却都多踩了 3 字节 ⇒ 位置落在缓冲区末尾时就是**越界写**。
+//   现在按 *u8 存(汇编 `movb %al,(%r8)`)。
 fn store_byte_i32(p: *u8, val: i32) -> i32 {
-    let pi = p as *i32;
-    (*pi) = val;
+    (*p) = val as u8;
     return 0 as i32;
 }
 
-// load_byte_i32: 读 *u8 位置到 i32
+// load_byte_i32: 读 *u8 位置的 **1 字节** 到 i32
+// （此前是 `p as *i32` 的 4 字节读 ⇒ 越界读 + 高 3 字节是垃圾）
 fn load_byte_i32(p: *u8) -> i32 {
-    let pi = p as *i32;
-    return (*pi);
+    let b = (*p);
+    return b as i32;
 }
 
-// str_concat: 拷贝 src 到 dst，返回写入字节数（不含 NUL）
-fn str_copy(dst: *u8, src: *u8) -> i64 {
+// str_copy: 拷贝 src 到 dst,**最多写 cap-1 字节**(给结尾 NUL 留位置),
+//   返回实际写入的字节数(不含 NUL)。src 比 cap-1 长 ⇒ **截断**。
+//
+// ⚠️ 2026-11-06 真修两处:
+//   1) 宽度:此前每个字节用 `*i32` 读写(4 字节)却只步进 1 字节
+//      ⇒ 每次迭代越界读源串尾部、越界写目标尾部;
+//   2) 边界:此前**没有任何容量上限** —— src 多长就写多长。
+fn str_copy(dst: *u8, src: *u8, cap: i64) -> i64 {
     let n = strlen(src);
+    let mut lim = n;
+    let mut room = cap - (1 as i64);
+    if room < (0 as i64) { room = 0 as i64; }
+    if lim > room { lim = room; }
     let mut i: i64 = 0 as i64;
-    while i < n {
+    while i < lim {
         let s_p = (src as i64 + i) as *u8;
         let d_p = (dst as i64 + i) as *u8;
-        let s_pi = s_p as *i32;
-        let d_pi = d_p as *i32;
-        (*d_pi) = (*s_pi);
+        (*d_p) = (*s_p) as u8;
         i = i + (1 as i64);
     }
-    return n;
+    // ⚠️ 2026-11-06:**补结尾 NUL**。此前 str_copy 只拷贝、不写 NUL ⇒
+    //   几个调用点(如 asm_path_of 的「后缀已存在」那条提前返回、cmd_run 的
+    //   tmp 输出名)拿到的是**没终止的缓冲**,后面的 strlen/strrchr 会读到
+    //   堆里的垃圾直到碰巧撞上 0。NUL 位置 = dst[lim] ≤ dst[cap-1] ⇒ 在界内。
+    let nul_p = (dst as i64 + lim) as *u8;
+    store_byte_i32(nul_p, 0 as i32);
+    return lim;
 }
 
-// str_concat_at: 把 src append 到 dst+offset，返回新 offset
-fn str_concat_at(dst: *u8, off: i64, src: *u8) -> i64 {
+// str_concat_at: 把 src append 到 dst+offset,**最多写到 dst+cap-1**,
+//   返回新 offset(被 cap 截断时 = off + 实际写入量)。
+//
+// ⚠️ 2026-11-06 真修:宽度改逐字节(见 str_copy 的说明),并加上容量上限 ——
+//   此前这个函数**没有 cap 参数**,调用方想传也传不了 ⇒ 一个 966 字符的
+//   import 名就能把 malloc(1024) 的路径缓冲写穿(实测:0xC0000374 堆损坏)。
+fn str_concat_at(dst: *u8, off: i64, src: *u8, cap: i64) -> i64 {
     let n = strlen(src);
+    let mut room = cap - (1 as i64) - off;
+    if room < (0 as i64) { room = 0 as i64; }
+    let mut lim = n;
+    if lim > room { lim = room; }
     let mut i: i64 = 0 as i64;
-    while i < n {
+    while i < lim {
         let s_p = (src as i64 + i) as *u8;
         let d_p = (dst as i64 + off + i) as *u8;
-        let s_pi = s_p as *i32;
-        let d_pi = d_p as *i32;
-        (*d_pi) = (*s_pi);
+        (*d_p) = (*s_p) as u8;
         i = i + (1 as i64);
     }
-    return off + n;
+    return off + lim;
 }
 
 // str_ends_with_exe: s 是否以 ".exe" 结尾（大小写不敏感）
@@ -325,12 +352,12 @@ fn str_ends_with_s(s: *u8) -> i32 {
 // 2026-11-05:修前有三处各自无条件 `out_buf + ".s"`(build_il / cmd_build /
 // cmd_compile)⇒ 用户写 `-o foo.s` 拿到的是 `foo.s.s`。现在跟 .exe 那侧
 // (P2-5 的 str_ends_with_exe)同一个规矩:**后缀已经有了就别再追加**。
-fn asm_path_of(out_buf: *u8, dest: *u8) -> i64 {
-    let mut len: i64 = str_copy(dest, out_buf);
+fn asm_path_of(out_buf: *u8, dest: *u8, cap: i64) -> i64 {
+    let mut len: i64 = str_copy(dest, out_buf, cap);
     if str_ends_with_s(out_buf) != (0 as i32) {
         return len;
     }
-    let off: i64 = str_concat_at(dest, len, ".s" as *u8);
+    let off: i64 = str_concat_at(dest, len, ".s" as *u8, cap);
     let nul: *u8 = (dest as i64 + off) as *u8;
     store_byte_i32(nul, 0 as i32);
     return off;
@@ -373,9 +400,12 @@ fn completed_match(completed: *u8, ncompleted: i64, path: *u8) -> i32 {
 }
 
 // dir_from_path: 从文件路径提取 dir（最后一个 '/' 或 '\\' 切）
-//   写回 dir_buf (caller 提供 ≥512 字节)
-//   返回 0 = OK, 1 = 无 separator (用 "." 代替)
-fn dir_from_path(path: *u8, dir_buf: *u8) -> i32 {
+//   写回 dir_buf (caller 提供 cap 字节)
+//   返回 0 = OK, 1 = 无 separator (用 "." 代替), 2 = 路径太长(没写,调用方要报错)
+//
+// ⚠️ 2026-11-06:加了 cap。此前本函数**不知道 dir_buf 有多大** ⇒
+//   源路径长于缓冲时直接写穿(而且是 4 字节窗口 / 1 字节步进的写法)。
+fn dir_from_path(path: *u8, dir_buf: *u8, cap: i64) -> i32 {
     let n = strlen(path);
     let mut last_sep_off: i64 = -(1 as i64);
     let mut idx: i64 = 0 as i64;
@@ -396,13 +426,15 @@ fn dir_from_path(path: *u8, dir_buf: *u8) -> i32 {
         store_byte_i32((dir_buf as i64 + (1 as i64)) as *u8, 0 as i32);
         return 1 as i32;
     }
+    // ⚠️ 装不下 ⇒ **不写**,报「太长」—— 截断出来的目录名会指向**另一个目录**。
+    if last_sep_off > (cap - (2 as i64)) {
+        return 2 as i32;
+    }
     let mut j: i64 = 0 as i64;
     while j < last_sep_off {
         let s_p = (path as i64 + j) as *u8;
         let d_p = (dir_buf as i64 + j) as *u8;
-        let s_pi = s_p as *i32;
-        let d_pi = d_p as *i32;
-        (*d_pi) = (*s_pi);
+        (*d_p) = (*s_p) as u8;
         j = j + (1 as i64);
     }
     let nul_p = (dir_buf as i64 + last_sep_off) as *u8;
@@ -411,17 +443,31 @@ fn dir_from_path(path: *u8, dir_buf: *u8) -> i32 {
 }
 
 // build_mod_path — 把 "<dir>/<name>.jhyy" 拼进 out_buf(caller 提供 ≥1024 字节)
-//   返回写入长度(不含结尾 NUL)。
+//   返回写入长度(不含结尾 NUL);**装不下时返回 -1**(out_buf 不写)。
 //   W-103:import 解析的两级查找(main 文件旁边 → std lib 目录)共用这一个拼接器,
 //   免得两处各拼一遍、拼法走偏(上一次两处不一致就是一个 silent bug 的形状)。
-fn build_mod_path(out_buf: *u8, dir: *u8, name: *u8) -> i64 {
+//
+// ⚠️ 2026-11-06:加了 cap + 溢出返回 -1。**这里是那条堆损坏的源头** ——
+//   `name` 来自被编译源码里的 import 名(长度不受限),而 out_buf 只有 1024
+//   字节 ⇒ 一个 966 字符的 import 名就能把它写穿(实测 0xC0000374)。
+//   截断出来的路径会指向**另一个文件** ⇒ 不能截断,必须报错。
+fn build_mod_path(out_buf: *u8, dir: *u8, name: *u8, cap: i64) -> i64 {
+    // ⚠️ 2026-11-06:加 cap 后**先算需要多少字节** —— str_concat_at 自己会
+    //   截断,事后看返回值永远发现不了「装不下」。
+    //   装不下 ⇒ 返回 -1 且**一个字都不写**(调用方必须检查)。
+    let dir_len = strlen(dir);
+    let name_len = strlen(name);
+    let need = dir_len + (1 as i64) + name_len + (5 as i64) + (1 as i64);
+    if need > cap {
+        return -(1 as i64);
+    }
     let mut off: i64 = 0 as i64;
-    off = str_concat_at(out_buf, off, dir);
+    off = str_concat_at(out_buf, off, dir, cap);
     let slash_m = "/" as *u8;
-    off = str_concat_at(out_buf, off, slash_m);
-    off = str_concat_at(out_buf, off, name);
+    off = str_concat_at(out_buf, off, slash_m, cap);
+    off = str_concat_at(out_buf, off, name, cap);
     let ext_m = ".jhyy" as *u8;
-    off = str_concat_at(out_buf, off, ext_m);
+    off = str_concat_at(out_buf, off, ext_m, cap);
     let nul_p = (out_buf as i64 + off) as *u8;
     store_byte_i32(nul_p, 0 as i32);
     return off;
@@ -482,9 +528,9 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
     // Slot layout: first 8 bytes = *u8 pointer to a separate heap path buf,
     // next 504 bytes unused. Path buf lives forever (heap leak, like mod_path).
     if (*nin_progress) < (64 as i64) {
-        let ip_path_buf = malloc(512 as i64);
+        let ip_path_buf = malloc(1024 as i64);
         let mut ip_off: i64 = 0 as i64;
-        ip_off = str_concat_at(ip_path_buf as *u8, ip_off, mod_path);
+        ip_off = str_concat_at(ip_path_buf as *u8, ip_off, mod_path, 1024 as i64);
         let ip_nul = (ip_path_buf as i64 + ip_off) as *u8;
         store_byte_i32(ip_nul, 0 as i32);
         // Write the *u8 pointer at slot offset (slot is interpreted as **u8)
@@ -500,14 +546,14 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
             // transitive import: nested_name = *(sym as **u8) (name is at offset 0 of Sym)
             let iid = node_import_decl_data(idecl);
             let nested_name = *((*iid).sym as **u8);
-            let dir_buf = malloc(512 as i64);
-            dir_from_path(mod_path, dir_buf);
+            let dir_buf = malloc(1024 as i64);
+            dir_from_path(mod_path, dir_buf, 1024 as i64);
             let npath = malloc(1024 as i64);
             let mut off_n: i64 = 0 as i64;
-            off_n = str_concat_at(npath, off_n, dir_buf);
-            off_n = str_concat_at(npath, off_n, "/" as *u8);
-            off_n = str_concat_at(npath, off_n, nested_name);
-            off_n = str_concat_at(npath, off_n, ".jhyy" as *u8);
+            off_n = str_concat_at(npath, off_n, dir_buf, 1024 as i64);
+            off_n = str_concat_at(npath, off_n, "/" as *u8, 1024 as i64);
+            off_n = str_concat_at(npath, off_n, nested_name, 1024 as i64);
+            off_n = str_concat_at(npath, off_n, ".jhyy" as *u8, 1024 as i64);
             let nul_np = (npath as i64 + off_n) as *u8;
             store_byte_i32(nul_np, 0 as i32);
             let rv1_err = resolve_one_import_v1(npath, nested_name, arena,
@@ -571,9 +617,9 @@ fn resolve_one_import_v1(mod_path: *u8, mod_name: *u8, arena: *Arena,
     // push to completed (cap 64, match C-side)
     // Same layout as in_progress push above.
     if (*ncompleted) < (64 as i64) {
-        let cp_path_buf = malloc(512 as i64);
+        let cp_path_buf = malloc(1024 as i64);
         let mut cp_off: i64 = 0 as i64;
-        cp_off = str_concat_at(cp_path_buf as *u8, cp_off, mod_path);
+        cp_off = str_concat_at(cp_path_buf as *u8, cp_off, mod_path, 1024 as i64);
         let cp_nul = (cp_path_buf as i64 + cp_off) as *u8;
         store_byte_i32(cp_nul, 0 as i32);
         let cp_slot_pp = (completed as i64 + (*ncompleted) * (512 as i64)) as **u8;
@@ -623,8 +669,15 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
     }
 
     // extract main dir
-    let main_dir_buf = malloc(512 as i64);
-    let _ignore = dir_from_path(main_path, main_dir_buf);
+    let main_dir_buf = malloc(1024 as i64);
+    let _ignore = dir_from_path(main_path, main_dir_buf, 1024 as i64);
+    // ⚠️ 2026-11-06:源路径的目录部分装不下 ⇒ 报错停下(此前忽略了返回值,
+    //   拿未写入的缓冲继续拼 ⇒ 路径是垃圾)。
+    if _ignore == (2 as i32) {
+        jh_fputs_stderr("error: source path too long (directory part over 1022 bytes)\n" as *u8);
+        free(main_dir_buf);
+        return 1 as i32;
+    }
 
     // allocate in_progress + completed (heap, 64 × 512 = 32KB each, avoid stack overflow)
     let in_progress = malloc(64 as i64 * (512 as i64));
@@ -666,7 +719,18 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
             let mod_name_str = (*id_sym_p).name;
             // mod_path = main_dir/mod_name.jhyy
             let mod_path_buf = malloc(1024 as i64);
-            let _mp_len = build_mod_path(mod_path_buf, main_dir_buf, mod_name_str);
+            let _mp_len = build_mod_path(mod_path_buf, main_dir_buf, mod_name_str, 1024 as i64);
+            // ⚠️ 2026-11-06:装不下 ⇒ **报「路径太长」并停**,不要拿半截路径继续。
+            //   import 名来自被编译的源码(长度不受限)⇒ 一个 966 字符的 import 名
+            //   就能把 1024 字节的缓冲写穿(实测 0xC0000374 堆损坏)。
+            //   截断出来的路径会指向**另一个文件** —— 比报错糟得多。
+            if _mp_len < (0 as i64) {
+                jh_fputs_stderr("error: import path too long (module name over ~1000 bytes): " as *u8);
+                jh_fputs_stderr(mod_name_str);
+                jh_fputs_stderr("\n" as *u8);
+                free(mod_path_buf);
+                return 1 as i32;
+            }
             // W-103 (2026-10-20):main 文件旁边找不到 → 回落到 std lib 目录。
             //
             // 为什么需要这一层:之前 import **只在 main 文件旁边找**,于是
@@ -682,7 +746,16 @@ fn inline_imports(module: *Node, main_path: *u8, arena: *Arena) -> i32 {
                 if std_dir != (0 as *u8) {
                     if strlen(std_dir) > (0 as i64) {
                         let alt_buf = malloc(1024 as i64);
-                        let _alt_len = build_mod_path(alt_buf, std_dir, mod_name_str);
+                        let _alt_len = build_mod_path(alt_buf, std_dir, mod_name_str, 1024 as i64);
+                        // std 目录这条路径更长 ⇒ 装不下就报「太长」,别拿垃圾路径去 stat。
+                        if _alt_len < (0 as i64) {
+                            jh_fputs_stderr("error: import path too long (module name over ~1000 bytes): " as *u8);
+                            jh_fputs_stderr(mod_name_str);
+                            jh_fputs_stderr("\n" as *u8);
+                            free(alt_buf);
+                            free(mod_path_buf);
+                            return 1 as i32;
+                        }
                         if jh_file_stat_ok(alt_buf) != (0 as i32) {
                             let alt_n = strlen(alt_buf);
                             let _cp = memcpy(mod_path_buf, alt_buf, alt_n + (1 as i64));
@@ -905,16 +978,16 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     let il_path_buf = malloc(1024 as i64);
     let il_path = il_path_buf;
     let n_o = strlen(output);
-    str_copy(il_path, output);
+    str_copy(il_path, output, 1024 as i64);
     let ext_il = ".il" as *u8;
-    let off1 = str_concat_at(il_path, n_o, ext_il);
+    let off1 = str_concat_at(il_path, n_o, ext_il, 1024 as i64);
     let nul1 = (il_path as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
 
     // 算 asm_path (跟 compile() 同 pattern: output + ".s";后缀有了就不重复追加)
     let asm_path_buf = malloc(1024 as i64);
     let asm_path = asm_path_buf;
-    let _nasm0 = asm_path_of(output, asm_path);
+    let _nasm0 = asm_path_of(output, asm_path, 1024 as i64);
 
     let sb_inner = (*ir).sb;
     let buf_p = (*sb_inner).buf;
@@ -1425,10 +1498,10 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // → SIGSEGV(gdb bt: #0 ___chkstk_ms #3 codegen.cg_expr #5 codegen.cg_expr)。
     // 64 MB 足够 main.jhyy 全量自举的递归深度。
     let d26_flags = " -g0 -Wl,--build-id=none -Wl,--stack,67108864 " as *u8;
-    pos = str_concat_at(cmd_buf, pos, d26_flags);
-    pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, temp_asm);    // W-048: ASCII
-    pos = str_concat_at(cmd_buf, pos, rq);
+    pos = str_concat_at(cmd_buf, pos, d26_flags, 16384 as i64);
+    pos = str_concat_at(cmd_buf, pos, lq, 16384 as i64);
+    pos = str_concat_at(cmd_buf, pos, temp_asm, 16384 as i64);    // W-048: ASCII
+    pos = str_concat_at(cmd_buf, pos, rq, 16384 as i64);
     // v3.0.0 (3d no_std): if is_no_std=1, link line skips runtime.c +
     // jhyy_helpers.c (no C runtime bridge) and adds `-nostartfiles
     // -nodefaultlibs -Wl,--entry=main -lgcc`.
@@ -1458,22 +1531,22 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         // 写反会导致「.o 存在时反而不用它」—— 第一版就栽在这,链接时间没变。
         if jh_file_stat_ok(rt_o) == (0 as i32) { use_obj = 0 as i32; }
         if jh_file_stat_ok(hp_o) == (0 as i32) { use_obj = 0 as i32; }
-        pos = str_concat_at(cmd_buf, pos, sp);
-        pos = str_concat_at(cmd_buf, pos, lq);
+        pos = str_concat_at(cmd_buf, pos, sp, 16384 as i64);
+        pos = str_concat_at(cmd_buf, pos, lq, 16384 as i64);
         if use_obj != (0 as i32) {
-            pos = str_concat_at(cmd_buf, pos, rt_o);
+            pos = str_concat_at(cmd_buf, pos, rt_o, 16384 as i64);
         } else {
-            pos = str_concat_at(cmd_buf, pos, RUNTIME_C());
+            pos = str_concat_at(cmd_buf, pos, RUNTIME_C(), 16384 as i64);
         }
-        pos = str_concat_at(cmd_buf, pos, rq);
-        pos = str_concat_at(cmd_buf, pos, sp);
-        pos = str_concat_at(cmd_buf, pos, lq);
+        pos = str_concat_at(cmd_buf, pos, rq, 16384 as i64);
+        pos = str_concat_at(cmd_buf, pos, sp, 16384 as i64);
+        pos = str_concat_at(cmd_buf, pos, lq, 16384 as i64);
         if use_obj != (0 as i32) {
-            pos = str_concat_at(cmd_buf, pos, hp_o);
+            pos = str_concat_at(cmd_buf, pos, hp_o, 16384 as i64);
         } else {
-            pos = str_concat_at(cmd_buf, pos, HELPERS_C());
+            pos = str_concat_at(cmd_buf, pos, HELPERS_C(), 16384 as i64);
         }
-        pos = str_concat_at(cmd_buf, pos, rq);
+        pos = str_concat_at(cmd_buf, pos, rq, 16384 as i64);
     } else {
         // no_std path: no runtime.c, no helpers.c, but still need kernel
         // entry + entry-point override.
@@ -1485,15 +1558,15 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         // libgcc 里;`-nodefaultlibs` 把它踢掉了 → 显式加回来。libgcc **不含**
         // C 运行时(不含 exit/atexit/stdio),所以 no_std 语义不被破坏。
         let no_std_flags = " -nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc " as *u8;
-        pos = str_concat_at(cmd_buf, pos, no_std_flags);
+        pos = str_concat_at(cmd_buf, pos, no_std_flags, 16384 as i64);
     }
     let oflag = " -o " as *u8;
-    pos = str_concat_at(cmd_buf, pos, oflag);
-    pos = str_concat_at(cmd_buf, pos, lq);
-    pos = str_concat_at(cmd_buf, pos, temp_exe);    // W-048: ASCII
-    pos = str_concat_at(cmd_buf, pos, rq);
+    pos = str_concat_at(cmd_buf, pos, oflag, 16384 as i64);
+    pos = str_concat_at(cmd_buf, pos, lq, 16384 as i64);
+    pos = str_concat_at(cmd_buf, pos, temp_exe, 16384 as i64);    // W-048: ASCII
+    pos = str_concat_at(cmd_buf, pos, rq, 16384 as i64);
     let lmflag = " -lm" as *u8;
-    pos = str_concat_at(cmd_buf, pos, lmflag);
+    pos = str_concat_at(cmd_buf, pos, lmflag, 16384 as i64);
     // v4.0.2 fix: add Windows system libs for GetCommandLineW/CommandLineToArgvW
     // (W-047 argv re-decode path) + future MessageBoxA writes.
     // 缺这俩 flag 时 ld 返回 exit 5 (undefined symbols), v4.0.2-rc1 起
@@ -1503,7 +1576,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // argv re-decode path 必需)。 advapi32 + uuid 给 future MessageBox + COM
     // call (W-062 v1.8.3 setuc path 用了), 提前 ship 不挂后下个sprint。
     let win_libs = " -lkernel32 -luser32 -lshell32 -ladvapi32" as *u8;
-    pos = str_concat_at(cmd_buf, pos, win_libs);
+    pos = str_concat_at(cmd_buf, pos, win_libs, 16384 as i64);
     let nul_p = (cmd_buf as i64 + pos) as *u8;
     store_byte_i32(nul_p, 0 as i32);
 
@@ -1591,11 +1664,15 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
 }
 
 // derive_output_name: input "path/foo.jhyy" → "path/foo" (strip .jhyy)
-fn derive_output_name(input: *u8, out_buf: *u8) -> i32 {
-    let n = strlen(input);
-    str_copy(out_buf, input);
+fn derive_output_name(input: *u8, out_buf: *u8, cap: i64) -> i32 {
+    let src_n = strlen(input);
+    let n = str_copy(out_buf, input, cap);
     let nul = (out_buf as i64 + n) as *u8;
     store_byte_i32(nul, 0 as i32);
+    // 装不下 ⇒ 报「路径太长」(截断出来的路径会指向另一个文件)
+    if n < src_n {
+        return 1 as i32;
+    }
     let dot = strrchr(out_buf, (46 as i32));  // '.' = 46
     if dot != (0 as *u8) {
         let _sd = store_byte_i32(dot, 0 as i32);
@@ -1657,7 +1734,11 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     }
     /* 默认从 input 派生 output 名（去 .jhyy 后缀） */
     let derived = malloc(1024 as i64);
-    derive_output_name(input, derived);
+    if derive_output_name(input, derived, 1024 as i64) != (0 as i32) {
+        jh_fputs_stderr("jhyy: output path too long (max 1023 bytes)\n" as *u8);
+        free(derived);
+        return 1 as i32;
+    }
     let mut out_buf: *u8 = derived;
     if user_out != (0 as *u8) {
         free(derived);
@@ -1684,7 +1765,7 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
     let n_b = strlen(out_buf);
     let asm_buf = malloc(1024 as i64);
     let asm_path = asm_buf;
-    let _nasm_b = asm_path_of(out_buf, asm_path);
+    let _nasm_b = asm_path_of(out_buf, asm_path, 1024 as i64);
     if r == (0 as i32) {
         // fallback:build_il 只写了 .il(它自己写的,同一公式 output + ".il"),
         // .s 要靠 run_backend 补 —— 对齐 cmd_compile 的同一分支。
@@ -1693,8 +1774,8 @@ fn cmd_build(argc: i32, argv: *u8, t: i32) -> i32 {
         // ⇒ 磁盘上没有 .s,退出码却是 0 ⇒ shell / CI 以为成功了。
         let il_buf = malloc(1024 as i64);
         let il_path = il_buf;
-        str_copy(il_path, out_buf);
-        let off_i = str_concat_at(il_path, n_b, ".il" as *u8);
+        str_copy(il_path, out_buf, 1024 as i64);
+        let off_i = str_concat_at(il_path, n_b, ".il" as *u8, 1024 as i64);
         let nul_i = (il_path as i64 + off_i) as *u8;
         store_byte_i32(nul_i, 0 as i32);
         let r1 = run_backend(il_path, asm_path, t);
@@ -1807,7 +1888,11 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32, no_link_flag: i32) -> i32 {
 
     /* 默认从 input 派生 output 名（去 .jhyy 后缀） */
     let derived = malloc(1024 as i64);
-    derive_output_name(input, derived);
+    if derive_output_name(input, derived, 1024 as i64) != (0 as i32) {
+        jh_fputs_stderr("jhyy: output path too long (max 1023 bytes)\n" as *u8);
+        free(derived);
+        return 1 as i32;
+    }
     let mut out_buf: *u8 = derived;
     if user_out != (0 as *u8) {
         free(derived);
@@ -1827,12 +1912,12 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32, no_link_flag: i32) -> i32 {
     let asm_path = malloc(1024 as i64);
     let exe_path = malloc(1024 as i64);
     let n_o = strlen(out_buf);
-    str_copy(il_path, out_buf);
-    let off1 = str_concat_at(il_path, n_o, ".il" as *u8);
+    str_copy(il_path, out_buf, 1024 as i64);
+    let off1 = str_concat_at(il_path, n_o, ".il" as *u8, 1024 as i64);
     let nul1 = (il_path as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
-    let _nasm_o = asm_path_of(out_buf, asm_path);
-    str_copy(exe_path, out_buf);
+    let _nasm_o = asm_path_of(out_buf, asm_path, 1024 as i64);
+    str_copy(exe_path, out_buf, 1024 as i64);
     // P2-5 (2026-11-01):`-o` 的输出路径**已有 .exe 就别再追加**。
     // 修前无条件追加 ⇒ `-o game_run.exe` 产出 `game_run.exe.exe`。
     // (Windows 目标固定 .exe;非 .exe 后缀是用户显式指定的 ⇒ 尊重之。)
@@ -1840,7 +1925,7 @@ fn cmd_compile(argc: i32, argv: *u8, t: i32, no_link_flag: i32) -> i32 {
         let nul3e = (exe_path as i64 + n_o) as *u8;
         store_byte_i32(nul3e, 0 as i32);
     } else {
-        let off3 = str_concat_at(exe_path, n_o, ".exe" as *u8);
+        let off3 = str_concat_at(exe_path, n_o, ".exe" as *u8, 1024 as i64);
         let nul3 = (exe_path as i64 + off3) as *u8;
         store_byte_i32(nul3, 0 as i32);
     }
@@ -2024,13 +2109,13 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
 
     // tmp output: "input" minus ext + "_run"
     let out_buf = malloc(1024 as i64);
-    str_copy(out_buf, input);
+    str_copy(out_buf, input, 1024 as i64);
     let dot = strrchr(out_buf, (46 as i32));
     if dot != (0 as *u8) {
         let _sdr = store_byte_i32(dot, 0 as i32);
     }
     let nl = strlen(out_buf);
-    let off1 = str_concat_at(out_buf, nl, "_run" as *u8);
+    let off1 = str_concat_at(out_buf, nl, "_run" as *u8, 1024 as i64);
     let nul1 = (out_buf as i64 + off1) as *u8;
     store_byte_i32(nul1, 0 as i32);
 
@@ -2068,13 +2153,13 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     }
     // Build abs_exe = abs_in (with .jhyy → _run.exe)
     let abs_exe = malloc(1024 as i64);
-    str_copy(abs_exe, abs_in);
+    str_copy(abs_exe, abs_in, 1024 as i64);
     let ext_dot = strrchr(abs_exe, (46 as i32));
     if ext_dot != (0 as *u8) {
         let _sdx = store_byte_i32(ext_dot, 0 as i32);
     }
     let abs_n = strlen(abs_exe);
-    let ae1 = str_concat_at(abs_exe, abs_n, "_run.exe" as *u8);
+    let ae1 = str_concat_at(abs_exe, abs_n, "_run.exe" as *u8, 1024 as i64);
     let ae_nul = (abs_exe as i64 + ae1) as *u8;
     store_byte_i32(ae_nul, 0 as i32);
     // v1.5.6 W-039: wrap abs_exe in quotes so CreateProcessA treats the full
@@ -2082,11 +2167,11 @@ fn cmd_run(argc: i32, argv: *u8, t: i32) -> i32 {
     // name. Without quotes, Windows tokenizes at first whitespace and would
     // launch C:\Program if that file exists.
     let quoted_exe = malloc(1024 as i64);
-    let _qe0 = str_concat_at(quoted_exe, 0 as i64, "\"" as *u8);
+    let _qe0 = str_concat_at(quoted_exe, 0 as i64, "\"" as *u8, 1024 as i64);
     let qe_n = strlen(quoted_exe);
-    let _qe1 = str_concat_at(quoted_exe, qe_n, abs_exe);
+    let _qe1 = str_concat_at(quoted_exe, qe_n, abs_exe, 1024 as i64);
     let qe_n2 = strlen(quoted_exe);
-    let _qe2 = str_concat_at(quoted_exe, qe_n2, "\"" as *u8);
+    let _qe2 = str_concat_at(quoted_exe, qe_n2, "\"" as *u8, 1024 as i64);
     // v1.5.6 W-038: 用 jh_run (CreateProcessA) 替代 system(), 绕过 cmd.exe /C 不搜索 cwd.
     // W-034 jh_fullpath 已把 abs_exe 解析为绝对路径, W-039 已用 quotes 包裹.
     let rc = jh_run(quoted_exe);
