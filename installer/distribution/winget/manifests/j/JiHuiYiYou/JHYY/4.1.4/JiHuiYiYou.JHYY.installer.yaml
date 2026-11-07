@@ -6,17 +6,17 @@
 # Package: JiHuiYiYou.JHYY
 # Version: 4.1.4
 #
-# reference manifest, **not yet published to winget-pkgs**。
-# 上游 PR **至今一次都没提过**, 排期表里也**没有这一格** —— v1.5.5 的决策
-# (「写 manifest,实际 publish 推到 v2.x」)随着 v2.x 轴终结而**从未被执行**。
-# ⇒ 本 manifest 已于 2026-11-05 修好并通过本机 `winget validate`(零警告),
-#    提 PR 的前置条件已就绪 —— 缺的只是「什么时候提」(见 FACTS.md § 4.5)。
+# **2026-11-07:已提交上游** —— microsoft/winget-pkgs 的 PR。
+# 这一格排了两年(v1.5.5 的决策「写 manifest,实际 publish 推到 v2.x」随着
+# v2.x 轴终结而**从未被执行**),2026-11-07 随 v4.1.4 一起发出去。
+# ⇒ 本 manifest 已于 2026-11-05 修好(W-203:三件套的类型装反了),
+#    `InstallerSha256` 已按**已发布**的资产回填。
 #
 # ⚠️ 2026-11-05 (W-203):**本文件此前装的是 version manifest 的内容**
 # (ManifestType: version)⇒ 与 `.yaml` 装反了。⇒ 已换回来。
 #
 # InstallerSha256 来自该次发布 GitHub Release 的 SHA256.txt 资产
-# (jhyy-installer-4.1.4.exe => f772c659d0e02fdbd35140609461d128248d5a93adf6384aa106a30bfe25e9be)。
+# (jhyy-installer-4.1.4.exe => cdfcc14517671c3a1a00afe194d9bd2bb1f451cd5f612125f2fa195d5f0e1705)。
 #
 # 为什么走 Burn bundle: WiX 4 Burn bundles 是 winget 的一等 installer
 # (`InstallerType: burn`);winget CLI 直接跑它们(BurnArgs)。
@@ -33,7 +33,7 @@ Platform:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe
-    InstallerSha256: f772c659d0e02fdbd35140609461d128248d5a93adf6384aa106a30bfe25e9be
+    InstallerSha256: cdfcc14517671c3a1a00afe194d9bd2bb1f451cd5f612125f2fa195d5f0e1705
     InstallerSwitches:
       Silent: /quiet
       SilentWithProgress: /passive

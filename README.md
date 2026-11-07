@@ -103,10 +103,24 @@ toolchain (`<INSTALLDIR>\toolchain\`).
 
 | Artifact | Size | What it is |
 |---|---|---|
-| [`jhyy-installer-4.1.4.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe) | ~54 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
-| [`jhyy-compiler-4.1.4.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-compiler-4.1.4.msi) | ~27 MB | Same payload, no GUI — for enterprise / SCCM distribution |
+| [`jhyy-installer-4.1.4.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe) | ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
+| [`jhyy-compiler-4.1.4.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-compiler-4.1.4.msi) | ~28 MB | Same payload, no GUI — for enterprise / SCCM distribution |
 
 Checksums are published alongside the assets as `SHA256.txt`.
+
+**Package managers** (added with v4.1.4):
+
+```powershell
+# winget (Windows Package Manager)
+winget install JiHuiYiYou.JHYY
+
+# scoop (personal bucket — the Main bucket is a separate decision)
+scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket
+scoop install jhyy
+```
+
+Both install the same Burn bundle that is attached to the GitHub release, and both
+verify its SHA-256 before running it.
 
 **VSCode users**: with the extension installed, `.jhyy` files get a ▶ run button in the
 title bar (`Ctrl+F5`). Opening this repo triggers `.vscode/settings.json`, which adds
@@ -459,8 +473,8 @@ numbers.
 | `artifact_checks.sh` | **19 PASS / 0 FAIL** |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
 | ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.4.exe` | shipped (~54 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
-| `jhyy-compiler-4.1.4.msi` | shipped (~27 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
+| `jhyy-installer-4.1.4.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
+| `jhyy-compiler-4.1.4.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.4.vsix` | shipped (VS Code extension) |
 
 **Changelog** — [`CHANGELOG.md`](CHANGELOG.md) has one line per release; the detailed

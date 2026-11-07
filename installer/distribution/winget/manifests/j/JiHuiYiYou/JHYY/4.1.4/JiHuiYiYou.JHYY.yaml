@@ -6,11 +6,11 @@
 # Package: JiHuiYiYou.JHYY
 # Version: 4.1.4
 #
-# reference manifest, **not yet published to winget-pkgs**。
-# 上游 PR **至今一次都没提过**, 排期表里也**没有这一格** —— v1.5.5 的决策
-# (「写 manifest,实际 publish 推到 v2.x」)随着 v2.x 轴终结而**从未被执行**。
-# ⇒ 本 manifest 已于 2026-11-05 修好并通过本机 `winget validate`(零警告),
-#    提 PR 的前置条件已就绪 —— 缺的只是「什么时候提」(见 FACTS.md § 4.5)。
+# **2026-11-07:已提交上游** —— microsoft/winget-pkgs 的 PR。
+# 这一格排了两年(v1.5.5 的决策「写 manifest,实际 publish 推到 v2.x」随着
+# v2.x 轴终结而**从未被执行**),2026-11-07 随 v4.1.4 一起发出去。
+# ⇒ 本 manifest 已于 2026-11-05 修好(W-203:三件套的类型装反了),
+#    `InstallerSha256` 已按**已发布**的资产回填。
 #
 # ⚠️ 2026-11-05 (W-203):**本文件此前装的是 installer manifest 的内容**
 # (ManifestType: installer)⇒ 真正的 version manifest 反而在

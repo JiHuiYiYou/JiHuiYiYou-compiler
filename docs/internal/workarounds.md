@@ -350,6 +350,7 @@
 | [W-218](#w-218) | RESOLVED | `bump_version.py finalize` 把 winget 的 sha256... |
 | [W-219](#w-219) | RESOLVED | `bump_version.py set` 的「刷 Status... |
 | [W-220](#w-220) | RESOLVED | 变异测试的「产物尺寸」变异点把体积**写死**成 `~55 MB` ⇒ 体积一改就找不到变异点 ⇒... |
+| [W-221](#w-221) | RESOLVED | `bump_version.py finalize` **只**替换占位符的 hash ⇒... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15426,3 +15427,40 @@ needs build-and-test)。
 
 **引用:** `scripts/dev/test_docs_gate_mutations.py`、
 `docs/internal/FACTS.md`（体积的单一真相源）。
+
+<a id="w-221"></a>
+## W-221: `bump_version.py finalize` **只**替换占位符的 hash ⇒ `--artifact` 形同虚设 ⇒ manifest 里躺着**本地构建**的 hash
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改成替换**任何** 64 位十六进制值
+**Filed-by:** 2026-11-07 (v4.1.4 发布之后,给 manifest 回填**已发布**资产时实测)
+**日期:** 2026-11-07
+
+**触发面:** `scripts/dev/bump_version.py` 的 `cmd_finalize`（winget 那段）。
+
+**症状:** v4.1.4 发布之后,把**已发布**的 `jhyy-installer-4.1.4.exe`
+喂给 `finalize --artifact`（这个选项的说明里明确写着「发布出去的资产是
+CI 构建的,本地构建的 hash 未必相同 ⇒ 发版后回填 manifest 请用 --artifact
+指向**已发布**的那个 exe」)⇒ **manifest 里的 hash 没变**,
+仍然是**本地构建**的 `f772c659…`;而已发布的资产是 `cdfcc145…`
+⇒ 提给上游的 PR 会带着一个**错的校验和**出去 ⇒ winget 校验必红。
+
+**根因:** 那段替换的正则是
+`^(\s*InstallerSha256:\s*)<PENDING_SHA>\s*$` —— **只认占位符**
+（64 个 0）。发布前跑一次 `finalize` ⇒ 占位符被填成**本地**的 hash
+⇒ 之后再跑 `finalize --artifact <已发布的>` ⇒ 那个值**不是占位符**了
+⇒ **匹配不上** ⇒ 刷不动。
+
+⇒ 同一个「只认占位符」的毛病,和 **W-218** 是同一段代码的两个面
+（W-218:找错文件;W-221:只填占位符）。
+
+**workaround:** 手改 manifest 里的 hash。
+
+**影响范围:** 第三方包管理上游发布(winget PR 的校验和)。scoop 那份不受影响
+（它的 `"hash"` 字段是**无条件**替换的）。
+
+**失效条件:** 已修 —— 改成替换**任何** 64 位十六进制值（占位符也是它）
+⇒ `finalize --artifact <已发布的 exe>` 现在真的会把 manifest 刷成
+**已发布**资产的 hash ⇒ 与 `--artifact` 这个选项的说明一致了。
+
+**引用:** `scripts/dev/bump_version.py`、
+`installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/4.1.4/`。

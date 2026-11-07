@@ -23,8 +23,8 @@
 
 | 产物 | 体积 |
 |---|---|
-| `jhyy-installer-4.1.4.exe` | ~54 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
-| `jhyy-compiler-4.1.4.msi` | ~27 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
+| `jhyy-installer-4.1.4.exe` | ~55 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
+| `jhyy-compiler-4.1.4.msi` | ~28 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
 | `jhyy-lang-4.1.4.vsix` | VS Code 扩展 |
 
 > ℹ️ **体积是实测的** —— `bump_version.py finalize` 量 `installer/build-artifacts/`
@@ -125,10 +125,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **216** |
+| 条目总数 | **217** |
 | ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 193 / 19 / 3 |
+| RESOLVED / SUPERSEDED / INVALID | 194 / 19 / 3 |
 
 ---
 
@@ -200,13 +200,13 @@
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 —— **不预先落文档**，启动时再领版本号。
 
-### 4.5 第三方包管理上游发布（**未排期**）
+### 4.5 第三方包管理上游发布（**2026-11-07 随 v4.1.4 发出去**）
 
-| 渠道 | 状态（2026-11-05 核对上游） |
+| 渠道 | 状态（2026-11-07） |
 |---|---|
-| winget-pkgs | **从未提交** —— 上游无 `manifests/j/JiHuiYiYou/` 路径 |
-| scoop | **从未提交** —— 上游 `bucket/jhyy.json` 不存在；**将来若发，先走个人 bucket**（`JiHuiYiYou/scoop-bucket`），Main bucket 另议 |
-| 仓内 manifest | **已修好** —— **4.1.1 / 4.1.2 / 4.1.3 三个目录 `winget validate` 零警告通过**；scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt 实测命中。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样）⇒ **提 PR 的前置条件已就绪**，缺的只是「什么时候提」 |
+| winget-pkgs | **PR 已提交**（`JiHuiYiYou/winget-pkgs` 的 `jh-4.1.4` 分支 → microsoft/winget-pkgs）—— manifest 三件套在 `manifests/j/JiHuiYiYou/JHYY/4.1.4/`，`InstallerSha256` 按**已发布**的资产回填。**上游合并前 `winget install` 还装不上** —— winget-pkgs 的自动校验 + CLA 签署由上游处理 |
+| scoop | **个人 bucket 已建**（`JiHuiYiYou/scoop-bucket` 的 `bucket/jhyy.json`）—— 按本仓 2026-11-05 的决定：**先走个人 bucket**，Main bucket 另议（装法：`scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket`） |
+| 仓内 manifest | **已修好 + 已随版发布** —— 4.1.4 的三件套 + scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt 实测命中。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样） |
 
 > ⚠️ 别把这一格跟 § 4.4 的「包管理器」混为一谈 —— § 4.4 说的是**语言层面**的
 > 包管理器（`jhyy new/build/test` + `jhyy.toml`），这一格说的是**发行渠道**。
@@ -215,6 +215,10 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 > 早已终结**（v2.16.0）⇒ 这个决定**从来没被执行**，manifest 就一直躺在仓里当
 > reference；而且它们**还是坏的**（version/installer 装反、scoop 脚本用 `//`
 > 注释）⇒ 台账 **W-203 / W-204**。
+> ⇒ **2026-11-07 补上这一格**：manifest 修好（2026-11-05）→「什么时候提」
+> 等了两个月 → 随 **v4.1.4** 一起把 PR 提了、bucket 建了。
+> ⇒ 顺带挖出并修掉**发版工具自己的三个缺陷**（W-218 / W-219 / W-221）——
+> **都是「提 PR 前最后一次跑发版流程」才暴露的**。
 
 ---
 

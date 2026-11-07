@@ -764,12 +764,22 @@ def cmd_finalize(artifact: str | None = None) -> int:
             n = replace_in_file(
                 wini,
                 [
+                    # ⚠️ 2026-11-07 真修:这里原来**只**替换**占位符**
+                    #   (PENDING_SHA = 64 个 0)⇒ 已经填过一次的真实 hash
+                    #   **永远刷不动** —— 而 `--artifact` 这个选项存在的意义
+                    #   恰恰是「发版后用**已发布**的那个 exe 回填」
+                    #   (发布出去的资产是 CI 构建的,本地构建的 hash 未必相同
+                    #   ⇒ MSI 含时间戳)⇒ 只填占位符 ⇒ `--artifact` 形同虚设。
+                    #   实测:v4.1.4 发布后跑 `finalize --artifact <已发布的 exe>`,
+                    #   winget manifest 里躺着的**还是本地构建的 hash**
+                    #   ⇒ 上游 PR 会带着一个**错的**校验和出去。
+                    #   ⇒ 现在替换**任何** 64 位十六进制值(占位符也是它)。
                     (
-                        r"(?m)^(\s*InstallerSha256:\s*)" + PENDING_SHA + r"\s*$",
+                        r"(?m)^(\s*InstallerSha256:\s*)[0-9a-fA-F]{64}\s*$",
                         r"\g<1>" + digest,
                     ),
                     (
-                        r"jhyy-installer-" + re.escape(version) + r"\.exe => " + PENDING_SHA,
+                        r"jhyy-installer-" + re.escape(version) + r"\.exe => [0-9a-f]{64}",
                         "jhyy-installer-" + version + ".exe => " + digest,
                     ),
                 ],

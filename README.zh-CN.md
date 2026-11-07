@@ -98,10 +98,23 @@ fn main_jhyy() -> i32 {
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| [`jhyy-installer-4.1.4.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe) | ~54 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
-| [`jhyy-compiler-4.1.4.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-compiler-4.1.4.msi) | ~27 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
+| [`jhyy-installer-4.1.4.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe) | ~55 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
+| [`jhyy-compiler-4.1.4.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-compiler-4.1.4.msi) | ~28 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
 
 校验和随产物一起发布在 `SHA256.txt`。
+
+**包管理器**(v4.1.4 起):
+
+```powershell
+# winget(Windows Package Manager)
+winget install JiHuiYiYou.JHYY
+
+# scoop(个人 bucket —— Main bucket 是另一个决定)
+scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket
+scoop install jhyy
+```
+
+两者装的都是 GitHub release 上那个 Burn bundle,装之前都会先校验它的 SHA-256。
 
 **VSCode 用户**:装上扩展后,`.jhyy` 文件标题栏会出现 ▶ 运行按钮(`Ctrl+F5`)。打开本仓库
 会触发 `.vscode/settings.json`,把 `compiler/build/bin` 与 MSYS2 的 ucrt64 路径加进集成
@@ -434,8 +447,8 @@ JiHuiYiYou-compiler/
 | `artifact_checks.sh` | **19 PASS / 0 FAIL** |
 | `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
 | ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.4.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
-| `jhyy-compiler-4.1.4.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
+| `jhyy-installer-4.1.4.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
+| `jhyy-compiler-4.1.4.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.4.vsix` | 已发布(VS Code 扩展) |
 
 **变更日志** —— [`CHANGELOG.md`](CHANGELOG.md) 每版一行;逐轴的详细记录是 v4 的
