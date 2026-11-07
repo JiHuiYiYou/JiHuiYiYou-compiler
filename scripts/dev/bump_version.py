@@ -129,7 +129,18 @@ README_VERSION_SPANS = [
     # 2026-11-04(v4.1.3 发版时实测):「Status (vX.Y.Z)」这个标题的**锚点**也带版本号
     #   ⇒ 徽章与目录里的链接(`#status-v412`)在版本号一变就成了**死锚点**
     #   ⇒ 文档门会报「死锚点」⇒ `set` 必须连它一起刷(否则每次发版都要手改两处)。
-    (r"(#(?:status|状态)-v)\d+\.\d+\.\d+", r"\g<1>{v}"),
+    #
+    # ⚠️ 2026-11-07 真修:锚点里的版本号是**紧凑**的 —— GitHub 的锚点生成规则
+    #   会**去掉点**(`## Status (v4.1.4)` ⇒ 锚点 `#status-v414`),
+    #   而这里的模板写的是 `\d+\.\d+\.\d+` ⇒ **从来没匹配过** ⇒
+    #   每次发版这两处锚点都是死的(2026-11-07 实测:文档门报
+    #   「死锚点 → #status-v413」×4 —— 当年是用手改糊过去的,脚本里那道
+    #   「刷锚点」的模板是**空转**的)。
+    (r"(#(?:status|状态)-v)\d+", r"\g<1>{vc}"),
+    # 2026-11-07:两份 README 开头那句「本页对应 vX.Y.Z / This page describes vX.Y.Z」
+    #   —— 同样带版本号,同样没人刷(徽章刷了、这句话没刷 ⇒ 门面自相矛盾)。
+    (r"(This page describes \*\*v)\d+\.\d+\.\d+(\*\*)", r"\g<1>{v}\g<2>"),
+    (r"(本页对应 \*\*v)\d+\.\d+\.\d+(\*\*)", r"\g<1>{v}\g<2>"),
 ]
 
 # changelog 里新版本段要插在它前面(该文件是**升序**的:最老在前)
@@ -283,6 +294,9 @@ def fingerprints(version: str) -> dict[str, list[str]]:
             (r"jhyy-lang-(\d+\.\d+\.\d+)\.vsix", "扩展名"),
             (r"## (?:Status|状态) \(v(\d+\.\d+\.\d+)\)", "Status 标题"),
             (r"<sub>v(\d+\.\d+\.\d+) — ", "页脚"),
+            # 2026-11-07 补:开头那句「本页对应 vX.Y.Z / This page describes vX.Y.Z」
+            #   —— 徽章刷了、这句话没刷 ⇒ 门面自相矛盾(徽章 v4.1.4、这句话 v4.1.3)。
+            (r"(?:This page describes|本页对应) \*\*v(\d+\.\d+\.\d+)\*\*", "页面自述版本"),
         ):
             scan(path, pat, rel(path) + " " + label, optional=True)
 
@@ -447,7 +461,9 @@ def cmd_set(new: str, *, dry_run: bool = False) -> int:
         for pat, tmpl in README_VERSION_SPANS:
             n = replace_in_file(
                 ROOT / path,
-                [(pat, tmpl.replace("{v}", new).replace("{d}", today))],
+                [(pat, tmpl.replace("{v}", new)
+                          .replace("{vc}", new.replace(".", ""))
+                          .replace("{d}", today))],
             )
             if n:
                 print(f"[bump_version] {rel(path)}: {n} 处（{pat}）")
@@ -582,6 +598,23 @@ def cmd_check() -> int:
         if data and data.get("hash") == PENDING_SHA:
             pending.append(f"{rel(SCOOP_JSON)}: hash 还没回填(finalize)")
 
+    # README 里指向 Status 段的**锚点**必须跟着版本走。
+    #
+    # ⚠️ 2026-11-07 补:锚点里的版本号是**紧凑**的(GitHub 的锚点生成规则去掉点:
+    #   `## Status (v4.1.4)` ⇒ `#status-v414`)⇒ 比的时候要拿**去点**的版本号。
+    #   (此前 `set` 的刷锚点模板写的是带点的形态 ⇒ 从来没匹配过 ⇒ 每次发版
+    #   那 4 处锚点都是死的,靠手改糊过去。)
+    compact = version.replace(".", "")
+    for path, _blabel in README_BADGES:
+        if not path.is_file():
+            continue
+        for m in re.finditer(r"#(?:status|状态)-v(\d+)", read_text(path)):
+            if m.group(1) != compact:
+                problems.append(
+                    f"{rel(path)}: Status 锚点 #{m.group(0)[1:]} 与 VERSION({version}) 不符"
+                    f"(GitHub 的锚点去掉点 ⇒ 应为 #status-v{compact})"
+                )
+
     # winget manifest —— **当前版本必须有一份**。
     #
     # ⚠️ 2026-11-06 真修:此前这段是 `if wini.is_file():` ⇒ 目录不存在就整段
@@ -596,9 +629,21 @@ def cmd_check() -> int:
             f"(bump_version.py set 会从上一版目录整份拷过来)"
         )
     else:
-        m = re.search(r"(?m)^\s*InstallerSha256:\s*(\S+)", read_text(wini))
-        if m and m.group(1) == PENDING_SHA:
-            pending.append(f"{rel(wini)}: InstallerSha256 还没回填(finalize)")
+        # ⚠️ 2026-11-07 真修:占位 hash 在 **installer** manifest 里
+        #   (`.installer.yaml`)—— W-203 把三件套的类型换回来之后,这段还只看
+        #   `.yaml` ⇒ **占位永远看不见** ⇒ 零漂移门对着一个全 0 的 hash 报绿。
+        #   ⇒ 现在扫该版本目录下的**所有** manifest。
+        for wf in sorted(wdir.glob("*.yaml")):
+            m = re.search(r"(?m)^\s*InstallerSha256:\s*(\S+)", read_text(wf))
+            if m and m.group(1) == PENDING_SHA:
+                pending.append(f"{rel(wf)}: InstallerSha256 还没回填(finalize)")
+        # installer manifest 缺失 ⇒ 也是 problem(它才是带 hash 的那份)
+        winst = wdir / "JiHuiYiYou.JHYY.installer.yaml"
+        if not winst.is_file():
+            problems.append(
+                f"{rel(winst)}: 不存在 —— winget 的 installer manifest(带 "
+                f"InstallerSha256 的那份)必须有"
+            )
 
     # release notes 片段:release.yml 的 ${MAIN_CHANGES} 从这儿取 —— 缺了就发不出版
     notes_file = ROOT / RELEASE_NOTES_DIR / f"{version}.md"
@@ -705,24 +750,34 @@ def cmd_finalize(artifact: str | None = None) -> int:
         )
         print(f"[bump_version] {rel(scoop)}: {n} 处")
 
-    # winget
+    # winget —— ⚠️ 2026-11-07 真修:hash 在 **installer** manifest 里
+    #   (`.installer.yaml`),**不在** `.yaml`。
+    #
+    #   W-203(2026-11-05)把三件套的类型换回来之后,这一段还指着旧的 `.yaml`
+    #   ⇒ **hash 永远填不上** —— 实测 `finalize` 报「0 处」,而发布出去的
+    #   manifest 带着全 0 的占位 hash ⇒ winget 校验必红、PR 提不上去。
+    #   ⇒ 现在扫**该版本目录下的所有 manifest**:谁有 `InstallerSha256` 就填谁
+    #   (哪个文件持有那个字段,是 manifest 结构的事,不该由这个脚本硬编码)。
     wdir = ROOT / WINGET_BASE / version
-    wini = wdir / "JiHuiYiYou.JHYY.yaml"
-    if wini.is_file():
-        n = replace_in_file(
-            wini,
-            [
-                (
-                    r"(?m)^(\s*InstallerSha256:\s*)" + PENDING_SHA + r"\s*$",
-                    r"\g<1>" + digest,
-                ),
-                (
-                    r"jhyy-installer-" + re.escape(version) + r"\.exe => " + PENDING_SHA,
-                    "jhyy-installer-" + version + ".exe => " + digest,
-                ),
-            ],
-        )
-        print(f"[bump_version] {rel(wini)}: {n} 处")
+    if wdir.is_dir():
+        for wini in sorted(wdir.glob("*.yaml")):
+            n = replace_in_file(
+                wini,
+                [
+                    (
+                        r"(?m)^(\s*InstallerSha256:\s*)" + PENDING_SHA + r"\s*$",
+                        r"\g<1>" + digest,
+                    ),
+                    (
+                        r"jhyy-installer-" + re.escape(version) + r"\.exe => " + PENDING_SHA,
+                        "jhyy-installer-" + version + ".exe => " + digest,
+                    ),
+                ],
+            )
+            if n:
+                print(f"[bump_version] {rel(wini)}: {n} 处")
+    else:
+        print(f"[bump_version] ⚠ {rel(wdir)} 不存在 —— winget manifest 的 sha256 没回填")
 
     # ── 产物体积:**实测回填**(FACTS.md § 1 + 两份 README)────────────
     #

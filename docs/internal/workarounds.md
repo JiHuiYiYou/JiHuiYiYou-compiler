@@ -347,6 +347,8 @@
 | [W-215](#w-215) | RESOLVED | 发布链的 action 与工具版本**全部浮着** —— 同一个 tag 两次发版可能跑在不同的... |
 | [W-216](#w-216) | SUPERSEDED | 发布产物(MSI / EXE / VSIX)没有**代码签名** |
 | [W-217](#w-217) | INVALID | 「帧大小没算只当目的地的 temp」—— 复核后**不成立**(审计提出的疑点,证据在下面) |
+| [W-218](#w-218) | RESOLVED | `bump_version.py finalize` 把 winget 的 sha256... |
+| [W-219](#w-219) | RESOLVED | `bump_version.py set` 的「刷 Status... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15310,3 +15312,74 @@ WiX 的 `SignTool` 调用、.vsix 的签名、`SHA256.txt` 之后多一份签名
 
 **引用:** `compiler/src0/codegen_amd64_lexer.jhyy`、
 `compiler/src0/codegen_amd64_state.jhyy`。
+
+<a id="w-218"></a>
+## W-218: `bump_version.py finalize` 把 winget 的 sha256 填进了**错的那个文件** ⇒ 发布出去的 manifest 带着全 0 的占位 hash
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改成扫该版本目录下的所有 manifest
+**Filed-by:** 2026-11-07 (v4.1.4 发版时实测)
+**日期:** 2026-11-07
+
+**触发面:** `scripts/dev/bump_version.py` 的 `cmd_finalize`(以及 `cmd_check` 的 pending 检测)。
+
+**症状:** `finalize` 跑完打印
+`JiHuiYiYou.JHYY.yaml: 0 处` —— **一处都没填上**;
+而 `JiHuiYiYou.JHYY.installer.yaml` 里的 `InstallerSha256` 仍是全 0 的占位符
+(`PENDING_SHA` = 64 个 0)⇒ **发布出去的 manifest 带着一个假 hash**
+⇒ winget 的校验必红、上游 PR 根本提不上去。
+
+**根因:** W-203(2026-11-05)把 winget 三件套的类型**换回来**了 ——
+`JiHuiYiYou.JHYY.yaml` 是 **version** manifest,带 `InstallerSha256` 的是
+`JiHuiYiYou.JHYY.installer.yaml`。而 `finalize` / `check` 仍然指着旧的
+`.yaml` ⇒ **对着一个没有 hash 字段的文件找 hash** ⇒ 永远找不到。
+
+⇒ 同一个根因的第二个面:`check` 的 pending 检测也只看 `.yaml`
+⇒ **占位 hash 永远不被报出来** ⇒ 零漂移门对着一个全 0 的 hash 报绿。
+
+**workaround:** 没有 —— 只能手改 manifest 里的 hash。
+
+**影响范围:** 第三方包管理上游发布(winget PR)。scoop 那份走 `jhyy.json`
+(hash 字段在同一个文件里)⇒ 不受影响。
+
+**失效条件:** 已修 —— ① `finalize` 改成扫**该版本目录下的所有 manifest**:
+谁有 `InstallerSha256` 就填谁(哪个文件持有那个字段是 manifest 结构的事,
+不该由这个脚本硬编码);② `check` 的 pending 检测同样扫全部 manifest
+⇒ 占位 hash 现在会被**报出来**(INFO 级,不算红 —— 那是发版流程的正常中间态);
+③ `check` 另外加了一条:installer manifest 缺失 = problem(硬红)。
+
+**引用:** `scripts/dev/bump_version.py`。
+
+<a id="w-219"></a>
+## W-219: `bump_version.py set` 的「刷 Status 锚点」模板写的是**带点**的版本号 ⇒ 从来没匹配过 ⇒ 每次发版那 4 处锚点都是死的
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改成紧凑形态 + 给 `check` 加了锚点检查
+**Filed-by:** 2026-11-07 (v4.1.4 发版时实测 —— 文档门报「死锚点」)
+**日期:** 2026-11-07
+
+**触发面:** `scripts/dev/bump_version.py` 的 `README_VERSION_SPANS`(刷)与
+`cmd_check`(查);`README.md` / `README.zh-CN.md`。
+
+**症状:** v4.1.4 发版时文档门报:
+`README.md: 死锚点 → #status-v413` ×2、`README.zh-CN.md: 死锚点 → #状态-v413` ×2。
+⇒ 徽章(Status 那一颗)与目录里的链接**点不动**。
+
+**根因:** GitHub 的锚点生成规则会**去掉点** ——
+`## Status (v4.1.4)` ⇒ 锚点 `#status-v414`。
+而 `set` 里那道「刷锚点」的模板写的是
+`(#(?:status|状态)-v)\d+\.\d+\.\d+` ⇒ **要求版本号带点**
+⇒ 对着 `#status-v413` 这种**紧凑**形态**永远匹配不上**
+⇒ 2026-11-04(v4.1.3)加这道模板时就是这么写的,**一次都没生效过**
+(那次的锚点是人手改对的 ⇒ 缺陷被掩盖了)。
+
+**workaround:** 每次发版后手改 4 处锚点。
+
+**影响范围:** 两份 README 的「Status」徽章与目录链接。
+
+**失效条件:** 已修 —— ① 模板改成紧凑形态(`{vc}` = 去点的版本号);
+② `check` 里加了一条**锚点检查**:两份 README 里所有 `#status-vNNN` / `#状态-vNNN`
+必须等于去点后的 VERSION ⇒ 以后漂了**当场红**,不用等文档门;
+③ 顺带补上两份 README 开头那句「本页对应 vX.Y.Z / This page describes vX.Y.Z」
+(同样带版本号、同样没人刷 ⇒ 徽章 v4.1.4 而那句话还写着 v4.1.3)
+⇒ 也进 `set` 的刷写表与 `check` 的指纹表。
+
+**引用:** `scripts/dev/bump_version.py`、`README.md`、`README.zh-CN.md`。

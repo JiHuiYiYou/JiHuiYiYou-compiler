@@ -8,16 +8,16 @@
 
 **静态类型 · 表达式导向 · 由自研 amd64 后端编译为原生机器码。**
 
-[![版本](https://img.shields.io/badge/版本-v4.1.3-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
-[![状态](https://img.shields.io/badge/自举-byte--equal-success)](#状态-v413)
+[![版本](https://img.shields.io/badge/版本-v4.1.4-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
+[![状态](https://img.shields.io/badge/自举-byte--equal-success)](#状态-v414)
 [![后端](https://img.shields.io/badge/后端-自研%20amd64-blue)](#架构)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#安装)
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
 [![English](https://img.shields.io/badge/lang-English-red)](README.md)
 
-[这是什么](#这是什么) · [一段代码看语法](#一段代码看语法) · [安装](#安装) · [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [已知限制](#已知限制) · [架构](#架构) · [项目结构](#项目结构) · [状态](#状态-v413) · [路线图](#路线图) · [工具](#工具--集成) · [文档](#文档) · [协议](#协议)
+[这是什么](#这是什么) · [一段代码看语法](#一段代码看语法) · [安装](#安装) · [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [已知限制](#已知限制) · [架构](#架构) · [项目结构](#项目结构) · [状态](#状态-v414) · [路线图](#路线图) · [工具](#工具--集成) · [文档](#文档) · [协议](#协议)
 
-**[English README →](README.md)** ｜ 本页对应 **v4.1.3**;语言规范基线是 **v4.0.0**(锁定于 2026-10-24),v4.1.x 的增量记在 [CHANGELOG.md](CHANGELOG.md)。
+**[English README →](README.md)** ｜ 本页对应 **v4.1.4**;语言规范基线是 **v4.0.0**(锁定于 2026-10-24),v4.1.x 的增量记在 [CHANGELOG.md](CHANGELOG.md)。
 
 **三条读法** —— **想用它** → [安装](#安装) · [快速开始](#快速开始) · [命令行](#命令行) ｜ **想改它** → [CONTRIBUTING.md](CONTRIBUTING.md) ｜ **想读它** → [架构](#架构) · [语言规范](docs/abis/jhyy-lang-spec-v4.0.0.md)
 
@@ -98,8 +98,8 @@ fn main_jhyy() -> i32 {
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| [`jhyy-installer-4.1.3.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.3/jhyy-installer-4.1.3.exe) | ~55 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
-| [`jhyy-compiler-4.1.3.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.3/jhyy-compiler-4.1.3.msi) | ~28 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
+| [`jhyy-installer-4.1.4.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe) | ~54 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
+| [`jhyy-compiler-4.1.4.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-compiler-4.1.4.msi) | ~27 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
 
 校验和随产物一起发布在 `SHA256.txt`。
 
@@ -221,7 +221,7 @@ python regress.py
 # => 279 passed, 20 skipped (299 total)
 ```
 
-这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v413)那张表里)。
+这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v414)那张表里)。
 工具自己报的是 `passed=279/299 failed=0` 与 `skipped=20`:
 
 - **total** —— `compiler/tests/examples/` 下除 `_` 前缀的辅助 fixture 外的每一个
@@ -418,7 +418,7 @@ JiHuiYiYou-compiler/
 
 ---
 
-## 状态 (v4.1.3)
+## 状态 (v4.1.4)
 
 说人话:**回归套件是全绿的** —— 每个可跑的用例都有判定、没有一个失败。编译器编译自己
 得到逐字节相同的结果,workaround 台账里**没有已知未修的编译器 bug**。下面的表是
@@ -434,9 +434,9 @@ JiHuiYiYou-compiler/
 | `artifact_checks.sh` | **19 PASS / 0 FAIL** |
 | `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
 | ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.3.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
-| `jhyy-compiler-4.1.3.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
-| `jhyy-lang-4.1.3.vsix` | 已发布(VS Code 扩展) |
+| `jhyy-installer-4.1.4.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
+| `jhyy-compiler-4.1.4.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
+| `jhyy-lang-4.1.4.vsix` | 已发布(VS Code 扩展) |
 
 **变更日志** —— [`CHANGELOG.md`](CHANGELOG.md) 每版一行;逐轴的详细记录是 v4 的
 umbrella:[`docs/archive/logs/v4/changelog-v4.0.0.md`](docs/archive/logs/v4/changelog-v4.0.0.md)
@@ -506,7 +506,7 @@ v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版
 ### VS Code 扩展
 
 `vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标)+ 原生 ▶ `Run JHYY File`
-(`Ctrl+F5`)+ `Compile JHYY File (no run)` 命令。最近 shipped = `jhyy-lang-4.1.3.vsix`。
+(`Ctrl+F5`)+ `Compile JHYY File (no run)` 命令。最近 shipped = `jhyy-lang-4.1.4.vsix`。
 
 ---
 
@@ -546,4 +546,4 @@ MIT —— 见 [`LICENSE`](LICENSE)。
 
 ---
 
-<sub>v4.1.3 — 2026-11-04 · 版本号自动化(`VERSION` 单一真相源)· 自研 amd64 后端</sub>
+<sub>v4.1.4 — 2026-11-07 · 版本号自动化(`VERSION` 单一真相源)· 自研 amd64 后端</sub>
