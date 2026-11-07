@@ -108,6 +108,12 @@ toolchain (`<INSTALLDIR>\toolchain\`).
 
 Checksums are published alongside the assets as `SHA256.txt`.
 
+⚠️ **The installer is not code-signed.** Windows SmartScreen therefore shows
+*Windows protected your PC* on first run — click **More info → Run anyway**.
+Unsigned binaries also trip third-party antivirus more often than signed ones.
+The MSI meant for enterprise/SCCM distribution is unsigned as well, and some
+organizations' software-distribution policies reject unsigned MSIs outright.
+
 **Package managers** (added with v4.1.4):
 
 ```powershell
