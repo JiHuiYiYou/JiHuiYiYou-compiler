@@ -346,6 +346,7 @@
 | [W-214](#w-214) | SUPERSEDED | 从 **tarball**(无 .git)构建时,字节级漂移检查被跳过且仍然 exit 0 |
 | [W-215](#w-215) | RESOLVED | 发布链的 action 与工具版本**全部浮着** —— 同一个 tag 两次发版可能跑在不同的... |
 | [W-216](#w-216) | SUPERSEDED | 发布产物(MSI / EXE / VSIX)没有**代码签名** |
+| [W-217](#w-217) | INVALID | 「帧大小没算只当目的地的 temp」—— 复核后**不成立**(审计提出的疑点,证据在下面) |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15272,3 +15273,40 @@ DEFERRED(DEFERRED 是「高优待办桶」,放这种条目会灌水、让信号�
 WiX 的 `SignTool` 调用、.vsix 的签名、`SHA256.txt` 之后多一份签名信息)。
 
 **引用:** `installer/build.ps1`、`installer/` 的 WiX 工程。
+
+<a id="w-217"></a>
+## W-217: 「帧大小没算只当目的地的 temp」—— 复核后**不成立**(审计提出的疑点,证据在下面)
+
+**状态:** INVALID since 2026-11-07 (v4.1.4) — 复核后确认帧大小**确实**覆盖了只当目的地的 temp
+**Filed-by:** 2026-11-07 (外部审计的一条疑点 —— 复核后判定为不成立,记下来免得下一个人再查一遍)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` 的 `cg_token_max_temp_id` /
+`cg_compute_global_max_temp` / `cg_state_set_frame_max_temp`。
+
+**审计提出的疑点(原文大意):** 帧大小是按 temp id 的最大值算的,而「只当目的地、
+从不当源」的 temp(例如 `%t9 =w copy 42`)也许没被算进去 ⇒ 那个 temp 的栈槽
+会落在帧外 ⇒ 栈踩踏。审计自己标的把握度是 PLAUSIBLE(没定论)。
+
+**复核结论:不成立。** 证据链:
+
+| # | 事实 | 出处 |
+|---|---|---|
+| 1 | 词法器的契约是「`tok.text` = **整条** QBE IL 指令原文 slice」 | `codegen_amd64_lexer.jhyy` 文件头(T1-a 契约) |
+| 2 | copy token 走 `lex_finish_instr` ⇒ text 含**目的 temp**(`%t9 =w copy 42` 整条) | `codegen_amd64_lexer.jhyy:next_token_copy` |
+| 3 | `cg_token_max_temp_id` 扫的是 token 的 **text** 里的 `%tN` ⇒ 目的 temp **看得见** | `codegen_amd64_state.jhyy` |
+| 4 | `cg_compute_global_max_temp` = 所有 token 的 max ⇒ 含只当目的地的 temp | 同上 |
+| 5 | 帧大小由 `frame_max_temp`(= 上面那个 global max)算出 | `codegen_amd64_run` / `codegen_amd64_run_text` 的 `cg_state_set_frame_max_temp` |
+
+⇒ 「只当目的地」的 temp **照样被计入帧大小**。
+
+**症状:** 无 —— 这条疑点不成立,没有对应的缺陷。
+
+**workaround:** 不适用。
+
+**影响范围:** 无。
+
+**失效条件:** 不适用 —— 判定为误判(INVALID),保留条目作为审计轨迹。
+
+**引用:** `compiler/src0/codegen_amd64_lexer.jhyy`、
+`compiler/src0/codegen_amd64_state.jhyy`。

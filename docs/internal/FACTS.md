@@ -125,10 +125,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **212** |
+| 条目总数 | **213** |
 | ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 190 / 19 / 2 |
+| RESOLVED / SUPERSEDED / INVALID | 190 / 19 / 3 |
 
 ---
 
