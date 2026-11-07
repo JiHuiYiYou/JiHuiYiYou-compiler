@@ -90,6 +90,13 @@ fn std_vec_with_cap(elem_size: i64, cap: i64) -> Vec {
     }
     let bytes = cap * elem_size;
     let buf = malloc(bytes);
+    // 2026-11-07:malloc 失败**必须**查 —— 否则返回 data=NULL 的 Vec,
+    // caller 之后往里写 → **写 NULL 地址 → 进程直接崩**。
+    // (std_vec_grow 一直有这道检查,只有这条路径漏了。)
+    // 退化成空 Vec(cap=0):push 会走 std_vec_grow 重新分配 ⇒ 行为正确。
+    if buf == (0 as *u8) {
+        return std_vec_new(elem_size);
+    }
     let v: Vec = Vec {
         data: buf,
         len:  0 as i64,

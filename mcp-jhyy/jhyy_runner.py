@@ -8,7 +8,7 @@ Public API:
     run_subprocess(args, timeout=600) -> dict
     parse_diagnostics(text)           -> list[str]
     il_diff(file_a, file_b, context=3) -> dict
-    selfhost_check(src, auto_rebuild=False, timeout=600) -> dict
+    selfhost_check(src, timeout=600) -> dict
 """
 import subprocess
 import os
@@ -395,12 +395,15 @@ def _resolve_binary(binary: str) -> str:
 
 
 def selfhost_check(src: str = "compiler/src0/main.jhyy",
-                   timeout: int = 600) -> dict:
-    """一键 v1→v2→v3 byte-equal 验证.
+                   timeout: int = 600, anchor: str = "") -> dict:
+    """一键自举不动点验证(gen1→gen2→gen3 的 .il / .s 逐字节相同).
 
     Args:
         src: 编译源文件 (default compiler/src0/main.jhyy)
         timeout: 每阶段 timeout (秒, default 600)
+        anchor: 链的起点(自举锚点)路径;空 = `compiler/build/bin/jhyy.exe`
+            (仓里 git 跟踪的那个产物)。给别的路径是为了测「锚点缺失 ⇒
+            fail-fast」那条路 —— 不必真的把仓里的产物挪走。
 
     Returns:
         {
@@ -408,54 +411,72 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
             "all_byte_equal": bool,
             "il_sha256": str,             # 共同的 sha256 (byte-equal 时填)
             "binary_chain": [
-                {"stage": "jhyy_v1", "path": "...", "sha256": "...", "duration_sec": 12.3},
-                {"stage": "jhyy_v2", "path": "...", "sha256": "...", "duration_sec": 11.8},
-                {"stage": "jhyy_v3", "path": "...", "sha256": "...", "duration_sec": 12.1},
+                {"stage": "gen1", "path": "...", "sha256": "...", "duration_sec": 12.3},
+                {"stage": "gen2", "path": "...", "sha256": "...", "duration_sec": 11.8},
+                {"stage": "gen3", "path": "...", "sha256": "...", "duration_sec": 12.1},
             ],
             "il_files": {
-                "jhyy_v1.il": "sha256...",
-                "jhyy_v2.il": "sha256...",
-                "jhyy_v3.il": "sha256...",
-                "jhyy_v4.il": "sha256...",   # 4-hop 稳定验证
+                "gen1.il": "sha256...",
+                "gen2.il": "sha256...",
+                "gen3.il": "sha256...",
+                "gen4.il": "sha256...",   # 4-hop 稳定验证
             },
+            "s_files": {...},            # 后端产物(.s)的同名对照
             "early_abort": None | str,
             "duration_sec": float,
         }
     """
     start = time.time()
 
-    # Check binaries exist
-    # W-014 fix (2026-08-12): outputs use _sh_ scratch prefix so pre-stage cleanup
-    # doesn't delete the canonical jhyy_v2.exe / jhyy_v3.exe input binaries.
-    # Before fix: stages 2/3 had input == output (only .exe suffix differs), so
-    # `_safe_remove(output_base + ".exe")` deleted the input → FileNotFoundError
-    # → "Command not found (exit=-1)". Canonical closure binaries committed at
-    # v1.0.0 tag were destroyed on every selfhost_check call. Now outputs go to
-    # scratch files (_sh_vN.exe / _sh_vN.il), leaving canonical binaries intact.
-    chain = [
-        ("jhyy_v1", "compiler/build/bin/jhyy_v1.exe.exe", "compiler/build/bin/_sh_v1"),
-        ("jhyy_v2", "compiler/build/bin/jhyy_v2.exe",     "compiler/build/bin/_sh_v2"),
-        ("jhyy_v3", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v3"),
-        ("jhyy_v4", "compiler/build/bin/jhyy_v3.exe",     "compiler/build/bin/_sh_v4"),  # v4 = v3 编 src 再一次
+    # ⚠️ 2026-11-07 真修(两处,这个工具**从来没能跑过**):
+    #
+    #   ① 链上的二进制**必须真存在**。旧链引用 jhyy_v2.exe / jhyy_v3.exe ——
+    #      这两个文件**既不在仓里、也不由 make 生成**(Makefile 只产
+    #      `jhyy.exe` 与 `jhyy_v1.exe.exe`)⇒ 工具必然在第 2 段以
+    #      "jhyy_v2 not found" 早退。
+    #      改成**自举链**:锚点(jhyy.exe)编 src → gen1;gen1 编 src → gen2;
+    #      gen2 编 src → gen3;gen3 编 src → gen4 ⇒ 比四代的产物
+    #      ⇒ 这才是真正的「不动点」判据(与 Makefile 的自举闭环门、
+    #      fixed_point.sh 同一判据),而且**只需要仓里就有的那个锚点**。
+    #
+    #   ② **.il 默认不落盘** —— in-mem self-backend 默认不写 .il
+    #      (要 JHY_WRITE_IL=1 才写,见 codegen_amd64_inmem.jhyy 文件头)
+    #      ⇒ 旧实现去找 .il 必然找不到("IL not found after compile")。
+    #      现在显式设 JHY_WRITE_IL=1。
+    #
+    # 顺带:.s 一直落盘 ⇒ 顺手也比一下 .s(后端产物逐字节相同 = 更强)。
+    anchor_path = _resolve_path(anchor) if anchor else _resolve_path(
+        "compiler/build/bin/jhyy.exe")
+    scratch = [
+        ("gen1", "compiler/build/bin/_sh_v1"),
+        ("gen2", "compiler/build/bin/_sh_v2"),
+        ("gen3", "compiler/build/bin/_sh_v3"),
+        ("gen4", "compiler/build/bin/_sh_v4"),
     ]
     src_abs = _resolve_path(src)
 
     binary_chain_out = []
     il_files = {}
+    s_files = {}
+    # 第 1 段的输入 = 锚点;之后每一段用上一段自己编出来的 .exe。
+    prev_exe = anchor_path
 
-    # Stage 1: jhyy_v1 → v1.il
-    for i, (stage, exe_rel, output_rel) in enumerate(chain):
+    # 自举链:anchor → gen1 → gen2 → gen3 → gen4
+    for i, (stage, output_rel) in enumerate(scratch):
         # Use absolute paths for subprocess (MSYS2 Python + Windows subprocess doesn't resolve rel paths)
-        exe_path = _resolve_path(exe_rel)
         output_base = _resolve_path(output_rel)
+        # 本段的输入二进制 = 上一段自己编出来的 .exe;第 1 段用锚点。
+        exe_path = prev_exe
         if not os.path.exists(exe_path):
             return {
                 "ok": False, "all_byte_equal": False,
                 "il_sha256": None,
                 "binary_chain": binary_chain_out,
                 "il_files": il_files,
-                "early_abort": f"{stage} not found at {exe_path}. "
-                               f"Run with auto_rebuild=True, or first build it manually.",
+                "s_files": s_files,
+                "early_abort": f"{stage} input binary not found at {exe_path}. "
+                               f"Build the compiler first (`make` in the repo root), "
+                               f"then run jhyy_selfhost_check again.",
                 "duration_sec": round(time.time() - start, 2),
             }
         # Sprint mcp-2 (A): pre-stage cleanup. Previous selfhost_check run may have
@@ -463,10 +484,14 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
         # ld.exe open-write then fails with PermissionError. Remove + retry on lock.
         _safe_remove(output_base + ".exe")
         _safe_remove(output_base + ".il")
+        _safe_remove(output_base + ".s")
         stage_start = time.time()
         # compile src → output_base (jhyy.exe adds .il suffix automatically per memory)
+        #
+        # ⚠️ JHY_WRITE_IL=1 是**必须**的:in-mem self-backend 默认**不落 .il**
+        #   (见 codegen_amd64_inmem.jhyy 文件头)⇒ 不设它就永远找不到 .il。
         cmd = [exe_path, "compile", src_abs, "-o", output_base]
-        r = _run_cmd(cmd, timeout=timeout)
+        r = _run_cmd(cmd, timeout=timeout, extra_env={"JHY_WRITE_IL": "1"})
         stage_dur = round(time.time() - stage_start, 2)
         if not r["ok"]:
             return {
@@ -474,6 +499,7 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
                 "il_sha256": None,
                 "binary_chain": binary_chain_out,
                 "il_files": il_files,
+                "s_files": s_files,
                 "early_abort": f"{stage} compile failed (exit={r['exit_code']}): {r['stderr'][-200:]}",
                 "duration_sec": round(time.time() - start, 2),
             }
@@ -484,23 +510,21 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
         if not os.path.exists(il_candidate):
             il_candidate = output_base + ".il.il"
         if not os.path.exists(il_candidate):
-            # Search build/bin for matching prefix
-            build_bin = str(JHYY_ROOT / "compiler/build/bin")
-            candidates = [f for f in os.listdir(build_bin)
-                          if f.startswith(os.path.basename(output_base)) and f.endswith(".il")]
-            if candidates:
-                il_candidate = str(JHYY_ROOT / "compiler/build/bin" / candidates[0])
-            else:
-                return {
-                    "ok": False, "all_byte_equal": False,
-                    "il_sha256": None,
-                    "binary_chain": binary_chain_out,
-                    "il_files": il_files,
-                    "early_abort": f"{stage} IL not found after compile (looked at {output_base}.il)",
-                    "duration_sec": round(time.time() - start, 2),
-                }
+            return {
+                "ok": False, "all_byte_equal": False,
+                "il_sha256": None,
+                "binary_chain": binary_chain_out,
+                "il_files": il_files,
+                "s_files": s_files,
+                "early_abort": f"{stage} IL not found after compile (looked at {output_base}.il)",
+                "duration_sec": round(time.time() - start, 2),
+            }
         il_sha = _sha256_file(il_candidate)
         il_files[f"{stage}.il"] = il_sha
+        # .s 一直落盘(后端产物)⇒ 顺手也比一下,比 .il 更强。
+        s_candidate = output_base + ".s"
+        if os.path.exists(s_candidate):
+            s_files[f"{stage}.s"] = _sha256_file(s_candidate)
         binary_chain_out.append({
             "stage": stage,
             "binary_path": exe_path,
@@ -509,15 +533,20 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
             "il_sha256": il_sha,
             "duration_sec": stage_dur,
         })
+        # 下一段用本段编出来的编译器当输入 —— 这就是自举链。
+        prev_exe = output_base + ".exe"
 
-    # Check byte-equal: all 4 ILs same sha
+    # Check byte-equal: all ILs (and all .s) same sha
     unique_shas = set(il_files.values())
-    all_byte_equal = len(unique_shas) == 1
-    common_sha = next(iter(unique_shas)) if all_byte_equal else None
+    il_equal = len(unique_shas) == 1
+    unique_s_shas = set(s_files.values()) if s_files else set()
+    s_equal = (len(unique_s_shas) == 1) if s_files else True
+    all_byte_equal = il_equal and s_equal
+    common_sha = next(iter(unique_shas)) if il_equal else None
 
     # W-014 cleanup: remove scratch _sh_vN.exe + _sh_vN.il + .s (ld.exe also emits .s).
-    # Keep canonical jhyy_vN.exe (committed at v1.0.0) untouched.
-    for stage, _, output_rel in chain:
+    # 锚点 jhyy.exe 与 make 生成的 jhyy_v1.exe.exe **不动**。
+    for _, output_rel in scratch:
         for ext in (".exe", ".il", ".s"):
             _safe_remove(_resolve_path(output_rel) + ext, retries=2, delay_ms=200)
 
@@ -527,9 +556,12 @@ def selfhost_check(src: str = "compiler/src0/main.jhyy",
         "il_sha256": common_sha,
         "binary_chain": binary_chain_out,
         "il_files": il_files,
+        "s_files": s_files,
         "early_abort": None if all_byte_equal else (
-            f"IL files NOT byte-equal! Unique shas: " +
-            ", ".join(f"{k}={v[:16]}..." for k, v in il_files.items())
+            f"产物 NOT byte-equal! IL: " +
+            ", ".join(f"{k}={v[:16]}..." for k, v in il_files.items()) +
+            (" | .s: " + ", ".join(f"{k}={v[:16]}..." for k, v in s_files.items())
+             if not s_equal else "")
         ),
         "duration_sec": round(time.time() - start, 2),
     }

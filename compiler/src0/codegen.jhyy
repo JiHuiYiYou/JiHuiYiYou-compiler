@@ -2392,9 +2392,13 @@ fn cg_match_pattern(cg_raw: *u8, matched: IRVal, pattern: *Node, match_type: *u8
     // parse_pattern_primary extension (W-NNN follow-up):
     //   - lo = NODE_PATTERN_LIT (parse_pattern TOKEN_INT/BOOL/CHAR/MINUS arm)
     //   - hi = NODE_INT         (parse_pattern_primary extension)
-    // Both emitted as `copy N` with matched.qbe_type. IDENT range (`x..y`) goes
-    // lo=NODE_PATTERN_IDENT which has no value resolution path — fall through
-    // to cmp=1 accept-all (preexisting behavior, no test exercises it).
+    // Both emitted as `copy N` with matched.qbe_type.
+    //
+    // ⚠️ 2026-11-07:IDENT 端点(`x..y`)现在由**解析器**编译期拒绝
+    //   ("range pattern endpoints must be literals")⇒ 下面的
+    //   `unsupported ⇒ cmp=1 accept-all` 兜底**已经不可达**。
+    //   保留它只是防御性的(万一将来有新形态漏过解析器,宁可接受一切
+    //   也不能编出半个比较);但那条路已经关上了。
     if pk == NODE_PATTERN_RANGE() {
         let pr = node_pattern_range_data(pattern) as *NodePatternRange;
         let mut qt: i32 = matched.qbe_type;

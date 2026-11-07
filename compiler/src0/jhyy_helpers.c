@@ -955,6 +955,46 @@ __attribute__((used)) int jh_mktemp_ascii(const char *tag, char *out, int out_ca
     return -1;
 }
 
+/* 2026-11-07:jh_mktemp_ascii_sfx —— 建一个**带后缀**的唯一临时路径,
+ * 且磁盘上那个被独占创建出来的文件**就是**这个带后缀的文件。
+ *
+ * ⚠️ 为什么不能沿用「先建 .tmp 再改路径字符串」(旧做法):
+ *   jh_mktemp_ascii 用 CREATE_NEW **真的在磁盘上建了**一个
+ *   `jh<tag><hash>.tmp`;旧代码(jhyy 侧的 main.jhyy 与本文件的
+ *   jh_build_icon_obj)只把**路径字符串**的尾巴改成 `.s`/`.exe`/
+ *   `.ico`/`.rc`/`.o`
+ *   ⇒ 那个 `.tmp` 文件**从此没人管** ⇒ 每次编译漏 5 个
+ *     (main.jhyy 2 个:temp_asm/temp_exe;jh_build_icon_obj 3 个)
+ *   ⇒ 实测 %TEMP% 里堆了 **118150** 个 `jh*.tmp`(全是本仓产物,
+ *     占 TEMP 目录 12 万个文件)。
+ *
+ * 修法:建完 `.tmp` 之后**改名**成最终名字 ⇒
+ *   ① 独占创建的语义不变(名字仍由内核 CREATE_NEW 保证唯一,W-123
+ *      那条并发修复不受影响);
+ *   ② 磁盘上不再留孤儿 `.tmp` —— 那个文件**变成**最终文件,随后
+ *      被调用方正常使用(gcc 写 .s/.exe、windres 写 .o)或删除。
+ */
+__attribute__((used)) int jh_mktemp_ascii_sfx(const char *tag, const char *suffix,
+                                              char *out, int out_cap) {
+    char tmp[1024];
+    char fin[1024];
+    if (!tag || !suffix || !out || out_cap <= 0) return -1;
+    if (jh_mktemp_ascii(tag, tmp, (int)sizeof(tmp)) != 0) return -1;
+    size_t n = strlen(tmp);
+    if (n + 1 > sizeof(fin)) { DeleteFileA(tmp); return -1; }
+    memcpy(fin, tmp, n + 1);
+    if (jh_set_tmp_suffix(fin, suffix) != 0) { DeleteFileA(tmp); return -1; }
+    /* tmp → fin:同一目录内的改名(同目录必同卷 ⇒ 不需要 COPY_ALLOWED) */
+    if (!MoveFileExA(tmp, fin, MOVEFILE_REPLACE_EXISTING)) {
+        DeleteFileA(tmp);
+        return -1;
+    }
+    size_t fn = strlen(fin);
+    if ((int)fn >= out_cap) { DeleteFileA(fin); return -1; }
+    memcpy(out, fin, fn + 1);
+    return 0;
+}
+
 __attribute__((used)) int jh_file_copy(const char *src, const char *dst) {
     wchar_t wsrc[MAX_PATH], wdst[MAX_PATH];
     if (!MultiByteToWideChar(CP_ACP, 0, src, -1, wsrc, MAX_PATH)) return -1;
@@ -1799,18 +1839,14 @@ __attribute__((used)) int jh_build_icon_obj(char *out_obj, int out_cap) {
     }
 
     char tmp_ico[1024], tmp_rc[1024], tmp_obj[1024];
-    if (jh_mktemp_ascii("i", tmp_ico, (int)sizeof(tmp_ico)) != 0) return -1;
-    if (jh_mktemp_ascii("r", tmp_rc, (int)sizeof(tmp_rc)) != 0) {
+    /* 2026-11-07:用 jh_mktemp_ascii_sfx —— 建出来的**就是**带后缀的文件,
+     * 磁盘上不留孤儿 `.tmp`(旧做法每次编译漏 3 个,见该函数的注释)。 */
+    if (jh_mktemp_ascii_sfx("i", ".ico", tmp_ico, (int)sizeof(tmp_ico)) != 0) return -1;
+    if (jh_mktemp_ascii_sfx("r", ".rc", tmp_rc, (int)sizeof(tmp_rc)) != 0) {
         DeleteFileA(tmp_ico); return -1;
     }
-    if (jh_mktemp_ascii("o", tmp_obj, (int)sizeof(tmp_obj)) != 0) {
+    if (jh_mktemp_ascii_sfx("o", ".o", tmp_obj, (int)sizeof(tmp_obj)) != 0) {
         DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); return -1;
-    }
-    if (jh_set_tmp_suffix(tmp_ico, ".ico") != 0 ||
-        jh_set_tmp_suffix(tmp_rc, ".rc") != 0 ||
-        jh_set_tmp_suffix(tmp_obj, ".o") != 0) {
-        DeleteFileA(tmp_ico); DeleteFileA(tmp_rc); DeleteFileA(tmp_obj);
-        return -1;
     }
     /* ① windres 的路径必须是正斜杠(见上面的约束 ①) */
     jh_path_to_fwd(tmp_ico);

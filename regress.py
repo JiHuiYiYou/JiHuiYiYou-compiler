@@ -145,6 +145,13 @@ _SYSV_TEST_NAMES = (
     #   SysV  :整数/浮点是**两个独立 bank**(rdi..r9 / xmm0..xmm7 各自编号)
     # 值只取决于函数体,不取决于实参落在哪个寄存器 ⇒ 两个目标都必须过。
     "sysv_mixed_int_float.jhyy",
+    # 2026-11-07:浮点**栈实参**的回归门 —— 9 个 f64 实参 ⇒ SysV 下
+    # xmm0-7 用完,第 9 个浮点实参**落栈**⇒ 盖住「caller 写栈 + callee 读栈」
+    # 这条路径(它原先借 %xmm15 中转,而 SysV 的 XMM8-15 是 callee-saved ⇒
+    # 改坏 %xmm15 就是 ABI 违规;Win 侧 XMM 全易失 ⇒ 只有 SysV 会坏)。
+    # 本地实测(docker gcc:12):amd64_sysv_freestanding 下 EXIT=255,与
+    # //EXPECT:255 一致。
+    "xmm_pressure_9args.jhyy",
 )
 
 # v2.8.3: docker CLI absolute path fallback (跟 feedback_gh_cli_path 同 pattern)。

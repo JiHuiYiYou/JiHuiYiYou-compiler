@@ -333,6 +333,19 @@
 | [W-202](#w-202) | RESOLVED | `ast_new_expr_stmt` 的**文件名参数传成了节点指针** ⇒... |
 | [W-203](#w-203) | RESOLVED | winget 三件套**装反了** + 旧 schema 字段 ⇒ `winget... |
 | [W-204](#w-204) | RESOLVED | scoop manifest 的脚本用 `//` 注释 ⇒ **PowerShell... |
+| [W-205](#w-205) | RESOLVED | 调用点的实参上限写死 16 ⇒ 第 17 个及以后的实参被**静默丢弃**(20 个参数的求和算出... |
+| [W-205.1](#w-205.1) | RESOLVED | 给 CGState 加字段忘了在 `cg_state_init` 里清零 ⇒... |
+| [W-206](#w-206) | RESOLVED | SysV 路径的**整数/浮点栈实参**没有 outgoing 区 ⇒... |
+| [W-207](#w-207) | RESOLVED | 浮点栈实参借 `%xmm15` 中转 ⇒ SysV 的 XMM8-15 是... |
+| [W-208](#w-208) | RESOLVED | 临时文件**孤儿** —— 每次编译漏 5 个 `%TEMP%\jh*.tmp`(实测堆了 11... |
+| [W-209](#w-209) | RESOLVED | `std_vec_with_cap` 不检查 `malloc` ⇒ 返回 `data =... |
+| [W-210](#w-210) | RESOLVED | 范围模式(`x..y`)端点写标识符 ⇒ (1) 绑定的符号名字变成 `..` (2) 整个... |
+| [W-211](#w-211) | RESOLVED | MCP 的 `jhyy_selfhost_check` **从来没能跑过** ——... |
+| [W-212](#w-212) | RESOLVED | MCP 的 `jhyy://changelog` 资源指向一个**空目录** ⇒ 一直返回 "No... |
+| [W-213](#w-213) | SUPERSEDED | 编译器 C 辅助层的 **POSIX 分支链不上**(`jh_mktemp_ascii` /... |
+| [W-214](#w-214) | SUPERSEDED | 从 **tarball**(无 .git)构建时,字节级漂移检查被跳过且仍然 exit 0 |
+| [W-215](#w-215) | RESOLVED | 发布链的 action 与工具版本**全部浮着** —— 同一个 tag 两次发版可能跑在不同的... |
+| [W-216](#w-216) | SUPERSEDED | 发布产物(MSI / EXE / VSIX)没有**代码签名** |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -14858,3 +14871,402 @@ ast_new_expr_stmt((*p).arena, ex, (*ex).loc_line, (*ex).loc_col, ex)
 的正则已对着**线上** tags 页与 SHA256.txt 实测命中 ✓。
 
 **引用:** `installer/distribution/scoop/jhyy.json`、`installer/GUIDS.md`(GUID 的定义)。
+
+<a id="w-205"></a>
+## W-205: 调用点的实参上限写死 16 ⇒ 第 17 个及以后的实参被**静默丢弃**(20 个参数的求和算出 117,正确值 210)
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 上限改成按需扩容;装不下时响亮失败
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/codegen_amd64_emit_call.jhyy` 的 `emit_amd64_arg_regs`。
+
+**症状:** 一个 20 个 i32 参数的函数,`sum20(1..20)` 算出来是 **117**(正确值 210),
+**Win 与 SysV 都错**,**零诊断**。汇编层的形态:caller 只写了 12 个栈实参,
+callee 却按自己的形参表读 16 个 ⇒ 后 4 个实参读到的是调用者栈上的垃圾。
+
+**根因:** 实参解析循环的退出条件写的是 `parsed_n < 16` ⇒ 第 17 个及以后的实参
+**直接被跳过**;而实参数组(`arg_qts_arr` / `arg_temps_arr`)也是固定 16 格。
+这是 v2.13.0 时代「最多 16 个实参」假设的残留 —— QBE 早没了,假设留下了。
+
+**workaround:** 用户侧只能把参数个数压到 <= 16(且没有任何提示)。
+
+**影响范围:** 任何实参超过 16 个的调用 —— 结果**错**、无告警。参数越多错得越离谱。
+
+**失效条件:** 已修 —— (1) 实参数组改成**按需扩容**(`arena_alloc` + `memcpy`,容量翻倍);
+(2) 解析循环的退出条件改成「扫完整个实参区」;
+(3)「解析出来的个数 != 文本里的个数」时**记下来**,编译末尾**响亮失败**
+(`cg_mark_call_args_overflow` / `cg_state_get_call_args_overflow`),
+而不是像从前那样 `min(parsed_n, nargs)` 静默截断(那会让后面的实参整体错位)。
+回归门:`compiler/tests/examples/many_args_20.jhyy`(EXPECT: 210)。
+
+**引用:** `compiler/src0/codegen_amd64_emit_call.jhyy`、
+`compiler/src0/codegen_amd64_state.jhyy`、`compiler/src0/codegen_amd64.jhyy`、
+`compiler/src0/codegen_amd64_inmem.jhyy`。
+
+<a id="w-205.1"></a>
+## W-205.1: 给 CGState 加字段忘了在 `cg_state_init` 里清零 ⇒ 编译末尾那道闸读**未初始化堆内存**
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — `cg_state_init` 里补上清零,并把纪律写进注释
+**Filed-by:** 2026-11-07 (修 W-205 时自己踩到)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/codegen_amd64_state.jhyy` 的 `cg_state_init`。
+
+**症状:** W-205 那道「响亮失败」闸在 **10 个完全合法的回归用例**上误报
+(报 "a call has arguments the emitter cannot represent"),而那些文件里
+**一个 call 都没有** ⇒ 闸根本没被写过,是**未初始化的堆内存**把它点着了。
+现象依赖内存布局 ⇒ 「单跑必绿、全量里随机红」。
+
+**根因:** `CGState` 是 `malloc(768)` 拿的**未初始化**堆块(不是 calloc、也不是
+memset)⇒ 新加的粘滞标志字段带着**上一块堆的残留**。`cg_state_init` 是
+**逐字段**赋值的 ⇒ 忘了加新字段,它就一直是垃圾。
+
+**workaround:** 没有 —— 只能靠「别加新字段」(不可能)。
+
+**影响范围:** 任何给 CGState 加字段的改动 ⇒ 新字段的初值不确定。
+
+**失效条件:** 已修 —— `cg_state_init` 里补 `(*s).call_args_overflow = 0 as i32;`
+并在注释里写明纪律:**给 CGState 加字段 ⇒ 同一个函数里必须同步 init**。
+(台账里同族的坑:`temp_table_overflow` / `holds_bitmap_overflow` / `rc_violation`
+当初都各自踩过一次。)
+
+**引用:** `compiler/src0/codegen_amd64_state.jhyy`。
+
+<a id="w-206"></a>
+## W-206: SysV 路径的**整数/浮点栈实参**没有 outgoing 区 ⇒ 栈实参写进调用者自己帧的最底部
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — SysV 分支按栈实参个数 `subq` 预留
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/codegen_amd64_emit_call.jhyy` 的 `emit_call`(SysV 分支)。
+
+**症状:** 一个 14 个参数的调用把调用者的 3 个活值全毁 ⇒ 程序算出**错值**
+(实测 EXIT=6,期望 1139),**零诊断**。
+
+**根因:** SysV 没有 shadow space,但**落栈实参仍然要占栈**。SysV 分支此前
+**只**给 MEMORY class 实参(W-104)预留 outgoing 区,**整数/浮点溢出到栈的
+那条路径完全不 `subq`** ⇒ 栈实参写在 `[rsp+0..]` ⇒ 那正是**调用者自己帧的
+最底部**(帧是 prologue 的 `subq $N, %rsp` 划出来的)⇒ **踩掉调用者的活跃局部变量**。
+注释里写着「stack args written at [rsp+0..] = [rbp+16..]」—— 描述的是 **callee**
+怎么读,没意识到 caller 那一侧压根没给这块栈留位置。
+
+**workaround:** 用户侧只能让所有调用的参数个数 <= 6(SysV 整数寄存器数)。
+
+**影响范围:** SysV 目标上参数超过 6 个的调用 ⇒ 调用者的局部变量被踩。
+
+**失效条件:** 已修 —— SysV 分支按 `max(0, nargs - 6)` 个栈实参估算 outgoing 区
+(`align16(stack_ub * 8)`),与 MEMORY 那条**相加**(相加在任何组合下都安全)。
+
+**引用:** `compiler/src0/codegen_amd64_emit_call.jhyy`。
+
+<a id="w-207"></a>
+## W-207: 浮点栈实参借 `%xmm15` 中转 ⇒ SysV 的 XMM8-15 是 callee-saved ⇒ **ABI 违规**
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改用整数 scratch(%r10 / %rax)搬原始比特
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/codegen_amd64_xmm_argalloc.jhyy` 的 `emit_stack_arg_push`
+(caller 侧)与 `compiler/src0/codegen_amd64_emit_call.jhyy` 的 `emit_copy`
+(callee 侧读栈上的浮点实参)。
+
+**症状:** Win 上完全看不出来(XMM 在 MS x64 里全是易失的)⇒ **Win 永远绿**;
+SysV 上 XMM8-15 是 **callee-saved(非易失)** ⇒ 我们编出来的函数在自己的
+prologue 里**写坏 %xmm15** ⇒ 它的调用者(gcc 编的 C 代码等)留在 %xmm15
+里的值被毁 ⇒ **ABI 违规**。触发面:SysV 下第 9 个及以后的浮点实参落栈。
+
+**根因:** x86 没有 mem->mem 的 SSE 传送,借一个寄存器中转是必须的 —— 但借的
+是 `%xmm15`,而它恰好在 SysV 的 callee-saved 集合里。
+
+**workaround:** 用户侧只能让每个函数的浮点实参 <= 8 个(SysV)。
+
+**影响范围:** SysV 目标上浮点实参 >= 9 个的函数 ⇒ 调用者(gcc / FFI 代码)的
+XMM15 被毁。
+
+**失效条件:** 已修 —— 改用**整数 scratch** 搬**原始比特**:f64 搬 8 字节
+(`movq`)、f32 搬 4 字节(`movl`),caller 侧用 `%r10`(两套 ABI 都易失)、
+callee 侧用 `%rax`。与 `movsd` / `movss` 搬的是同一批字节(IEEE 位模式)⇒
+语义等价。回归门:`compiler/tests/examples/xmm_pressure_9args.jhyy`
+(Win 与 SysV 两条路都跑;已加进 CI 的 SysV 名单)。
+
+**引用:** `compiler/src0/codegen_amd64_xmm_argalloc.jhyy`、
+`compiler/src0/codegen_amd64_emit_call.jhyy`、`.github/workflows/ci.yml`。
+
+<a id="w-208"></a>
+## W-208: 临时文件**孤儿** —— 每次编译漏 5 个 `%TEMP%\jh*.tmp`(实测堆了 11 万多个)
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 建出来就改名成最终名字,磁盘上不留 `.tmp`
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `jh_mktemp_ascii` /
+`jh_build_icon_obj`,以及 `compiler/src0/main.jhyy` 的 `link_with_gcc`。
+
+**症状:** `%TEMP%` 里堆了 **118150** 个 `jh<tag><8hex>.tmp`(全是 0 字节),
+把用户的临时目录塞满(118150 个文件 ⇒ 目录枚举慢到 `ls` 超时)。
+
+**根因:** `jh_mktemp_ascii` 用 `CREATE_NEW` **真的在磁盘上建**了一个
+`jh<tag><hash>.tmp`(那是 W-123 的并发修复:名字由内核保证唯一);而调用方
+(jhyy 侧的 `main.jhyy` 与 C 侧的 `jh_build_icon_obj`)**只把路径字符串**的
+尾巴改成 `.s` / `.exe` / `.ico` / `.rc` / `.o` ⇒ 那个 `.tmp` 文件**从此没人管**。
+每次编译漏 5 个(2 + 3)。
+
+**workaround:** 定期手工删 `%TEMP%\jh*.tmp`。
+
+**影响范围:** 每一次编译;长跑 CI / 批量编译的机器上尤其明显。
+
+**失效条件:** 已修 —— 新增 `jh_mktemp_ascii_sfx(tag, suffix, out, cap)`:
+建完 `.tmp` 之后**改名**(MoveFileExA)成最终名字 ⇒ (1) 独占创建的语义不变
+(W-123 不受影响);(2) 磁盘上不再留孤儿 —— 那个文件**变成**最终文件,随后
+被调用方正常使用或删除。顺带:链接失败路径也把 `temp_exe` 删掉。
+
+**引用:** `compiler/src0/jhyy_helpers.c`、`compiler/src0/main.jhyy`。
+
+<a id="w-209"></a>
+## W-209: `std_vec_with_cap` 不检查 `malloc` ⇒ 返回 `data = NULL` 的 Vec ⇒ 之后写 NULL 崩溃
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — OOM 时退化成空 Vec(cap=0)
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/std/vec.jhyy` 的 `std_vec_with_cap`。
+
+**症状:** 分配失败时返回一个 `data = NULL` 的 Vec;caller 之后 `push` →
+`std_vec_grow` 会先判 `cur_cap`(请求值,非 0)⇒ **不重新分配** ⇒
+直接往 NULL 写 ⇒ **写 NULL 地址 → 进程崩**。
+
+**根因:** 同文件的 `std_vec_grow` 一直有 `malloc` 失败检查,只有这条路径漏了。
+
+**workaround:** 没有。
+
+**影响范围:** 内存吃紧时的 Vec 预分配。
+
+**失效条件:** 已修 —— `malloc` 返回 NULL 时返回 `std_vec_new(elem_size)`
+(空 Vec,`cap = 0`)⇒ 后续 `push` 会走 `std_vec_grow` 正常分配。
+
+**引用:** `compiler/src0/std/vec.jhyy`。
+
+<a id="w-210"></a>
+## W-210: 范围模式(`x..y`)端点写标识符 ⇒ (1) 绑定的符号名字变成 `..` (2) 整个 arm 被编成「接受一切」
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 解析器编译期拒绝标识符端点
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/parser.jhyy` 的 `parse_pattern`(ident 分支)与
+`parse_pattern_primary`(ident 分支);`compiler/src0/codegen.jhyy` 的
+`cg_match_pattern`(NODE_PATTERN_RANGE 分支)。
+
+**症状(两个,都是「静默」):**
+
+| # | 现象 |
+|---|---|
+| (1) | `match x { lo..hi => … }` 往作用域里塞了一个**名字叫 `..`** 的符号 —— 因为 `parser_match(p, TOKEN_DOTDOT(), &t)` 会 advance 并把 `t` **覆盖成 DOTDOT token**,而 `lo_name` 是在它**之后**取的 ⇒ arm body 里写原变量名 → 未定义 |
+| (2) | codegen 对标识符端点没有取值路径 ⇒ 整个 arm 被编成 `cmp = 1`(**接受一切**)⇒ 匹配语义**完全错**、**零诊断** |
+
+**根因:** (1) 是 `parser_match` 的副作用(它会写回 `t`)没被注意;
+(2) 是 codegen 的一条兜底分支(`unsupported` ⇒ `cmp = 1` accept-all)——
+「不支持就接受一切」是**静默错语义**的最坏兜底。
+
+**workaround:** 没有 —— 用户写标识符端点时得到的是「匹配一切」。
+
+**影响范围:** 用了标识符端点的 match arm(语言规范只举了字面量端点的例子)。
+
+**失效条件:** 已修 —— 解析器**编译期拒绝**:报错
+`range pattern endpoints must be literals (identifier endpoints are not supported)`
+(与既有的 `nested pattern is not supported` 同一处理原则:
+**一个响亮的编译错误远好过静默的错误语义**)。
+回归门:`compiler/tests/examples/err_match_range_ident.jhyy`。
+
+**引用:** `compiler/src0/parser.jhyy`、`compiler/src0/codegen.jhyy`。
+
+<a id="w-211"></a>
+## W-211: MCP 的 `jhyy_selfhost_check` **从来没能跑过** —— 链引用不存在的二进制 + `.il` 默认不落盘
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改成自举链(anchor → gen1 → gen2 → …)+ 显式 `JHY_WRITE_IL=1`
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `mcp-jhyy/jhyy_runner.py` 的 `selfhost_check`。
+
+**症状(两处独立的致命伤):**
+
+| # | 现象 |
+|---|---|
+| (1) | 链上是 `jhyy_v1.exe.exe` / `jhyy_v2.exe` / `jhyy_v3.exe` —— 后两个**既不在仓里、也不由 make 生成**(Makefile 只产 `jhyy.exe` 与 `jhyy_v1.exe.exe`)⇒ 工具必然在第 2 段以 "not found" 早退 |
+| (2) | 工具去找 `<out>.il` —— 而 **in-mem self-backend 默认不落 `.il`**(要 `JHY_WRITE_IL=1` 才写,见 `codegen_amd64_inmem.jhyy` 文件头)⇒ 第 1 段就会以 "IL not found after compile" 早退 |
+
+另外,早退消息里让人「Run with auto_rebuild=True」—— 而 `selfhost_check`
+**根本没有这个参数**(签名是 `selfhost_check(src, timeout=600)`)⇒
+照着做的人什么也做不了。
+
+**workaround:** 用 `compiler/tests/bootstrap/fixed_point.sh`(它自己会
+设 `JHY_WRITE_IL=1`,而且链是对的)。
+
+**影响范围:** 用 MCP 验自举闭环的人 —— 这个工具**一次也没成功过**。
+
+**失效条件:** 已修 —— (1) 链改成**自举链**:锚点(`compiler/build/bin/jhyy.exe`)
+编 src → gen1;gen1 编 src → gen2;gen2 编 src → gen3;gen3 编 src → gen4
+⇒ 比四代的 `.il`(顺带比 `.s`)⇒ 这才是真正的「不动点」判据,
+与 Makefile 的自举闭环门、`fixed_point.sh` 同一口径,且**只需要仓里就有的锚点**;
+(2) 显式设 `JHY_WRITE_IL=1`;(3) 早退消息改成「先跑 `make`」。
+
+**引用:** `mcp-jhyy/jhyy_runner.py`、`mcp-jhyy/server.py`。
+
+<a id="w-212"></a>
+## W-212: MCP 的 `jhyy://changelog` 资源指向一个**空目录** ⇒ 一直返回 "No changelog files found."
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 改成读仓根 CHANGELOG.md + 最新的分轴归档日志
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `mcp-jhyy/server.py` 的 `jhyy_changelog`。
+
+**症状:** 资源永远返回 "No changelog files found." —— 它 glob 的是
+`docs/changelog-*.md`,而**更新日志在仓根 `CHANGELOG.md`**,分轴的详细日志在
+`docs/archive/logs/v*/changelog-v*.md` ⇒ `docs/` 底下从来没有 `changelog-*.md`。
+
+**workaround:** 直接读仓根 `CHANGELOG.md`。
+
+**影响范围:** 通过 MCP 问「最近改了什么」的人。
+
+**失效条件:** 已修 —— 先给仓根 `CHANGELOG.md`(发布表 + 变更槽 = 当前事实),
+再附上最新的分轴归档日志(`docs/archive/logs/v*/changelog-v*.md` 里版本号最大的那份)。
+
+**引用:** `mcp-jhyy/server.py`。
+
+<a id="w-213"></a>
+## W-213: 编译器 C 辅助层的 **POSIX 分支链不上**(`jh_mktemp_ascii` / `jh_run_get_output` 是 `_WIN32` 独有)
+
+**状态:** SUPERSEDED closed 2026-11-07 (v4.1.4) — 不是待修的 bug:发布物只有 Windows PE,POSIX 分支是死代码
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `compiler/src0/jhyy_helpers.c` 的 `#ifdef _WIN32` / `#else` 分界。
+
+**症状:** `jhyy_helpers.c` 里有一整块 POSIX 分支(`jh_run` 用 `system()`),
+但 `jh_mktemp_ascii`、`jh_run_get_output` 这些**只在 `_WIN32` 块里**有定义
+⇒ 在 Linux 上编这个辅助层 ⇒ **链接期报 undefined reference**。
+(另一处语义差:`system()` 返回的是 wait status,不是退出码 ⇒ 与 Windows 分支不同。)
+
+**根因:** 这些分支是 `#ifdef _WIN32` 的**对称写法**,从来**没有被编译过**
+—— CI 里也没有编它(SysV 目标是从 Windows 侧 jhyy.exe 交叉编出 `.s`,
+再在 ubuntu-latest 上用 gcc 链 crt0.S + link.ld;那条链**不碰** jhyy_helpers.c)。
+
+**workaround:** 没有 —— 想在 Linux 上编编译器这条路根本走不通。
+
+**影响范围:** 只影响「在 Linux 上编 jhyy 编译器」这个**本仓不支持**的场景;
+**不影响**任何已发布的产物(发布物是 Windows PE;`amd64_sysv*` 目标是从
+Windows 交叉编出来的)。
+
+**失效条件:** 不适用 —— 见下面的 not-a-bug。
+
+**not-a-bug:** 本仓的发布物只有 Windows PE(.exe + MSI);`amd64_sysv*` 目标
+不需要在 Linux 上编编译器(交叉编 `.s` 即可)⇒ POSIX 分支是**死代码**,
+留着只是 `#ifdef` 的对称写法 ⇒ 记在这里,免得有人以为「在 Linux 上编 jhyy」
+是受支持的路径。
+
+**引用:** `compiler/src0/jhyy_helpers.c`、`compiler/src0/main.jhyy`。
+
+<a id="w-214"></a>
+## W-214: 从 **tarball**(无 .git)构建时,字节级漂移检查被跳过且仍然 exit 0
+
+**状态:** SUPERSEDED closed 2026-11-07 (v4.1.4) — 不是待修的 bug:发布链在 git 工作树里跑,漂移检查照常生效
+**Filed-by:** 2026-11-07 (外部审计 + 自查)
+**日期:** 2026-11-07
+
+**触发面:** `Makefile` 的 `jhyy.exe` 规则(STRICT_TOOLCHAIN 那段的三态判定)。
+
+**症状:** `make` 在一个**没有 .git 元数据**的目录里(例如从 GitHub codeload
+解出来的 tarball)⇒ 字节级漂移检查「没有参照物」⇒ **跳过**,make 照常 exit 0。
+
+**根因:** 那道检查比的是「现编产物 vs **提交进仓的那份**」⇒ 需要 git 元数据
+才知道参照物是谁。Makefile 的注释里写得很清楚:「若要一条 tarball 也拦得住的
+判据,那得随 tarball 分发一份 manifest(提交态的 sha 清单)—— 本仓目前没有
+⇒ 记在这里,别假装有。」
+
+**workaround:** 想在 tarball 里也验漂移 ⇒ 自己 `sha256sum` 对一下
+`compiler/build/bin/jhyy.exe`(tarball 里带着提交态的那份)。
+
+**影响范围:** 只影响「从 tarball 自己编」的人;**不影响发布** ——
+release.yml 在 **git 工作树**里跑 ⇒ 那道检查照常生效(`release-anchor` 门
+另外还比了**行为**,与 host gcc 无关)。
+
+**失效条件:** 不适用 —— 见下面的 not-a-bug。
+
+**not-a-bug:** 发布链(release.yml)在 git checkout 里跑 ⇒ 漂移检查 + 行为级
+的 release-anchor 双双生效;tarball 那条路自带**提交态的 jhyy.exe**
+⇒ 自举闭环门(迭代到不动点)照样跑 ⇒ 「编译器能不能把自己编成同一个东西」
+这条最强的判据在 tarball 里**仍然有效**。缺的只是「现编产物 == 提交态那份」
+这一层。
+
+**引用:** `Makefile`。
+
+<a id="w-215"></a>
+## W-215: 发布链的 action 与工具版本**全部浮着** —— 同一个 tag 两次发版可能跑在不同的 action / SDK / 打包器上
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — action 钉到 commit SHA;.NET SDK / WiX / vsce 钉到确定版本
+**Filed-by:** 2026-11-07 (外部审计)
+**日期:** 2026-11-07
+
+**触发面:** `.github/workflows/ci.yml`、`.github/workflows/release.yml`。
+
+**症状:** 发布链里所有第三方件都是**浮动**的:
+
+| 件 | 修之前 |
+|---|---|
+| `actions/checkout` / `download-artifact` / `upload-artifact` / `setup-dotnet` / `setup-node` / `setup-python` / `msys2/setup-msys2` / `softprops/action-gh-release` | `@v4` / `@v5` / `@v2` —— 浮动 tag |
+| .NET SDK | `dotnet-version: 8.x` —— 浮动 |
+| WiX | `dotnet tool install --global wix` —— 浮动(下一个 major/minor) |
+| vsce | `npm install -g @vscode/vsce` —— 浮动 |
+
+⇒ 同一个 tag 发两次,可能跑在**不同的 action 代码 / 不同的 SDK / 不同的打包器**上
+⇒ 「昨天能发今天发不了」这类故障**无法复现、无法归因**;
+⇒ 上游任何一个 tag 被移动(或包被撤版),都会**在发版那一刻**改掉产物。
+
+**根因:** 写 workflow 时按「方便」写了 tag 而不是 SHA —— 这是 GitHub 官方文档
+里最常见的写法,不是笔误。
+
+**workaround:** 发版前人工核对工具版本(靠人记,不可靠)。
+
+**影响范围:** 发布链(CI 与 release 两个 workflow)。
+
+**失效条件:** 已修 ——
+(1) 8 个 action 全部钉到 **commit SHA**(用 GitHub API 按 tag 解析出来的,
+带 `# v4` 注释留人看);
+(2) .NET SDK 钉 `8.0.427`(当前最新的 8.0.x);
+(3) WiX 钉 `--version 7.0.1`(当前 latest);vsce 钉 `@4.1.0`(当前 latest)
+—— 三个都是**当前 latest** ⇒ 行为与 pin 之前**逐字相同**,只是不再浮动。
+
+**引用:** `.github/workflows/ci.yml`、`.github/workflows/release.yml`。
+
+<a id="w-216"></a>
+## W-216: 发布产物(MSI / EXE / VSIX)没有**代码签名**
+
+**状态:** SUPERSEDED closed 2026-11-07 (v4.1.4) — 需要一张真实签名证书(外部依赖),本仓自己解决不了
+**Filed-by:** 2026-11-07 (外部审计)
+**日期:** 2026-11-07
+
+**触发面:** `installer/` 的 WiX 产物与 `vscode-ext/` 的 `.vsix`。
+
+**症状:** 用户装出来的 EXE / MSI **没有 Authenticode 签名** ⇒ Windows SmartScreen
+会拦(「未知发布者」),杀毒软件误报率也更高。
+
+**根因:** 签名需要一张**真实的**代码签名证书(OV / EV)+ 私钥 + 签发机构的
+审核流程 —— 那是**外部依赖**,不是仓里能造出来的东西。
+
+**workaround:** 没有 —— 只能让用户手动放行。
+
+**影响范围:** 装机的第一道摩擦(不是功能缺陷)。
+
+**失效条件:** 不适用 —— 见下面的 not-a-bug。
+
+**not-a-bug:** 这不是「仓里能修但没修」的 bug,而是**外部依赖不可控**
+(证书要花钱、要审核、要保管私钥)⇒ 按台账的登记规范归 SUPERSEDED 而不是
+DEFERRED(DEFERRED 是「高优待办桶」,放这种条目会灌水、让信号失效)。
+⇒ 证书到位时另开一条 DEFERRED/ACTIVE 跟进(需要:证书接入 CI 的 secret、
+WiX 的 `SignTool` 调用、.vsix 的签名、`SHA256.txt` 之后多一份签名信息)。
+
+**引用:** `installer/build.ps1`、`installer/` 的 WiX 工程。

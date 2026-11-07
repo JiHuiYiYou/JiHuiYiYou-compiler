@@ -216,11 +216,13 @@ fn int_reg_name_win_narrow(idx: i32) -> *u8 {
 // 自增 stack_arg_offset(8-byte aligned)。
 //
 // emit 序列(以 f64 为例):
-//   movsd <src_off>(%rbp), %xmm15
-//   movsd %xmm15, <stack_off>(%rsp)
+//   movq <src_off>(%rbp), %r10
+//   movq %r10, <stack_off>(%rsp)
 // 其中 stack_off 是 caller frame 内的字节偏移(Win: 32+ ; SysV: 0+)
 // 第 1 个 stack arg = 0/32,第 2 个 = 8/40,第 3 个 = 16/48,...
 // 注:src_off 已经带符号(负数表示 caller 栈帧里);直接 emit,不要 prepend "-"。
+// ⚠️ 2026-11-07:浮点栈实参**不再借 %xmm15 中转** —— SysV 的 XMM8-15 是
+//    callee-saved,我们在自己身上写坏 %xmm15 就是 ABI 违规(详见下面注释)。
 fn emit_stack_arg_push(state: *u8, qt: i32, src_off: i64) -> i32 {
     let cg = state as *CGState;
     let arena = (*cg).arena;
@@ -230,16 +232,40 @@ fn emit_stack_arg_push(state: *u8, qt: i32, src_off: i64) -> i32 {
     // W-104 MEMORY class:字母 'm'(109)按 **8 字节**推(MEMORY slot 是 8 字节粒度)
     let is_wide = if qt == (109 as i32) { 1 as i32 } else { qbe_is_wide(qt) };
     if is_float != (0 as i32) {
-        // f32 → movss, f64 → movsd
-        let suffix = if qt == (115 as i32) { "ss" as *u8 } else { "sd" as *u8 };
+        // f32 → movl(4 字节),f64 → movq(8 字节)
+        //
+        // ⚠️ 2026-11-07 真修:**不再用 %xmm15 做中转**。
+        //
+        //   旧做法:`movsd src(%rbp), %xmm15` + `movsd %xmm15, dst(%rsp)`。
+        //   x86 没有 mem→mem 的 SSE 传送,所以必须借一个寄存器中转 —— 旧代码
+        //   借的是 %xmm15。
+        //
+        //   为什么 %xmm15 不行:SysV amd64 ABI 里 **XMM8–XMM15 是
+        //   callee-saved(非易失)** —— 被调用方**必须**保住它们。
+        //   我们编出来的函数在**自己身上**把 %xmm15 写坏了 ⇒ 它的调用者
+        //   (比如 gcc 编的 C 代码)留在 %xmm15 里的值被毁 ⇒ **ABI 违规**。
+        //   (Win x64 里 XMM 全是易失的,所以 Win 侧看不出问题 —— 正是
+        //   「Win 绿、SysV 悄悄坏」的那一类。)
+        //
+        //   改成用 **%r10**(整数 scratch,两套 ABI 都列为 caller-saved)
+        //   搬**原始比特**:f64 搬 8 字节、f32 搬 4 字节。
+        //   `movq src(%rbp), %r10` 与 `movsd src(%rbp), %xmm15` 搬的是
+        //   **同一批字节**(IEEE 位模式原样搬)⇒ 语义完全等价。
+        //   整数路径本来就在用 %r10 ⇒ 两边统一。
+        let suffix = if qt == (115 as i32) { "l" as *u8 } else { "q" as *u8 };
+        let reg = if qt == (115 as i32) { "%r10d" as *u8 } else { "%r10" as *u8 };
         let _a = sb_append_cstr(arena, s, "\tmov" as *u8);
         let _b = sb_append_cstr(arena, s, suffix);
         let _c = sb_append_cstr(arena, s, " " as *u8);
         let _d = sb_appendf_lld(arena, s, "%lld" as *u8, src_off);
-        let _e = sb_append_cstr(arena, s, "(%rbp), %xmm15\n" as *u8);
+        let _e = sb_append_cstr(arena, s, "(%rbp), " as *u8);
+        let _e2 = sb_append_cstr(arena, s, reg);
+        let _e3 = sb_append_cstr(arena, s, "\n" as *u8);
         let _f = sb_append_cstr(arena, s, "\tmov" as *u8);
         let _g = sb_append_cstr(arena, s, suffix);
-        let _h = sb_append_cstr(arena, s, " %xmm15, " as *u8);
+        let _h = sb_append_cstr(arena, s, " " as *u8);
+        let _h2 = sb_append_cstr(arena, s, reg);
+        let _h3 = sb_append_cstr(arena, s, ", " as *u8);
         let _i = sb_appendf_lld(arena, s, "%lld" as *u8, stack_off);
         let _j = sb_append_cstr(arena, s, "(%rsp)\n" as *u8);
     } else if is_wide != (0 as i32) {

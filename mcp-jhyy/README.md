@@ -78,7 +78,7 @@ print(compile_and_run('compiler/tests/examples/hello.jhyy'))"
 |---|---|
 | `jhyy_regress` | 跑回归，返回 PASS/FAIL 列表 |
 | `jhyy_il_diff` | 两个 `.il` 的 byte-equal 检查 + 上下文 diff |
-| `jhyy_selfhost_check` | 一键自举闭环验证（v1→v2→v3→v4） |
+| `jhyy_selfhost_check` | 一键自举不动点验证（锚点 → gen1 → gen2 → gen3 → gen4 的 .il/.s 逐字节相同） |
 
 ### 查询
 

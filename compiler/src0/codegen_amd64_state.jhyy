@@ -309,6 +309,30 @@ type CGState = struct {
     rc_allocated:  i64,   // 实际分配到寄存器的 temp 数(统计用)
     rc_violation:  i32,   // 粘滞错误标志:分配了寄存器的 temp 被按**栈槽**访问
                           // ⇒ 漏改的 emit 调用点 ⇒ **编译失败**(不产出错代码)
+    // 2026-11-06:调用点实参「装不下」的粘滞标志。
+    //
+    // 实参解析(emit_call)只认 "<qt> %tN" 这一种形态;认不出的实参(比如全局
+    // 符号的地址 " $name")会让「解析出来的个数」少于「文本里的个数」⇒
+    // 之前是**静默截断**(后面的实参错位、值错,零诊断)。
+    // 现在这里记下来 ⇒ 编译末尾**响亮失败**(一个响亮的失败远好过静默的错代码)。
+    call_args_overflow: i32,
+}
+
+// cg_mark_call_args_overflow — 调用点的实参装不下 ⇒ 静默截断会产出错代码
+//   ⇒ 记下来 + 打一次 ⇒ 编译末尾由 codegen_amd64*.jhyy 检查并失败。
+fn cg_mark_call_args_overflow(state: *u8) -> i32 {
+    let s = state as *CGState;
+    if (*s).call_args_overflow == (0 as i32) {
+        (*s).call_args_overflow = 1 as i32;
+        jh_fputs_stderr("jhyy error: a call has arguments the emitter cannot represent -- refusing to emit silently-wrong code" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+    }
+    return 0 as i32;
+}
+
+// cg_state_get_call_args_overflow — 编译末尾闸读它。
+fn cg_state_get_call_args_overflow(state: *u8) -> i32 {
+    return ((state as *CGState)).call_args_overflow;
 }
 
 // v2.11.5 (W-074.7 alloc-tracking 真修): extern bridge 装当前 CGState 的
@@ -617,6 +641,15 @@ fn cg_state_init(state: *u8, out: *u8, arena: *u8, fn_name: *u8) -> i32 {
     (*s).rc_global_max = -(1 as i64);
     (*s).rc_allocated = 0 as i64;
     (*s).rc_violation = 0 as i32;
+    // 2026-11-06:调用点实参装不下的粘滞标志 —— **必须在这里清 0**。
+    //
+    // ⚠️ 漏 init 的后果(实测踩过):CGState 是 `malloc(768)` 拿的**未初始化**
+    //   堆块(不是 calloc、不是 memset)⇒ 新加的字段带着**上一块堆的残留**
+    //   ⇒ 编译末尾那道闸读到的不是"本次编译出的错",而是**随机垃圾**
+    //   ⇒ 闸在**完全合法的文件**上误报(实测 10 个回归用例集体变红,而那些
+    //   文件里**一个 call 都没有** ⇒ 闸根本没被写过,是残留值把它点着了)。
+    //   ⇒ 教训:**给 CGState 加字段 ⇒ 同一个函数里必须同步 init**。
+    (*s).call_args_overflow = 0 as i32;
     // v2.11.5 helper wire C-side static (forward ref-safe helper call):
     let _wr = cg_state_set_temp_slots(state);
     // v2.11.6 (W-074.7 big_test link error 真修 — scope DOWN):alloc block-name

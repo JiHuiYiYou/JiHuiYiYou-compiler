@@ -1,7 +1,13 @@
 """test_selfhost_check.py — smoke test for jhyy_selfhost_check tool.
 
-注意: selfhost_check 端到端跑 v1→v2→v3 (3 次编译, ~30 秒). smoke test 只验证
+注意: selfhost_check 端到端跑自举链(4 次编译, ~60 秒). smoke test 只验证
 fail-fast 路径 (binary 缺失 + 错误 src) 不验证全链路, 全链路留给 regress / 手动跑.
+
+2026-11-07:链改了 —— 旧链引用 `jhyy_v2.exe` / `jhyy_v3.exe`,而这两个文件
+**既不在仓里、也不由 make 生成** ⇒ 工具从来没能跑过(W-211)。现在链是
+「锚点 → gen1 → gen2 → gen3 → gen4」,锚点默认 `compiler/build/bin/jhyy.exe`。
+⇒ 「锚点缺失 ⇒ fail-fast」这条改用 `anchor` 参数指向一个不存在的路径来测 ——
+**不用再真的把仓里的产物挪走**(那会动到 git 跟踪的文件)。
 
 Sprint mcp-1 (2026-08-11).
 """
@@ -15,38 +21,29 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_selfhost_check_fail_fast_missing_binary(mcp_client):
-    """jhyy_v1.exe 缺失 → fail-fast + clear error."""
-    # Setup: rename jhyy_v1.exe.exe 临时避开
-    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy_v1.exe.exe")
-    backup = bin_path + ".test_backup"
-    renamed = False
-    if os.path.exists(bin_path):
-        os.rename(bin_path, backup)
-        renamed = True
-
-    try:
-        result = await mcp_client.call_tool(
-            "jhyy_selfhost_check",
-            {"src": "compiler/src0/main.jhyy"},
-        )
-        data = result.data
-        assert data["ok"] is False
-        assert data["all_byte_equal"] is False
-        assert data["early_abort"] is not None
-        assert "jhyy_v1" in data["early_abort"] or "not found" in data["early_abort"]
-        assert data["binary_chain"] == []
-        assert data["il_files"] == {}
-    finally:
-        if renamed and os.path.exists(backup):
-            os.rename(backup, bin_path)
+    """锚点缺失 → fail-fast + clear error."""
+    result = await mcp_client.call_tool(
+        "jhyy_selfhost_check",
+        {
+            "src": "compiler/src0/main.jhyy",
+            "anchor": "compiler/build/bin/_definitely_missing_anchor.exe",
+        },
+    )
+    data = result.data
+    assert data["ok"] is False
+    assert data["all_byte_equal"] is False
+    assert data["early_abort"] is not None
+    assert "not found" in data["early_abort"]
+    assert data["binary_chain"] == []
+    assert data["il_files"] == {}
 
 
 @pytest.mark.asyncio
 async def test_selfhost_check_result_schema(mcp_client):
     """完整跑 (跳过 missing-binary 测试) 验证 schema 字段."""
-    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy_v1.exe.exe")
+    bin_path = str(Path(__file__).resolve().parents[2] / "compiler/build/bin/jhyy.exe")
     if not os.path.exists(bin_path):
-        pytest.skip("jhyy_v1.exe.exe not built — skip end-to-end schema test")
+        pytest.skip("jhyy.exe not built — skip end-to-end schema test")
 
     # Use _repro_t0.jhyy which is known to work (per memory project_v1_0_0_closure).
     repro_src = str(Path(__file__).resolve().parents[2] / "compiler/tests/examples/_repro_t0.jhyy")

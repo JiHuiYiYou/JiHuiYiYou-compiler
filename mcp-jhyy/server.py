@@ -6,13 +6,13 @@
   - jhyy_compile         编译 .jhyy 文件
   - jhyy_run             编译并运行
   - jhyy_check           仅做语法/语义检查
-  - jhyy_get_il          获取 QBE IL 输出
+  - jhyy_get_il          获取 JHYY IL 输出(自写后端的 IR 文本)
   - jhyy_lang_ref        查询语言规范
   - jhyy_abi_info        查询 ABI 信息
   - jhyy_format          代码格式化 (简单对齐 / 占位)
   - jhyy_regress         跑 regress (Sprint mcp-1, 替代 Bash regress.py)
   - jhyy_il_diff         diff 两个 .il 文件 (Sprint mcp-1, 替代 sha256sum + diff)
-  - jhyy_selfhost_check  v1→v2→v3 byte-equal 验证 (Sprint mcp-1, 替代 ~30 行 bash)
+  - jhyy_selfhost_check  自举不动点验证 (anchor→gen1→gen2→… 逐字节相同)
   - jhyy_workarounds     搜 workarounds.md (Sprint mcp-1, 替代 grep workarounds.md)
 
 提供 4 个资源:
@@ -52,7 +52,7 @@ Routing (intent → tool):
 - run / test / verify behavior → jhyy_run
 - syntax / lint / "is this valid" → jhyy_check
 - compile only (no run) → jhyy_compile
-- show QBE IL / debug codegen → jhyy_get_il
+- show the IL / debug codegen → jhyy_get_il
 - "does JHYY support X" / syntax questions → jhyy_lang_ref
 - ABI / struct passing / FFI / calling convention → jhyy_abi_info
 - format code → jhyy_format
@@ -152,21 +152,25 @@ def jhyy_check(file: str) -> dict:
 
 @mcp.tool
 def jhyy_get_il(file: str) -> dict:
-    """Compile a .jhyy file and return the generated QBE IL text inline.
+    """Compile a .jhyy file and return the generated IL text inline.
 
     USE THIS WHEN debugging the codegen or understanding what the compiler emits.
-    Triggers: "show the IL", "what does codegen produce", "show the QBE output",
+    Triggers: "show the IL", "what does codegen produce", "show the IL output",
               "debug codegen", "what IL does this generate", "show the assembly backend",
               "read the .il file" (for files in compiler/build/bin/).
 
-    The returned `il` field contains the full QBE IL text — analyze it directly,
+    ⚠️ 这个 IL 是 **JHYY 自己的 IR 文本**(借用了 QBE 的*语法*),QBE 早在
+    v4.0.0 就从编译器里移除了 —— 现在的后端是自写的(codegen_amd64_*.jhyy)。
+    看到 "QBE IL" 这个说法请当过时表述读。
+
+    The returned `il` field contains the full IL text — analyze it directly,
     do NOT try to cat the .il file via Bash.
 
     Args:
         file: 源文件路径
 
     Returns:
-        {ok, exit_code, il: "QBE IL 全文", il_file: "IL 文件路径"}
+        {ok, exit_code, il: "IL 全文", il_file: "IL 文件路径"}
     """
     return runner.get_il(file)
 
@@ -328,7 +332,7 @@ def jhyy_regress(
 
 @mcp.tool
 def jhyy_il_diff(file_a: str, file_b: str, context: int = 3) -> dict:
-    """Diff two QBE .il files for byte-equality and structural changes.
+    """Diff two .il files (JHYY 自写后端的 IR) for byte-equality and structural changes.
 
     USE THIS WHEN comparing compiler output (Stage 1 / Stage 2 byte-equal verification).
     Triggers: "diff .il", "compare IL", "byte-equal check",
@@ -353,33 +357,40 @@ def jhyy_il_diff(file_a: str, file_b: str, context: int = 3) -> dict:
 def jhyy_selfhost_check(
     src: str = "compiler/src0/main.jhyy",
     timeout: int = 600,
+    anchor: str = "",
 ) -> dict:
-    """Run the v1→v2→v3→v4 byte-equal self-hosting closure chain.
+    """Run the self-hosting closure chain (anchor→gen1→gen2→gen3→gen4 byte-equal).
 
     USE THIS WHEN verifying that the self-hosting closure still holds after a change.
     Triggers: "verify selfhost", "check closure", "is self-hosting still working",
               "v1 v2 v3 byte-equal", "run the closure check", "byte-equal 还稳吗",
               "自举闭环还在吗".
 
-    Missing binary fails fast with a clear error (per Plan agent risk analysis:
-    auto-rebuild masks phantom binary traps).
+    The chain starts from the committed anchor (`compiler/build/bin/jhyy.exe`) and
+    feeds each generation's own output into the next stage, so it needs **no**
+    pre-existing v2/v3 binaries (there are none — `make` only produces `jhyy.exe`
+    and `jhyy_v1.exe.exe`).  Missing anchor fails fast with a clear error
+    (per Plan agent risk analysis: auto-rebuild masks phantom binary traps).
     改了 src0 想重新验证 ⇒ 先跑 `make`(它自己就做闭环 + 刷新 jhyy_v1.exe.exe),
     再调本工具。
 
     Args:
         src: 编译源文件 (default compiler/src0/main.jhyy)
         timeout: 每阶段 timeout (秒, default 600 = 10 分钟)
+        anchor: 链的起点(自举锚点)路径;空 = `compiler/build/bin/jhyy.exe`。
+            指向一个不存在的路径即可验「锚点缺失 ⇒ fail-fast」。
 
     Returns:
         {ok, all_byte_equal, il_sha256 | None,
          binary_chain: [{stage, binary_path, binary_sha256, il_path, il_sha256, duration_sec}],
          il_files: {stage.il: sha256},
+         s_files: {stage.s: sha256},
          early_abort | None,
          duration_sec}
 
     比手写 ~30 行 bash chain 好: 一键, 失败 fail-fast + 列出失败阶段, 不用手动循环.
     """
-    return runner.selfhost_check(src, timeout)
+    return runner.selfhost_check(src, timeout, anchor)
 
 
 @mcp.tool
@@ -473,13 +484,30 @@ def jhyy_examples() -> str:
 
 @mcp.resource("jhyy://changelog")
 def jhyy_changelog() -> str:
-    """JHYY 更新日志。"""
-    docs_dir = JHYY_ROOT / "docs"
-    # Find latest changelog
-    changelogs = sorted(docs_dir.glob("changelog-*.md"), reverse=True) if docs_dir.exists() else []
-    if not changelogs:
-        return "No changelog files found."
-    return changelogs[0].read_text(encoding="utf-8", errors="replace")
+    """JHYY 更新日志(仓根 CHANGELOG.md + 最新的分轴归档日志)。"""
+    # ⚠️ 2026-11-07 真修:旧的 glob 是 `docs/changelog-*.md` —— **这个目录下从来
+    #   没有这种文件**(更新日志在**仓根** `CHANGELOG.md`;分轴的详细日志在
+    #   `docs/archive/logs/v*/changelog-v*.md`)⇒ 这个资源**一直**返回
+    #   "No changelog files found."(一个永远答不出问题的资源)。
+    #   现在:先给仓根 CHANGELOG.md(发布表 + 变更槽 = 当前事实),
+    #   再附上最新的分轴归档日志(细节记录)。
+    parts = []
+    root_cl = JHYY_ROOT / "CHANGELOG.md"
+    if root_cl.exists():
+        parts.append(root_cl.read_text(encoding="utf-8", errors="replace"))
+    else:
+        parts.append("No CHANGELOG.md found at the repository root.")
+    logs_dir = JHYY_ROOT / "docs" / "archive" / "logs"
+    candidates = sorted(logs_dir.glob("v*/changelog-v*.md")) if logs_dir.exists() else []
+    if candidates:
+        latest = candidates[-1]
+        try:
+            rel = latest.relative_to(JHYY_ROOT)
+        except ValueError:
+            rel = latest
+        parts.append(f"\n\n---\n\n# 分轴详细日志:{rel}\n\n"
+                     + latest.read_text(encoding="utf-8", errors="replace"))
+    return "".join(parts)
 
 
 # ========== Entry point ==========

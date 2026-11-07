@@ -1,0 +1,24 @@
+// 2026-11-07:范围模式(`a..b`)的端点写成了**标识符** —— 编译期必须报错。
+//
+// 修前的两种毛病(都是「静默」):
+//   ① parse_pattern 里 `parser_match(p, TOKEN_DOTDOT(), &t)` 会把 t
+//      **覆盖成 DOTDOT token**,而 lo_name 是在它**之后**取的
+//      ⇒ 模式往作用域里塞了一个名字叫 **".."** 的符号
+//      (arm body 里写原变量名 → 未定义)。
+//   ② codegen 对标识符端点没有取值路径 ⇒ 整个 arm 被编成
+//      **cmp=1(接受一切)** ⇒ 匹配语义**完全错**、**零诊断**。
+//
+// 现在:解析器直接报「range pattern endpoints must be literals」。
+// 一个响亮的编译错误远好过静默的错误语义。
+//
+// EXPECT-ERROR: "range pattern endpoints must be literals"
+fn main_jhyy() -> i32 {
+    let x: i32 = 5;
+    let lo: i32 = 1;
+    let hi: i32 = 10;
+    match x {
+        lo..hi => 1,
+        _ => 0,
+    }
+    return 1;
+}

@@ -103,10 +103,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup MSYS2 + toolchain
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           update: true
@@ -322,19 +322,24 @@ jobs:
         shell: msys2 {0}
         run: |
           # gate: sysv-emit
-          # 这 6 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
+          # 这 8 个测试在 windows-latest 上**跑不了**:link 出来的是 Win PE,
           # 要验 SysV ABI 得用 `runtime/linux_elf/crt0.S` + `link.ld` 链成 ELF。
           # 而 regress.py 的 `--cross=auto` 在 CI 上探测不到能用的环境
           # (windows-latest 没有 Docker daemon,gcc:12 也没有 windows manifest)
-          # → 6 个测试永远 SKIP,`_sysv_failed == 0` 就算通过。
+          # → 8 个测试永远 SKIP,`_sysv_failed == 0` 就算通过。
           #
           # 拆成两段:本 job 只负责「编出 .s」(需要 Windows 的 jhyy.exe),
           # sysv job 在 ubuntu-latest 上负责「链 + 跑 + 比期望值」。
           #
-          # 顺带关掉 regress 里的 wire-only SKIP:这里显式列出 5 个名字,
+          # 顺带关掉 regress 里的 wire-only SKIP:这里显式列出全部 8 个名字,
           # 少编出一个就在本步失败,而不是悄悄进到下游。
           mkdir -p tmp/sysv_il
-          TESTS="sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic sysv_mixed_int_float"
+          # ⚠️ 2026-11-07:加 xmm_pressure_9args —— 9 个 f64 实参 ⇒ SysV 下
+          #   第 9 个浮点实参**落栈**(xmm0-7 用完)⇒ 正好盖住「浮点栈实参」
+          #   这条路径(caller 写栈 + callee 读栈)。那条路径原先借 %xmm15
+          #   中转 —— SysV 的 XMM8-15 是 callee-saved ⇒ 改坏 %xmm15 就是
+          #   **ABI 违规**(Win 侧 XMM 全易失 ⇒ Win 永远绿,只有 SysV 会坏)。
+          TESTS="sysv_abi_test sysv_enum_match sysv_struct_mixed sysv_struct_pass sysv_struct_ret sysv_vararg_basic sysv_mixed_int_float xmm_pressure_9args"
           missing=0
           for t in $TESTS; do
             src="compiler/tests/examples/$t.jhyy"
@@ -374,7 +379,7 @@ jobs:
 
       - name: Upload SysV .s artifacts (regress 用例)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sysv-il
           path: tmp/sysv_il/
@@ -382,7 +387,7 @@ jobs:
 
       - name: Upload ABI cross-check .s
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sysv-abi
           path: tmp/sysv_abi/
@@ -639,7 +644,7 @@ jobs:
       # 这两步放在 job **最后**:setup-python 会改 PATH,放在末尾就不会影响
       # 前面那些 msys2 step 用的 MSYS2 python。
       - name: Set up Python (MCP test suite)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -769,12 +774,12 @@ jobs:
           python scripts/dev/check_regalloc_parity.py
 
   # ══════════════════════════════════════════════════════════════════════
-  # 5 个 SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
+  # SysV ABI 测试 —— 此前在 CI 上**根本不存在门**
   # ══════════════════════════════════════════════════════════════════════
   #
   # `regress.py` 的 `--cross=auto` 在 windows-latest 上三个探测全失败
   # (没有可用的 WSL distro / docker 镜像 gcc:12 没有 windows-amd64 manifest),
-  # 于是 cross_mode=none → 6 个 sysv 测试永远 SKIP,`_sysv_failed == 0`
+  # 于是 cross_mode=none → 8 个 sysv 测试永远 SKIP,`_sysv_failed == 0`
   # 就算通过。CI 日志实证:`cross: --cross=auto → resolved=none`。
   #
   # 而 W-104(SysV caller 侧分类错)与 W-116(SysV callee 只 spill 4 个寄存器)
@@ -789,7 +794,7 @@ jobs:
     #   job 的显示名**,而它要当稳定 id 用(分支保护的 contexts 引用它)。
     #   显示名一改,分支保护里的 context 就不再上报 ⇒ 所有 PR 永久卡在
     #   "Expected — Waiting for status to be reported"。
-    #   ⇒ 这道门是 **SysV ABI 门**:那 7 个 SysV ABI 测试 + W-104 跨实现对拍
+    #   ⇒ 这道门是 **SysV ABI 门**:那 8 个 SysV ABI 测试 + W-104 跨实现对拍
     #   **在 windows-latest 上永远 SKIP** ⇒ 唯一能跑它们的 job 就是这个
     #   (ubuntu-latest)。绿灯不覆盖它们 ⇒ 别拿 windows-latest 的绿当全绿。
     name: sysv
@@ -797,16 +802,16 @@ jobs:
     needs: build-and-test
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download .s emitted on the Windows runner
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sysv-il
           path: tmp/sysv_il
 
       - name: Download ABI cross-check .s
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: sysv-abi
           path: tmp/sysv_abi
@@ -818,7 +823,7 @@ jobs:
           uname -a
           gcc --version | head -1
           ls -la tmp/sysv_il/
-            # 7 份一份都不能少(7 个 sysv 测试)——少了就是上游 emit 步出了问题,
+            # 8 份一份都不能少(8 个 sysv 测试)——少了就是上游 emit 步出了问题,
             # 不能当成通过。
             #
             # ⚠️ 2026-11-06 真修:此前这里是 **6** 个,断言也是 `-eq 6`,而上面
@@ -830,9 +835,14 @@ jobs:
             #   本地实测(2026-11-06,MSYS2 + docker gcc:12):该用例在
             #   amd64_sysv_freestanding 下 EXIT=170,与 //EXPECT:170 一致 ⇒
             #   加上它不会让 CI 常红。
+            #
+            # ⚠️ 2026-11-07:第 8 个是 `xmm_pressure_9args`(9 个 f64 实参 ⇒
+            #   SysV 下第 9 个浮点实参落栈 ⇒ 盖住「浮点栈实参」这条路径)。
+            #   本地实测(docker gcc:12):amd64_sysv_freestanding 下 EXIT=255,
+            #   与 //EXPECT:255 一致 ⇒ 加上它不会让 CI 常红。
             n=$(ls tmp/sysv_il/*.s 2>/dev/null | wc -l)
-            echo "收到 $n 份 regress 用例 .s(期望 7)"
-            [ "$n" -eq 7 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
+            echo "收到 $n 份 regress 用例 .s(期望 8)"
+            [ "$n" -eq 8 ] || { echo "::error::.s 数量不对,拒绝报绿"; exit 1; }
             m=$(ls tmp/sysv_abi/*.s 2>/dev/null | wc -l)
             echo "收到 $m 份 ABI 对拍用 .s(期望 3:small caller / MEMORY caller / MEMORY callee)"
             [ "$m" -eq 3 ] || { echo "::error::ABI 对拍 .s 缺失,拒绝报绿"; exit 1; }
@@ -879,9 +889,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
 

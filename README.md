@@ -227,12 +227,12 @@ Known gaps in the stdlib → [Known limitations](#known-limitations).
 
 ```bash
 python regress.py
-# => 277 passed, 20 skipped (297 total)
+# => 279 passed, 20 skipped (299 total)
 ```
 
 What those numbers mean — one term, one definition each (the counts themselves live
 in the [Status](#status-v413) table). The tool reports it as
-`passed=277/297 failed=0` and `skipped=20`:
+`passed=279/299 failed=0` and `skipped=20`:
 
 - **total** — every `.jhyy` file in `compiler/tests/examples/` except the
   `_`-prefixed helper fixtures.
@@ -397,7 +397,7 @@ flowchart TB
 
 | Piece | Where | Role |
 |-------|-------|------|
-| `compiler/src0/*.jhyy` | 30 modules | **The** compiler — lexer, parser, sema, IR, codegen, target dispatch |
+| `compiler/src0/*.jhyy` | 31 modules | **The** compiler — lexer, parser, sema, IR, codegen, target dispatch |
 | `compiler/src0/codegen_amd64_*.jhyy` | self-written backend | IL lexer · emitter (`emit_call` / `emit_ctrl` / `emit_mem` / `emit_sse`) · peephole · register cache |
 | `compiler/src0/std/*.jhyy` | 8 modules | `mem` `fmt` `io` `math` `string` `vec` `os` `arena` |
 | `compiler/runtime/runtime.c` | C runtime | Arena allocator + `main` → `main_jhyy` bridge |
@@ -415,12 +415,12 @@ iteration loop on codegen itself. The **IL text is JHYY's own format**: it borro
 ```
 JiHuiYiYou-compiler/
 ├── compiler/
-│   ├── src0/                   compiler sources (the only implementation, 30 modules + std/)
+│   ├── src0/                   compiler sources (the only implementation, 31 modules + std/)
 │   │   ├── std/                standard library: mem / fmt / io / math / string / vec / os / arena
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests — 297 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
+│   │   ├── examples/           integration tests — 299 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -430,13 +430,14 @@ JiHuiYiYou-compiler/
 ├── installer/                  WiX installer + bundled ucrt64 toolchain
 ├── mcp-jhyy/                   Claude Code MCP server (jhyy_* tools)
 ├── vscode-ext/                 VS Code extension
-├── scripts/dev/                development scripts (bench / test / build / install)
-└── tools/                      cross-repository tools
+└── scripts/dev/                development scripts (bench / test / build / install)
 ```
 
 > ℹ️ `jhyy_v1.exe.exe` is **not** a typo: `make` regenerates it as a byte-identical
 > copy of `jhyy.exe` on every build, and the double extension is the historical
-> name. Nothing depends on the name — it is a build artifact, not an input.
+> name. It is a build artifact, not an input — but two local bootstrap gates
+> (`byte_equal.sh`, `fixed_point.sh`) default to *this exact path* as their
+> "generation 1" reference, so renaming it would silently break them.
 
 ---
 
@@ -450,8 +451,8 @@ numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (regression suite) | **277 PASS + 0 XFAIL + 0 failed + 20 SKIP** (297 total) |
-| Assertion audit | 297 scanned · 277 runnable · 214 real assertions · 0 zero-signal |
+| `regress.py` (regression suite) | **279 PASS + 0 XFAIL + 0 failed + 20 SKIP** (299 total) |
+| Assertion audit | 299 scanned · 279 runnable · 215 real assertions · 0 zero-signal |
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |

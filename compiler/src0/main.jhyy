@@ -100,6 +100,8 @@ extern fn jh_run(cmd_line: *u8) -> i32;
 extern fn jh_run_get_output() -> *u8;
 // v1.5.6 W-048: temp ASCII path + copy + rename 绕开 mingw CRT 中文 argv 编码歧义
 extern fn jh_mktemp_ascii(tag: *u8, out: *u8, out_cap: i32) -> i32;
+// 2026-11-07:建出来的**就是**带后缀的临时文件(不留孤儿 .tmp,见 jhyy_helpers.c)
+extern fn jh_mktemp_ascii_sfx(tag: *u8, suffix: *u8, out: *u8, out_cap: i32) -> i32;
 extern fn jh_file_copy(src: *u8, dst: *u8) -> i32;
 extern fn jh_rename_file(src: *u8, dst: *u8) -> i32;
 extern fn jh_unlink_file(path: *u8) -> i32;
@@ -828,7 +830,7 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
     //
     // 它们的生命周期本该是「**本次**编译写 → **本次**编译读」,但固定路径意味着:
     // 一次编译**没走到读的那一步**(比如 `--no-link` 只编 .s 不链),它们就
-    // **留在盘上** ⇒ 下一��编译把**上一次**的内容当自己的用。
+    // **留在盘上** ⇒ 下一次编译把**上一次**的内容当自己的用。
     //
     // 实测(2026-10-20):一次 `--no-link` 的批量编译(freestanding 用例会写
     // _no_std.flag)之后,紧接着的 `make` 拿 **no_std 的链接行**去链一个正常
@@ -1362,47 +1364,22 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     // gcc 找不到文件 → silent exit. 改 cmd_buf 用 ASCII temp path 绕开。
     let temp_asm = malloc(1024 as i64);
     let temp_exe = malloc(1024 as i64);
-    let _t1 = jh_mktemp_ascii("a" as *u8, temp_asm, 1024 as i32);
-    let _t2 = jh_mktemp_ascii("e" as *u8, temp_exe, 1024 as i32);
+    // 2026-11-07:改用 jh_mktemp_ascii_sfx —— **建出来的文件就是带后缀的那个**。
+    //
+    // 旧做法:jh_mktemp_ascii 先在磁盘上建一个 "jha<8hex>.tmp",然后只把
+    // **路径字符串**的尾巴改成 ".s"/".exe" ⇒ 那个 `.tmp` 文件**从此没人管**
+    // ⇒ 每次编译漏 2 个 ⇒ 实测 %TEMP% 里堆了 118150 个 jh*.tmp。
+    // 新做法:建完 `.tmp` 之后**改名**成最终名字 ⇒ 磁盘上不留孤儿,
+    // 而且「名字由内核 CREATE_NEW 保证唯一」这条(W-123 并发修复)不变。
+    let _t1 = jh_mktemp_ascii_sfx("a" as *u8, ".s" as *u8, temp_asm, 1024 as i32);
+    let _t2 = jh_mktemp_ascii_sfx("e" as *u8, ".exe" as *u8, temp_exe, 1024 as i32);
     if _t1 != (0 as i32) || _t2 != (0 as i32) {
         jh_fputs_stderr("W-048: cannot create temp path\n" as *u8);
+        // 建了一半的那个也要删 —— 否则又是一个孤儿文件
+        if _t1 == (0 as i32) { let _d1 = jh_unlink_file(temp_asm); }
+        if _t2 == (0 as i32) { let _d2 = jh_unlink_file(temp_exe); }
         free(temp_asm); free(temp_exe); return 1 as i32;
     }
-    // jh_mktemp_ascii 输出 "...Temp\\jha<8hex>.tmp" / "jhe<8hex>.tmp".
-    // gcc 需要 .s / .exe 后缀 — 把末尾 ".tmp" (固定 4 字节) overwrite 为新 suffix,
-    // 然后 nul-terminate. W-048 fix: 之前用 `tmplen - suflen` 错算成 `tmplen - 2`,
-    // 导致 .tmp 变成 ".t.s" → gcc 找不到文件.
-    let suffix_s = ".s" as *u8;
-    let tmplen_a = strlen(temp_asm);
-    let suflen_s = strlen(suffix_s) as i64;
-    let src_off_a = tmplen_a - (4 as i64);   // ".tmp" = 4 字节, 从这位置开始 overwrite
-    let dst_p_a = (temp_asm as i64 + src_off_a) as *u8;
-    let mut k: i64 = 0 as i64;
-    while k < suflen_s {
-        let sp = (suffix_s as i64 + k) as *i32;
-        let dp = (dst_p_a as i64 + k) as *i32;
-        (*dp) = (*sp);
-        k = k + (1 as i64);
-    }
-    // nul-terminate after new suffix (".s" 短于 ".tmp", 后面 2 字节需清零)
-    let nul_at_a = (temp_asm as i64 + src_off_a + suflen_s) as *u8;
-    store_byte_i32(nul_at_a, 0 as i32);
-
-    let suffix_e = ".exe" as *u8;
-    let tmplen_e = strlen(temp_exe);
-    let suflen_e = strlen(suffix_e) as i64;
-    let src_off_e = tmplen_e - (4 as i64);   // ".tmp" = 4 字节
-    let dst_p_e = (temp_exe as i64 + src_off_e) as *u8;
-    k = 0 as i64;
-    while k < suflen_e {
-        let sp = (suffix_e as i64 + k) as *i32;
-        let dp = (dst_p_e as i64 + k) as *i32;
-        (*dp) = (*sp);
-        k = k + (1 as i64);
-    }
-    // nul-terminate (".exe" 同长于 ".tmp", 写在最后刚好)
-    let nul_at_e = (temp_exe as i64 + src_off_e + suflen_e) as *u8;
-    store_byte_i32(nul_at_e, 0 as i32);
     // Copy 原 Chinese asm → temp_asm (ASCII)
     let _cp = jh_file_copy(asm_path, temp_asm);
     if _cp != (0 as i32) {
@@ -1650,6 +1627,9 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
         free(invoke_buf);
         free(cmd_buf);
         jh_unlink_file(temp_asm);  // W-048 cleanup
+        // 2026-11-07:链接失败时 gcc 可能已经建了一个(不完整的)temp_exe
+        //   ⇒ 一起删掉,别留在 %TEMP% 里(旧做法只删 temp_asm)。
+        jh_unlink_file(temp_exe);
         free(temp_asm); free(temp_exe);
         return 1 as i32;
     }

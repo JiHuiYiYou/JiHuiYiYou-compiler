@@ -178,7 +178,7 @@ jobs:
       # subsequent steps read ${{ env.JHY_VERSION_DISPLAY }} directly.
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # (原注释提到 qbe/ 是 vendored QBE source —— 已于 2026-10-30 整体删除)
           #
@@ -292,7 +292,7 @@ jobs:
           Write-Host "[OK] CI run for tag $tag is green AND ran on the commit being released"
 
       - name: Setup MSYS2 + toolchain
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: UCRT64
           update: true
@@ -324,9 +324,11 @@ jobs:
             zip
 
       - name: Setup .NET 8 (WiX 4/7 prerequisite)
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          dotnet-version: 8.x
+          # 2026-11-07:pin 成一个确定的版本(当前最新的 8.0.x SDK = 8.0.427)——
+          #   以前写 "8.x" 会每次发布拉到一个新 SDK。
+          dotnet-version: 8.0.427
 
       - name: Install WiX 4/7 toolchain
         shell: pwsh
@@ -334,7 +336,9 @@ jobs:
           # WiX CLI ships as a .NET tool; install globally and add to PATH.
           # Use Add-Content (per W-022) — Out-File -Encoding utf8 corrupts
           # $GITHUB_PATH with UTF-8 BOM.
-          dotnet tool install --global wix
+          # 2026-11-07:pin 工具版本(7.0.1 = 当前 latest)——
+          #   不写版本的安装会拿到下一个 major/minor。
+          dotnet tool install --global wix --version 7.0.1
           "$env:USERPROFILE\.dotnet\tools" | Add-Content -Path $env:GITHUB_PATH
           # WiX 7+ requires explicit OSMF EULA acceptance (WIX7015). The
           # `wix eula accept wix7` command writes a sentinel file to
@@ -354,7 +358,8 @@ jobs:
           # extension as a .vsix for the installer bundle. Required for
           # v1.5.4+ release workflow (prior runs locally had vsce, but
           # CI runner doesn't include it by default).
-          npm install -g @vscode/vsce
+          # 2026-11-07:pin 工具版本(4.1.0 = 当前 latest)——
+          npm install -g @vscode/vsce@4.1.0
           vsce --version
 
       # 2026-10-18:删掉 `make stage0`。v4.0.8 起 QBE 与 stage0 都已移出 `all`
@@ -654,7 +659,7 @@ jobs:
         #   workflow_dispatch dry_run=true   → tag == '' 且 true     → 不发
         #   workflow_dispatch dry_run=false  → tag == '' 且 == false → 发
         if: ${{ inputs.tag != '' || inputs.dry_run == false }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ env.JHY_TAG_NAME }}
           name: 'JHYY ${{ env.VERSION }}${{ env.JHY_IS_RC == ''1'' && '' [RC]'' || '''' }}'

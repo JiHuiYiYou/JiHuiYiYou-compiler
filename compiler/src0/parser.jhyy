@@ -1055,8 +1055,18 @@ fn parse_pattern_primary(p: *Parser) -> *Node {
     }
 
     // ── TOKEN_IDENT 分支 ──
+    //
+    // ⚠️ 2026-11-07 真修:标识符端点的范围模式**编译期拒绝**。
+    //   parse_pattern_primary 只在「范围端点」这个位置被调用(lo 的字面量分支
+    //   与 hi 都走它)⇒ 走到这里就说明端点写成了标识符。
+    //   codegen 没有标识符端点的取值路径 ⇒ 旧行为是把整个 arm 编成
+    //   **cmp=1(接受一切)** ⇒ 静默走错 arm、零诊断 ⇒ 改成响亮报错。
     if t.kind == TOKEN_IDENT() {
         parser_advance(p, &t);
+        jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+        jh_fputs_stderr("error: range pattern endpoints must be literals (identifier endpoints are not supported)" as *u8);
+        jh_fputs_stderr("\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
         let iname = arena_strdup((*p).arena, t.start, t.length);
         let mut isym = symtab_lookup((*p).current_scope, iname);
         if isym == (0 as *Sym) {
@@ -1214,9 +1224,28 @@ fn parse_pattern(p: *Parser) -> *Node {
         }
 
         // range lo..hi  —— v1.4.6 W-020: hi 走 parse_pattern_primary（避免 mutual recursion）
+        //
+        // ⚠️ 2026-11-07 真修(两处):
+        //
+        //   ① lo_name 必须在 parser_match **之前**捕获 ——
+        //      parser_match(p, TOKEN_DOTDOT(), &t) 会 advance 并把 t
+        //      **覆盖成 DOTDOT token**;之后再读 t.start/t.length 拿到的
+        //      是 ".." 而不是用户的变量名 ⇒ 这个模式往作用域里塞了一个
+        //      **名字叫 ".." 的符号**(arm body 里写原变量名 → 未定义)。
+        //
+        //   ② 端点是**标识符**的范围模式(x..y)**编译期拒绝** ——
+        //      codegen 只会把**字面量**端点发成 `lo <= v <= hi` 比较;
+        //      标识符端点没有取值路径 ⇒ 旧行为是把这个 arm 编译成
+        //      **cmp=1(接受一切)** ⇒ 静默走错 arm、**零诊断**。
+        //      一个响亮的编译错误远好过静默的错误语义
+        //      (与「nested pattern is not supported」同一处理原则)。
+        let lo_name = arena_strdup((*p).arena, t.start, t.length);
         if parser_match(p, TOKEN_DOTDOT(), &t) != (0 as i32) {
             let hi = parse_pattern_primary(p);
-            let lo_name = arena_strdup((*p).arena, t.start, t.length);
+            jh_print_loc_stderr(loc_lf, loc_ll, loc_lc);
+            jh_fputs_stderr("error: range pattern endpoints must be literals (identifier endpoints are not supported)" as *u8);
+            jh_fputs_stderr("\n" as *u8);
+            (*p).error_count = (*p).error_count + (1 as i32);
             let mut sym = symtab_lookup((*p).current_scope, lo_name);
             if sym == (0 as *Sym) {
                 sym = symtab_insert((*p).current_scope, lo_name, SYM_VAR(),

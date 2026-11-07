@@ -676,6 +676,7 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
     //   V.1 gate 1 NEW fixture + 5/5 PASS per feedback_fix_evaluation_rule)
     let mut arg_qts_arr = arena_alloc(arena, (16 as i64) * (4 as i64));
     let mut arg_temps_arr = arena_alloc(arena, (16 as i64) * (8 as i64));
+    let mut arg_cap: i64 = 16 as i64;
     let mut parsed_n: i64 = 0 as i64;
 
     if text != (0 as *u8) && text_len > (0 as i64) {
@@ -695,7 +696,14 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
             let args_start = open_idx + (1 as i64);
             let args_end = close_idx;
             let mut cursor = args_start;
-            while cursor < args_end && parsed_n < (16 as i64) {
+            //
+            // ⚠️ 2026-11-06 真修:**上限从 16 改成动态扩容**。
+            //   此前这个循环的条件是 `parsed_n < 16` ⇒ **第 17 个及以后的实参
+            //   被静默丢弃** ⇒ caller 只写了 12 个栈参数、callee 却读 16 个
+            //   ⇒ 实参值错 ⇒ 求和算错,**零诊断**。
+            //   (实测:20 个参数的调用,Win 与 SysV 都错;caller 写 12 / callee 读 16。)
+            //   ⇒ 静默错代码是本仓最该消灭的那一类 ⇒ 改成**按需扩容**,上限消失。
+            while cursor < args_end {
                 while cursor < args_end {
                     let c = cg_byte_at(text, cursor);
                     if c == (32 as i32) || c == (9 as i32) { cursor = cursor + (1 as i64); } else { break; }
@@ -735,6 +743,19 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
                     // ⚠️ **必须在这里显式认它** —— 落进最后的 `else { qt }` 兜底会被当成
                     // 别的类型,于是既不落栈也不报错,静默传错。
                     let arg_qt: i32 = if qt_byte == (119 as i32) { 119 as i32 } else { if qt_byte == (108 as i32) { 108 as i32 } else { if qt_byte == (115 as i32) { 115 as i32 } else { if qt_byte == (100 as i32) { 100 as i32 } else { if qt_byte == (109 as i32) { 109 as i32 } else { qt } } } } };
+                    // 2026-11-06:实参数组**按需扩容**(原先固定 16 ⇒ 超出的实参
+                    //   被静默丢弃 ⇒ caller 写的实参个数少于 callee 读的个数
+                    //   ⇒ 值错、零诊断)。
+                    if parsed_n >= arg_cap {
+                        let new_cap = arg_cap * (2 as i64);
+                        let nq = arena_alloc(arena, new_cap * (4 as i64));
+                        let nt = arena_alloc(arena, new_cap * (8 as i64));
+                        memcpy(nq, arg_qts_arr, arg_cap * (4 as i64));
+                        memcpy(nt, arg_temps_arr, arg_cap * (8 as i64));
+                        arg_qts_arr = nq;
+                        arg_temps_arr = nt;
+                        arg_cap = new_cap;
+                    }
                     let ap = arg_qts_arr as *i32;
                     let bp = arg_temps_arr as *i64;
                     let ap_off = ptr_add_u8(ap as *u8, parsed_n * (4 as i64)) as *i32;
@@ -748,7 +769,15 @@ fn emit_amd64_arg_regs(state: *u8, nargs: i64, qt: i32, target_tag: i32) -> i32 
         }
     }
 
-    let n = if parsed_n < nargs { parsed_n } else { nargs };
+    // 2026-11-06:**解析出来的个数与文本里的个数不一致 ⇒ 响亮失败**。
+    //   差在哪里?实参解析只认 "<qt> %tN" 这一种形态;认不出的实参(比如全局
+    //   符号的地址 " $name")会被**跳过** ⇒ parsed_n < nargs ⇒ 修前是
+    //   `let n = min(parsed_n, nargs)` ⇒ **后面的实参整体错位**(值进错寄存器),
+    //   而且**零诊断**。⇒ 现在记下来 ⇒ 编译末尾失败。
+    if parsed_n != nargs {
+        let _m = cg_mark_call_args_overflow(state);
+    }
+    let n = parsed_n;
     // v2.13.0 Phase 1 真 XMM regalloc:重置 per-call XMM/int arg 计数
     // (替换 v2.11.15 的 hard-coded `sse_xmm_reg_for_arg_idx(ri)` 静态 mapping
     //  — 原 SysV XMM pool = 6 是 bug,实际 SysV 是 8 个 XMM arg reg)
@@ -1043,6 +1072,31 @@ fn emit_call(state: *u8, tok: *u8) -> i32 {
             let _sa = sb_append_cstr(arena, s, "\tsubq $" as *u8);
             let _sb2 = sb_appendf_lld(arena, s, "%lld" as *u8, shadow_bytes);
             let _sa2 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
+        }
+        //
+        // ⚠️ 2026-11-06 真修:**整数/浮点溢出到栈的实参**同样需要 outgoing 区。
+        //
+        //   修前:SysV 路径对「整数溢出参数」**完全不 subq** ⇒ 栈实参写在
+        //   [rsp+0..] ⇒ 那正是**调用者自己帧的最底部**(帧是 prologue 的
+        //   `subq $N, %rsp` 划出来的)⇒ **踩掉调用者的活跃局部变量**。
+        //   实测(docker gcc:12 + SysV ELF 真跑):一个 14 参数的调用把调用者的
+        //   3 个活值全毁 ⇒ 程序算出**错值**(EXIT=6,期望 1139),**零诊断**。
+        //   ⇒ 同一个缺陷形态,MEMORY class 那条(W-104)早就有 subq,整数溢出
+        //   这条路径漏了。
+        //
+        //   栈实参个数的上界:SysV 整数实参占 6 个寄存器(rdi/rsi/rdx/rcx/
+        //   r8/r9)、浮点占 8 个(xmm0-7)⇒ 落栈的个数 ≤ max(0, nargs-6)
+        //   (全是整数时取到上界;混排/全浮点时更少 ⇒ 多留是安全的)。
+        //   与 MEMORY 那条相加而不是二选一:IL 层虽然拒绝两者混排,但相加
+        //   在任何组合下都安全(多留的 outgoing 区只是浪费一点栈)。
+        let mut stack_ub: i64 = nargs - (6 as i64);
+        if stack_ub < (0 as i64) { stack_ub = 0 as i64; }
+        if stack_ub > (0 as i64) {
+            let extra = ((stack_ub * (8 as i64)) + (15 as i64)) & ((0 as i64) - (16 as i64));
+            shadow_bytes = shadow_bytes + extra;
+            let _sa3 = sb_append_cstr(arena, s, "\tsubq $" as *u8);
+            let _sb3 = sb_appendf_lld(arena, s, "%lld" as *u8, extra);
+            let _sa4 = sb_append_cstr(arena, s, ", %rsp\n" as *u8);
         }
     }
 
@@ -1752,9 +1806,22 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                 8 as i64
             };
             if arg_xmm_idx >= xmm_max {
-                // stack-arg read:必须走 %xmm15 中转(GAS 不支持 movsd mem,mem)
-                //   movsd <stack_off>(%rbp), %xmm15
-                //   movsd %xmm15, -<dst_off>(%rbp)
+                // stack-arg read:走 **整数 scratch** 中转(x86 没有 mem→mem 的
+                // SSE 传送)。
+                //   movq <stack_off>(%rbp), %rax
+                //   movq %rax, -<dst_off>(%rbp)
+                //
+                // ⚠️ 2026-11-07 真修:**不再借 %xmm15 中转**。
+                //   SysV amd64 ABI 里 **XMM8–XMM15 是 callee-saved** ——
+                //   被调用方**必须**保住它们。我们编出来的函数在自己的
+                //   prologue 里写坏 %xmm15 ⇒ 它的调用者(gcc 编的 C 代码等)
+                //   留在 %xmm15 里的值被毁 ⇒ **ABI 违规**。
+                //   (Win x64 里 XMM 全易失 ⇒ Win 侧看不出来 —— 又是
+                //   「Win 绿、SysV 悄悄坏」那一类。)
+                //   改成 %rax/%eax 搬**原始比特**:f64 搬 8 字节、f32 搬 4 字节
+                //   —— 与 `movsd`/`movss` 搬的是同一批字节(IEEE 位模式),
+                //   语义等价。%rax 在两套 ABI 里都是易失寄存器 ✓。
+                //
                 // v2.13.0 Phase 1: Win 5th arg = rbp+48 (跳过 saved rbp + retaddr + 32B shadow),
                 //                  SysV 5th arg = rbp+16 (跳过 saved rbp + retaddr only)。
                 // Derivation (Win): caller subq $32, write [rsp+32] = old_rsp;
@@ -1767,15 +1834,20 @@ fn emit_copy(state: *u8, tok: *u8) -> i32 {
                     16 as i64
                 };
                 let stack_off = stack_off_base + stack_idx * (8 as i64);
-                let suffix = if dst_qt == QBE_D_LOCAL() { "sd" as *u8 } else { "ss" as *u8 };
+                let suffix = if dst_qt == QBE_D_LOCAL() { "q" as *u8 } else { "l" as *u8 };
+                let scratch = if dst_qt == QBE_D_LOCAL() { "%rax" as *u8 } else { "%eax" as *u8 };
                 let _r1 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
                 let _r2 = sb_append_cstr(arena2, s2, suffix);
                 let _r3 = sb_append_cstr(arena2, s2, " " as *u8);
                 let _r4 = sb_appendf_lld(arena2, s2, "%lld" as *u8, stack_off);
-                let _r5 = sb_append_cstr(arena2, s2, "(%rbp), %xmm15\n" as *u8);
+                let _r5 = sb_append_cstr(arena2, s2, "(%rbp), " as *u8);
+                let _r5b = sb_append_cstr(arena2, s2, scratch);
+                let _r5c = sb_append_cstr(arena2, s2, "\n" as *u8);
                 let _r6 = sb_append_cstr(arena2, s2, "\tmov" as *u8);
                 let _r7 = sb_append_cstr(arena2, s2, suffix);
-                let _r8 = sb_append_cstr(arena2, s2, " %xmm15, " as *u8);
+                let _r8 = sb_append_cstr(arena2, s2, " " as *u8);
+                let _r8b = sb_append_cstr(arena2, s2, scratch);
+                let _r8c = sb_append_cstr(arena2, s2, ", " as *u8);
                 let _r9 = sb_appendf_lld(arena2, s2, "%lld" as *u8, dst_off);
                 let _rA = sb_append_cstr(arena2, s2, "(%rbp)\n" as *u8);
             } else {

@@ -413,6 +413,15 @@ fn codegen_amd64_run(il_path: *u8, asm_path: *u8, target_tag: i32,
         arena_free(&arena);
         return 1 as i32;
     }
+    // 2026-11-06:调用点实参装不下 ⇒ 静默截断会产出错代码 ⇒ 响亮失败。
+    if cg_state_get_call_args_overflow(state_buf) != (0 as i32) {
+        jh_fputs_stderr("jhyy error: a call has arguments the emitter cannot represent -- refusing to emit silently-wrong code" as *u8);
+        jh_fputs_stderr("
+" as *u8);
+        free(il_buf);
+        arena_free(&arena);
+        return 1 as i32;
+    }
     if cg_state_get_temp_overflow(state_buf) != (0 as i32) {
         jh_fputs_stderr("jhyy error: temp id exceeded the temp-slot table — refusing to emit silently-wrong code (W-120)" as *u8);
         jh_fputs_stderr("

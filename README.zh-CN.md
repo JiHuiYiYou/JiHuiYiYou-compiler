@@ -218,11 +218,11 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 277 passed, 20 skipped (297 total)
+# => 279 passed, 20 skipped (299 total)
 ```
 
 这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v413)那张表里)。
-工具自己报的是 `passed=277/297 failed=0` 与 `skipped=20`:
+工具自己报的是 `passed=279/299 failed=0` 与 `skipped=20`:
 
 - **total** —— `compiler/tests/examples/` 下除 `_` 前缀的辅助 fixture 外的每一个
   `.jhyy` 文件。
@@ -375,7 +375,7 @@ flowchart TB
 
 | 部件 | 位置 | 职责 |
 |------|------|------|
-| `compiler/src0/*.jhyy` | 30 个模块 | **唯一的**编译器 —— lexer、parser、sema、IR、codegen、target dispatch |
+| `compiler/src0/*.jhyy` | 31 个模块 | **唯一的**编译器 —— lexer、parser、sema、IR、codegen、target dispatch |
 | `compiler/src0/codegen_amd64_*.jhyy` | 自研后端 | IL lexer · 发射器(`emit_call`/`emit_ctrl`/`emit_mem`/`emit_sse`)· peephole · 寄存器缓存 |
 | `compiler/src0/std/*.jhyy` | 8 个模块 | `mem` `fmt` `io` `math` `string` `vec` `os` `arena` |
 | `compiler/runtime/runtime.c` | C 运行时 | Arena 分配器 + `main` → `main_jhyy` 桥接 |
@@ -393,12 +393,12 @@ codegen 路径 —— 少一个 17K-LOC 的 vendored 依赖,同时也让 codegen
 ```
 JiHuiYiYou-compiler/
 ├── compiler/
-│   ├── src0/                   编译器源码(唯一实现,30 个模块 + std/)
+│   ├── src0/                   编译器源码(唯一实现,31 个模块 + std/)
 │   │   ├── std/                标准库:mem / fmt / io / math / string / vec / os / arena
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试 —— 297 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
+│   │   ├── examples/           集成测试 —— 299 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -408,13 +408,13 @@ JiHuiYiYou-compiler/
 ├── installer/                  WiX 安装器 + 内置 ucrt64 工具链
 ├── mcp-jhyy/                   Claude Code MCP 服务(jhyy_* 工具)
 ├── vscode-ext/                 VS Code 扩展
-├── scripts/dev/                开发脚本(bench / test / build / install)
-└── tools/                      跨仓工具
+└── scripts/dev/                开发脚本(bench / test / build / install)
 ```
 
 > ℹ️ `jhyy_v1.exe.exe` **不是笔误**:`make` 每次构建都会把它重新生成成 `jhyy.exe` 的
-> 逐字节副本,双后缀是历史留下来的名字。没有任何东西依赖这个名字 —— 它是构建产物,
-> 不是输入。
+> 逐字节副本,双后缀是历史留下来的名字。它是构建产物、不是输入 —— 但有两道本地
+> 自举门(`byte_equal.sh`、`fixed_point.sh`)**默认按这个确切路径**取「第 1 代」
+> 参照物,所以改名字会让它们静默失效。
 
 ---
 
@@ -426,8 +426,8 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py`(回归套件) | **277 PASS + 0 XFAIL + 0 failed + 20 SKIP**(297 total) |
-| 断言强度审计 | 扫 297 · 可跑 277 · 真断言 214 · 零信号 0 |
+| `regress.py`(回归套件) | **279 PASS + 0 XFAIL + 0 failed + 20 SKIP**(299 total) |
+| 断言强度审计 | 扫 299 · 可跑 279 · 真断言 215 · 零信号 0 |
 | 基准套件 | 9 道题 · 4 个覆盖轴 —— [已发布快照](bench/baseline/RESULTS-2026-11-04.md)(jhyy 与 gcc 的墙钟对比;**代码生成质量的地板是 gcc `-O0`**,不是及格线) |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
