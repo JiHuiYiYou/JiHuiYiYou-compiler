@@ -152,6 +152,13 @@ _SYSV_TEST_NAMES = (
     # 本地实测(docker gcc:12):amd64_sysv_freestanding 下 EXIT=255,与
     # //EXPECT:255 一致。
     "xmm_pressure_9args.jhyy",
+    # 2026-11-07:整数**栈实参**的回归门 —— 20 个 i32 实参 ⇒ SysV 下只有
+    # 6 个整数寄存器 ⇒ 14 个落栈 ⇒ 正好盖住「整数栈实参要占 outgoing 区」
+    # 这条路径(它此前**完全不 subq** ⇒ 栈实参写进调用者自己帧的最底部
+    # ⇒ 踩掉调用者的活跃局部变量)。
+    # 本地实测(docker gcc:12):amd64_sysv_freestanding 下 EXIT=210,
+    # 与 //EXPECT:210 一致。
+    "many_args_20.jhyy",
 )
 
 # v2.8.3: docker CLI absolute path fallback (跟 feedback_gh_cli_path 同 pattern)。

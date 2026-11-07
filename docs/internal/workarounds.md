@@ -14958,6 +14958,8 @@ memset)⇒ 新加的粘滞标志字段带着**上一块堆的残留**。`cg_stat
 
 **失效条件:** 已修 —— SysV 分支按 `max(0, nargs - 6)` 个栈实参估算 outgoing 区
 (`align16(stack_ub * 8)`),与 MEMORY 那条**相加**(相加在任何组合下都安全)。
+回归门:`compiler/tests/examples/many_args_20.jhyy`(20 个 i32 实参 ⇒ SysV 下
+14 个落栈);已加进 CI 的 SysV 名单与 `regress.py` 的 `_SYSV_TEST_NAMES`。
 
 **引用:** `compiler/src0/codegen_amd64_emit_call.jhyy`。
 
