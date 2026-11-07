@@ -349,6 +349,7 @@
 | [W-217](#w-217) | INVALID | 「帧大小没算只当目的地的 temp」—— 复核后**不成立**(审计提出的疑点,证据在下面) |
 | [W-218](#w-218) | RESOLVED | `bump_version.py finalize` 把 winget 的 sha256... |
 | [W-219](#w-219) | RESOLVED | `bump_version.py set` 的「刷 Status... |
+| [W-220](#w-220) | RESOLVED | 变异测试的「产物尺寸」变异点把体积**写死**成 `~55 MB` ⇒ 体积一改就找不到变异点 ⇒... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15383,3 +15384,45 @@ WiX 的 `SignTool` 调用、.vsix 的签名、`SHA256.txt` 之后多一份签名
 ⇒ 也进 `set` 的刷写表与 `check` 的指纹表。
 
 **引用:** `scripts/dev/bump_version.py`、`README.md`、`README.zh-CN.md`。
+
+<a id="w-220"></a>
+## W-220: 变异测试的「产物尺寸」变异点把体积**写死**成 `~55 MB` ⇒ 体积一改就找不到变异点 ⇒ **CI 直接红**(发版被卡住)
+
+**状态:** RESOLVED closed 2026-11-07 (v4.1.4) — 体积改成从 FACTS.md 现场读
+**Filed-by:** 2026-11-07 (v4.1.4 发版时实测 —— tag 的 CI 红在「Docs gate mutation test」)
+**日期:** 2026-11-07
+
+**触发面:** `scripts/dev/test_docs_gate_mutations.py` 的「产物尺寸（安装器）」变异点。
+
+**症状:** v4.1.4 打 tag 之后,CI 的 **build-and-test** 红在
+「Docs gate mutation test (prove the docs gate can see)」这一步,
+报「**1 个变异漏网: 产物尺寸（安装器）**」——
+本地复现的原文是「**变异点找不到（README.md 里有 0 处）**」。
+⇒ **tag 路径的 release job 因此被跳过**(needs 不绿 ⇒ 不发)⇒ 发版被卡住。
+
+**根因:** 那个变异点的**查找串**是写死的 `| ~55 MB | GUI installer — … |`。
+而 v4.1.4 的安装器**实测**是 **54 MB**(本轮 `finalize` 第一次量到真实体积
+—— 以前那个 55 是**手打的**)⇒ 查找串再也匹配不上 ⇒
+`check_points()` 数到 0 处 ⇒ 那条变异被判「漏网」⇒ 变异测试整体红。
+
+⇒ 这是**同一个类的第三个实例**:
+2026-11-06 修过一次(产物级门数 18 → 19 把变异点写死了),
+2026-11-07 又中一次(体积 55 → 54)。
+**根因是同一个:变异点把「会被改的数」写死在自己身上** ——
+而那些数**本来就会变**(回归数、门数、体积、断言数……)。
+
+**workaround:** 每次某个数变了,就手改变异点的模板 ⇒ 忘了就 CI 红
+(这次的形态:CI 红了,但红的原因离「真缺陷」很远 ⇒ 查起来费时间)。
+
+**影响范围:** 变异测试这一道门(它证明「文档门看得见漂移」)。
+**不影响**任何已发布产物 —— 但它**卡住了发版**(tag 路径的 release job
+needs build-and-test)。
+
+**失效条件:** 已修 —— ① `_facts_numbers()` 多读一个 `size_installer`
+(从 FACTS.md 的 `jhyy-installer-<ver>.exe | ~N MB` 那行现场读);
+② 「产物尺寸(安装器)」与「模板里写死 installer 体积」两个变异点的文本
+都改成用这个数拼 ⇒ 体积再变也不用改脚本;
+③ 变异出来的值取 `_SZ + 13` ⇒ 一定是**错的** ⇒ 门必然红(不会「碰巧对」)。
+
+**引用:** `scripts/dev/test_docs_gate_mutations.py`、
+`docs/internal/FACTS.md`（体积的单一真相源）。

@@ -91,6 +91,15 @@ def _facts_numbers() -> dict[str, int]:
             "ERR: FACTS.md 里找不到产物级门数"
             "(`artifact-checks` —— **N 道**)"
             " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
+    # 产物体积(2026-11-07 补):变异点原来把「~55 MB」写死在
+    # 脚本里 ⇒ 体积一变(本轮发版实测 55 → 54)就找不到
+    # 变异点。⇒ 与其它数一样,从 FACTS.md 现场读。
+    sz = re.search(r"jhyy-installer-[\d.]+\.exe` \| ~(\d+) MB", text)
+    if not sz:
+        raise SystemExit(
+            "ERR: FACTS.md 里找不到安装器体积"
+            "(`jhyy-installer-<ver>.exe` | ~N MB)"
+            " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
     return {
         "pass": int(m.group(1)),
         "skip": int(m.group(2)),
@@ -99,6 +108,7 @@ def _facts_numbers() -> dict[str, int]:
         "runnable": int(a.group(2)),
         "assertions": int(a.group(3)),
         "artifact_checks": int(ac.group(1)),
+        "size_installer": int(sz.group(1)),
     }
 
 
@@ -106,6 +116,7 @@ _N = _facts_numbers()
 _P, _S, _T = _N["pass"], _N["skip"], _N["total"]
 _SC, _RN, _RA = _N["scanned"], _N["runnable"], _N["assertions"]
 _AC = _N["artifact_checks"]
+_SZ = _N["size_installer"]
 
 # ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
 # ⚠️ **模板必须与门面里那几行逐字一致** —— 门面改了措辞或分隔符,这里要跟着改,
@@ -172,15 +183,16 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         f"| `artifact_checks.sh` | **{_AC} PASS / 0 FAIL** |",
         f"| `artifact_checks.sh` | **{_AC - 3} PASS / 0 FAIL** |")]),
     # (e) 产物尺寸:FACTS § 1 声明 vs 两份 README
+    # ⇒ 尺寸也从 FACTS.md 现场读(上面），不写死。
     ("产物尺寸（安装器）", [(
         "README.md",
-        "| ~55 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |",
-        "| ~42 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |")]),
+        f"| ~{_SZ} MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |",
+        f"| ~{_SZ + 13} MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |")]),
     # (g) release notes 模板里写死体积 —— 模板**每版都发**,写死 = 每版都发错
     ("模板里写死 installer 体积", [(
         "installer/changelog-template.md",
         "${INSTALLER_SIZE} Burn bundle",
-        "${INSTALLER_SIZE} Burn bundle (~55MB)")]),
+        f"${{INSTALLER_SIZE}} Burn bundle (~{_SZ + 13}MB)")]),
     # (f) 台账的前向版本标签:指向一个不存在的版本
     ("台账标签指向不存在的版本", [(
         "docs/internal/workarounds.md",
