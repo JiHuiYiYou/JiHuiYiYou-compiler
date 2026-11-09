@@ -3567,7 +3567,12 @@ module 的 loc_filename）⇒ 自举闭环 / fixed-point 不受影响。（台�
 ### 门
 
 - 产物级门 `naked_symbol`(W-223 登记时是 KNOWN-FAIL)—— **删掉 KNOWN_FAIL 里那一行
-  ⇒ 自动升级成真门** ⇒ 现在 20 道门**全绿**(PASS 20 / KNOWN-FAIL 0 / FAIL 0)。
+  ⇒ 自动升级成真门**。
+- **新增产物级门 `no_std_any_cwd`**(W-224):在**没有** `compiler/build/obj/` 的
+  临时目录里编译 ⇒ 验 `#[no_std]` 链得出(退出码 42)+ `#[naked]` 的标签没丢。
+  这条门是**换 CWD** 跑的 —— W-224 那条 bug 对「在仓库根目录跑」的所有现有门
+  **本来就不可见**。
+- ⇒ 现在 **21 道门全绿**(PASS 21 / KNOWN-FAIL 0 / FAIL 0)。
 - 回归:+2 个用例 ⇒ 281 PASS / 301 total(此前 279 / 299)。
 
 ---

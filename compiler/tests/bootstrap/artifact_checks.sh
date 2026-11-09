@@ -563,6 +563,90 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════════════
+# W-224 (2026-11-09 真修):旁路文件(side-file)的路径**不能相对 CWD**
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 为什么这道门必须**换 CWD** 跑:
+#   W-224 那条 bug 的形态是「**只在某些目录里**发作」——
+#   编译器在仓库根目录跑(所有现有门都在那儿跑)⇒ `compiler/build/obj/`
+#   恰好存在 ⇒ 旁路文件写得出 ⇒ **门全绿**。
+#   而真实的用户场景恰恰是「在自己项目目录里编译」⇒ 那个目录**没有**
+#   `compiler/build/obj/` ⇒ 写侧静默失败 ⇒ 两种后果:
+#     ① `#[no_std]` 的 `_no_std.flag` 没写出来 ⇒ 链成 hosted ⇒ hosted
+#        `runtime.c` 的 `main` 跟用户的 `fn main` 撞名 ⇒ **链接失败**;
+#     ② `#[naked]` 的 `.globl` + 标签**整个丢失** ⇒ 产物里没有那个符号。
+#   ⇒ 这道门在一个**没有** `compiler/build/obj/` 的临时目录里跑编译器。
+#
+# 门验两件事(都是 W-224 的两条症状):
+#   ① `#[no_std]` 程序在任意目录里都能链出来,跑起来退出码 42;
+#   ② `#[naked]` 函数的标签不会因为「写不进去」而整个丢失。
+#
+# 修复前:①链接失败 ②产物里没有 irq_entry 符号 ⇒ 两件都红。
+check_no_std_any_cwd() {
+    hdr "W-224  旁路文件不能相对 CWD —— 在任意目录里都要编得出"
+    [ -x "$JHYY_EXE" ] || { skip "no_std_any_cwd" "jhyy.exe 不存在"; return; }
+    command -v objdump >/dev/null || { skip "no_std_any_cwd" "objdump 不在 PATH"; return; }
+
+    # 临时「项目目录」—— **没有** compiler/build/obj/ ⇒ 相对路径的旧实现在这儿必然失败。
+    local proj="$WORK/proj_any_cwd"
+    rm -rf "$proj" 2>/dev/null
+    mkdir -p "$proj" || { badenv "no_std_any_cwd" "建不出临时项目目录"; return; }
+
+    # ① #[no_std] 程序 —— 链接行由旁路文件(_no_std.flag)决定。
+    cat > "$proj/prog.jhyy" <<'EOF'
+#[no_std]
+fn main() -> i32 {
+    let a: i32 = 20;
+    let b: i32 = 22;
+    return a + b;
+}
+EOF
+    local out rc exe
+    out=$(cd "$proj" && "$JHYY_EXE" compile prog.jhyy -o prog.exe 2>&1)
+    rc=$?
+    if [ "$rc" != "0" ]; then
+        bad "no_std_any_cwd" "在**没有** compiler/build/obj/ 的目录里编 #[no_std] 程序失败(退出码 $rc)—— 旁路文件路径仍相对 CWD ⇒ 走了 hosted 链接行。gcc 报错:$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+        return
+    fi
+    exe=$(cygpath -w "$proj/prog.exe" 2>/dev/null || echo "$proj/prog.exe")
+    [ -f "$exe" ] || { badenv "no_std_any_cwd" "没产出 prog.exe"; return; }
+    "$exe" >/dev/null 2>&1
+    local prc=$?
+    if [ "$prc" != "42" ]; then
+        bad "no_std_any_cwd" "no_std 程序跑出来的退出码是 $prc(期望 42)"
+        return
+    fi
+
+    # ② #[naked] 函数的标签 —— 写侧失败 ⇒ `.globl` + 标签整个丢失。
+    cat > "$proj/naked.jhyy" <<'EOF'
+#[naked]
+fn irq_entry() {
+    asm!("iret");
+}
+fn main_jhyy() -> i32 { return 0 as i32; }
+EOF
+    out=$(cd "$proj" && "$JHYY_EXE" compile naked.jhyy -o naked.exe 2>&1)
+    rc=$?
+    if [ "$rc" != "0" ]; then
+        bad "no_std_any_cwd" "在项目目录里编 #[naked] 函数失败(退出码 $rc):$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+        return
+    fi
+    exe=$(cygpath -w "$proj/naked.exe" 2>/dev/null || echo "$proj/naked.exe")
+    [ -f "$exe" ] || { badenv "no_std_any_cwd" "没产出 naked.exe"; return; }
+    # ⚠️ **先收再匹配**,不要 `objdump | grep -q`:脚本开着 `set -o pipefail` ⇒
+    #   `grep -q` 一命中就退出 ⇒ objdump 收到 SIGPIPE(141)⇒ 管道状态非零 ⇒
+    #   `if !` 判成「没找到」—— 明明符号就在那儿!(2026-11-09 实测踩到)
+    local dis
+    dis=$(objdump -d "$exe" 2>/dev/null)
+    if ! grep -q '<irq_entry>:' <<< "$dis"; then
+        bad "no_std_any_cwd" "产物里没有 irq_entry 符号 —— naked 的标签在项目目录里被整个写丢了"
+        return
+    fi
+
+    ok "no_std_any_cwd(任意目录里 #[no_std] 链得出且退出码 42 ✓ · #[naked] 的标签也在 ✓)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # 3. W-107 — per-fn 表 1024 上限:高索引函数的帧不应比低索引大一个量级
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -1468,6 +1552,7 @@ want link_section    && check_link_section
 want link_section_build && check_link_section_build
 want asm_before_ret  && check_asm_before_ret
 want naked_symbol   && check_naked_symbol
+want no_std_any_cwd && check_no_std_any_cwd
 want holds_bitmap    && check_holds_bitmap
 want holds_cap_source && check_holds_cap_source
 want selfhost_target_flag && check_selfhost_target_flag

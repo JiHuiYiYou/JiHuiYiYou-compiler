@@ -476,7 +476,7 @@ numbers.
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
-| `artifact_checks.sh` | **20 gates** (PASS 20 / KNOWN-FAIL 0 / FAIL 0) |
+| `artifact_checks.sh` | **21 gates** (PASS 21 / KNOWN-FAIL 0 / FAIL 0) |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
 | ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.4.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
