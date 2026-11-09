@@ -6512,13 +6512,22 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
             let fd_node = node_func_decl_data(d_node);
             if (*fd_node).is_naked == (0 as i32) {
                 if (*fd_node).link_section != (0 as *u8) {
-                    if section_fp != (0 as *u8) {
-                        let fn_sym = (*fd_node).sym as *Sym;
-                        let _w1 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), section_fp);
-                        let _w2 = fwrite("|" as *u8, 1 as i64, 1 as i64, section_fp);
-                        let _w3 = fwrite((*fd_node).link_section, 1 as i64, strlen((*fd_node).link_section), section_fp);
-                        let _w4 = fwrite("\n" as *u8, 1 as i64, 1 as i64, section_fp);
+                    if section_fp == (0 as *u8) {
+                        // ⚠️ 2026-11-09 (W-224 的另一半):写侧失败**必须响亮**。
+                        //   这个文件装着 `#[link_section]` 的段名 ⇒ 写不出来 ⇒
+                        //   段指令整个丢 ⇒ 函数落在**错的段**里,而编译器一声不吭
+                        //   ⇒ 产物「能编过」但段是错的。⇒ 当场拒绝。
+                        //   (只有真的用到 link_section 的函数才走到这里 ⇒
+                        //    普通程序不受影响。)
+                        let _e = jh_fputs_stderr("jhyy error: cannot write the link_section side-file -- aborting\n" as *u8);
+                        let _x = exit(1 as i32);
+                        return 0;
                     }
+                    let fn_sym = (*fd_node).sym as *Sym;
+                    let _w1 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), section_fp);
+                    let _w2 = fwrite("|" as *u8, 1 as i64, 1 as i64, section_fp);
+                    let _w3 = fwrite((*fd_node).link_section, 1 as i64, strlen((*fd_node).link_section), section_fp);
+                    let _w4 = fwrite("\n" as *u8, 1 as i64, 1 as i64, section_fp);
                 }
             }
             cg_func(cg_raw, d_node, inline_fns_raw, n_inline, t);
@@ -6546,11 +6555,19 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
         // W-136:同 section_directive —— per-compilation 唯一路径
         let flag_path = jh_sidefile_path("_no_std.flag" as *u8);
         let flag_fp = fopen(flag_path, "wb" as *u8);
-        if flag_fp != (0 as *u8) {
-            let payload = "no_std\n" as *u8;
-            let _w = fwrite(payload, 1 as i64, 7 as i64, flag_fp);
-            let _c = fclose(flag_fp);
+        if flag_fp == (0 as *u8) {
+            // ⚠️ 2026-11-09 (W-224 的另一半):写侧失败**必须响亮**。
+            //   这个标志决定**链接行**(no_std vs hosted)⇒ 写不出来 ⇒ 链接行
+            //   会走错 ⇒ hosted `runtime.c` 的 `main` 跟用户的 `fn main` 撞名
+            //   ⇒ 链接失败,而 gcc 的真实诊断还会被 collect2 吞掉 ⇒ 用户只看到
+            //   「链接器坏了」。⇒ 与其编出一个错的链接行,不如当场报错。
+            let _e = jh_fputs_stderr("jhyy error: cannot write the no_std flag (the link line would be wrong) -- aborting\n" as *u8);
+            let _x = exit(1 as i32);
+            return 0;
         }
+        let payload = "no_std\n" as *u8;
+        let _w = fwrite(payload, 1 as i64, 7 as i64, flag_fp);
+        let _c = fclose(flag_fp);
     }
 
     return 1;

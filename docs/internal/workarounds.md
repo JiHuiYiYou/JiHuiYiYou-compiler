@@ -15694,9 +15694,20 @@ hosted 链接行把 `compiler/runtime/runtime.c` 也链进去,而 runtime.c 自�
 ⇒ 必须**先收再匹配**(`dis=$(objdump ...)` 然后 `grep -q ... <<< "$dis"`)——
 跟旁边那道 `naked_symbol` 门同款。
 
-⚠️ 顺带说明:这条修的是**路径**,不是「写侧失败时报错」。写侧的静默跳过
-(`if fp != 0`)仍在 —— 但路径不再可能失败,所以暂时不构成问题。
-(真要彻底,写侧失败时应当报错;那是另一件事,别跟这条混为一谈。)
+⚠️ **同一缺陷类的另一半也修了(2026-11-09):写侧失败必须响亮。**
+三个写侧原来是 `if fp != 0 { … }` —— **写不进去就静默跳过** ⇒ 特性悄悄
+失效、产物是错的、而编译器一声不吭。现在:
+| 写侧 | 写不进去的后果 | 现在 |
+|---|---|---|
+| `_no_std.flag`(codegen.jhyy) | 链接行走 hosted ⇒ 用户的 `fn main` 跟 hosted `runtime.c` 的 `main` 撞名 ⇒ 链接失败(诊断还被 collect2 吞) | **报错并退出** |
+| `_inline_asm.buf`(abi_amd64_win.jhyy) | 裸函数的 `.globl` + 标签整个丢 ⇒ 产物里没有那个符号 | **报错并退出** |
+| `_section_directive.buf`(codegen.jhyy) | 段指令丢 ⇒ 函数落在**错的段**里 | **报错并退出**(只有真用到 `#[link_section]` 的函数才触发 ⇒ 普通程序不受影响) |
+
+实测(把 `TMP`/`TEMP` 指到一个不存在的目录 ⇒ 临时目录不可写):
+- `#[no_std]` 程序 ⇒ `jhyy error: cannot write the no_std flag (the link line would be wrong) -- aborting`,退出码 1 ✓
+- `#[naked]` 函数 ⇒ `jhyy error: cannot write the naked side-file (the function's label would be lost) -- aborting`,退出码 1 ✓
+(跟 codegen.jhyy 里 SysV MEMORY-class struct 那条同款:
+「the compiler refuses to emit wrong code」。)
 
 **引用:** `compiler/src0/jhyy_helpers.c`(jh_sidefile_path)、
 `compiler/src0/codegen.jhyy`(写 `_no_std.flag`)、

@@ -166,19 +166,31 @@ fn abi_win_emit_function_header(
 // the side-file's raw `mangled:` label (multiple definition at link time).
 /* W-136:side-file 路径 per-compilation 唯一(pid 后缀)—— 见 jhyy_helpers.c */
 extern fn jh_sidefile_path(name: *u8) -> *u8;
+/* 2026-11-09 (W-224 的另一半):写侧失败要**响亮** —— 见 emit_naked_func_header */
+extern fn jh_fputs_stderr(s: *u8) -> i32;
+extern fn exit(code: i32);
 
 fn emit_naked_func_header(ir: *IRBuf, fn_sym: *Sym) -> i32 {
     // W-136:per-compilation 唯一路径(以前固定路径 ⇒ 并发编译互相截断)
     let buf_path = jh_sidefile_path("_inline_asm.buf" as *u8);
     let fp = fopen(buf_path, "ab" as *u8);
-    if fp != (0 as *u8) {
-        let _w1 = fwrite(".globl " as *u8, 1 as i64, 7 as i64, fp);
-        let _w2 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
-        let _w3 = fwrite("\n" as *u8, 1 as i64, 1 as i64, fp);
-        let _w4 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
-        let _w5 = fwrite(":\n" as *u8, 1 as i64, 2 as i64, fp);
-        let _c = fclose(fp);
+    if fp == (0 as *u8) {
+        // ⚠️ 2026-11-09 (W-224 的另一半):写侧失败**必须响亮**。
+        //   这个文件装着裸函数的 `.globl` + 标签 ⇒ 写不出来 ⇒ 标签整个丢 ⇒
+        //   产物里没有那个符号,而编译器**一声不吭** ⇒ 用户拿到一个「能编过
+        //   但没有中断入口」的产物。⇒ 宁可当场拒绝,也不编出这种产物。
+        //   (同 codegen.jhyy 里 SysV MEMORY-class struct 那条:
+        //    "the compiler refuses to emit wrong code")
+        let _e = jh_fputs_stderr("jhyy error: cannot write the naked side-file (the function's label would be lost) -- aborting\n" as *u8);
+        let _x = exit(1 as i32);
+        return 0 as i32;
     }
+    let _w1 = fwrite(".globl " as *u8, 1 as i64, 7 as i64, fp);
+    let _w2 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
+    let _w3 = fwrite("\n" as *u8, 1 as i64, 1 as i64, fp);
+    let _w4 = fwrite((*fn_sym).name, 1 as i64, strlen((*fn_sym).name), fp);
+    let _w5 = fwrite(":\n" as *u8, 1 as i64, 2 as i64, fp);
+    let _c = fclose(fp);
     let _i = ir;  // unused (kept for symmetry with other emit_*_header fns)
     return 1 as i32;
 }
