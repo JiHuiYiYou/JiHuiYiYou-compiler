@@ -46,6 +46,14 @@ compiler/tests/examples/*
 # v4.0.22: import 成环检测的回归门(§18 `circular import` 文本)
 !compiler/tests/examples/spec_err_circular_import/
 !compiler/tests/examples/spec_err_circular_import/*.jhyy
+# 2026-11-09 (W-222): std::arena 的 arena_reset 越界回归门 ——
+#   ⚠️ 这个目录**必须**没有本地 arena.jhyy ⇒ `import arena;` 才会回落到
+#   std lib 目录(hit 到 arena_test/ 那份本地副本就等于没测到真身)。
+!compiler/tests/examples/std_arena_reset/
+!compiler/tests/examples/std_arena_reset/*.jhyy
+# 2026-11-09 (W-223): #[naked] 函数带参数时编译器自己 segfault 的回归门
+!compiler/tests/examples/naked_fn_with_param/
+!compiler/tests/examples/naked_fn_with_param/*.jhyy
 # v2.3.0 hello-freestanding E2E: hand-written UEFI app + assembly helpers
 # tracked as build inputs (NOT generated). .jhyy + efi_*.s carveout'd because
 # efi_helpers.s + efi_main_asm.s are hand-written MS x64 ABI helpers linked

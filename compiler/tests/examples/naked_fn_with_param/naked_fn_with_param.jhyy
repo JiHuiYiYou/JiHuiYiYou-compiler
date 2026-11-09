@@ -1,0 +1,33 @@
+// naked_fn_with_param.jhyy — `#[naked]` 函数**带参数**时的回归(W-223 同路径)
+//
+// 2026-11-09 实测:修 W-223 之前,带参数的 naked 函数**把编译器自己搞崩了**
+//   —— 退出码 139(SIGSEGV),零输出。
+//
+// 根因:同一条「naked 走旁路文件」的通道上,还有一处没跟上 ——
+//   codegen 对**每个**函数都 emit「参数搬运」(`copy %x` / `alloc` / `store`),
+//   而 naked 函数**整条 QBE IR 都没有**(它只有旁路文件里的 `.globl` + 标签
+//   + 裸汇编体)⇒ 那几条搬运变成了**顶层**指令 ⇒ 落在 .text 段开头,
+//   把 IL 弄坏 ⇒ 编译器 segfault。
+//
+// 现在:naked 函数不登记参数、不 emit sret 搬运(它的 IR 是空的)。
+//   语义上也对:naked 没有 prologue ⇒ 参数按 ABI 约定**留在寄存器里**
+//   (Win x64: RCX/RDX/R8/R9)⇒ 裸汇编直接用寄存器,不该被搬进栈槽。
+//
+// 这个用例只验「编译器不崩 + 产物里有这个符号」——
+// 「首指令是不是 iret」由产物级门 naked_symbol 盯着
+// (compiler/tests/bootstrap/artifact_checks.sh)。
+//
+// EXPECT: 0
+// EXPECT-OUT: "naked with param ok"
+
+#[naked]
+fn irq_entry_arg(x: i64) {
+    asm!("iret");
+}
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+
+fn main_jhyy() -> i32 {
+    printf("naked with param ok\n", 0);
+    return 0 as i32;
+}

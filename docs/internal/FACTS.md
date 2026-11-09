@@ -47,10 +47,10 @@
 
 | 项 | 值 |
 |---|---|
-| `python regress.py` | **279 PASS + 0 XFAIL + 0 failed + 20 SKIP**（299 total） |
-| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 299 · 可跑 279 · 真断言 215 · literal-return-ok 8 · expect-error 56 · skipped 6 · library 14 · **零信号 0** |
+| `python regress.py` | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP**（301 total） |
+| 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 301 · 可跑 281 · 真断言 217 · literal-return-ok 8 · expect-error 56 · skipped 6 · library 14 · **零信号 0** |
 | 产物级门数 | `artifact-checks` —— **20 道**（`check_*` 函数数） |
-| 产物级门 KNOWN-FAIL | **1** 条（W-223 · `#[naked]` 的标签与函数体分离 —— 登记在台账，预期状态，不计红） |
+| 产物级门 KNOWN-FAIL | **0** 条（当前没有预期失败的门 —— 每道门都该自己绿） |
 
 ### 2.2 CI 门（完整清单）
 
@@ -127,9 +127,9 @@
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
 | 条目总数 | **220** |
-| ACTIVE | **3** |
+| ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 194 / 19 / 3 |
+| RESOLVED / SUPERSEDED / INVALID | 197 / 19 / 3 |
 
 ---
 

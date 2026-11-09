@@ -104,12 +104,9 @@ declare -A KNOWN_FAIL=(
     #   函数体,不再是「append 到 .s 末的死字节」⇒ 这一项升级成真门。
     # W-116 已修(2026-10-19),同一机制。
     #
-    # W-223(2026-11-09 登记):`#[naked]` 的**标签走旁路文件、函数体走 IL**
-    #   ⇒ 两者永不相遇(标签处是一串 nop,真正的 `iret` 落在 .text 段开头)。
-    #   两个签名 = 同一 bug 的两种形态(与 asm_before_ret 同款做法):
-    #     形态甲:标签压根没进产物 ⇒ 产物里没有 irq_entry 符号
-    #     形态乙:标签进了但函数体分离 ⇒ irq_entry 的首指令不是 iret
-    [naked_symbol]="W-223|产物里没有 irq_entry 符号|首指令不是 iret"
+    # W-223 已修(2026-11-09,v4.1.5)—— `#[naked]` 的**标签与函数体现在走同一条
+    #   通道**(旁路文件 `_inline_asm.buf`)⇒ 两者相邻 ⇒ 产物里 `irq_entry` 的
+    #   首指令就是 `iret` ⇒ 这一项升级成真门。
 )
 
 # 从 "link_section(.text.boot 已出现在产物里)" 里取出 "link_section"
@@ -511,7 +508,8 @@ EOF
 #     的覆盖缺口,只有产物级的门才抓得到。
 #
 # ⚠️ 隔离说明:本 check 只验「标签与函数体在一起」,**不**验旁路文件能不能写
-#   (那是 W-224 的面)⇒ 先把 `compiler/build/obj/` 建出来,让两个面互不污染。
+#   (那是 W-224 的面)⇒ 仍然把 `compiler/build/obj/` 建出来,让两个面互不污染。
+#   (W-224 已修 ⇒ 旁路文件现在落在 OS 临时目录;这一步只是保险。)
 check_naked_symbol() {
     hdr "W-223  #[naked] 函数的标签与函数体必须在一起"
     [ -x "$JHYY_EXE" ] || { skip "naked_symbol" "jhyy.exe 不存在"; return; }
@@ -549,7 +547,7 @@ EOF
     local first
     first=$(awk '/<irq_entry>:/ {f=1; next} f && /^ *[0-9a-f]+:/ {print $3; exit}' <<< "$dis")
     if [ "$first" != "iret" ]; then
-        bad "naked_symbol" "irq_entry 的首指令不是 iret(实际是 ${first:-?})—— 函数体与标签分离(W-223 未修)"
+        bad "naked_symbol" "irq_entry 的首指令不是 iret(实际是 ${first:-?})—— 函数体与标签分离(W-223 已修,这里又红了 ⇒ 回归了)"
         return
     fi
 

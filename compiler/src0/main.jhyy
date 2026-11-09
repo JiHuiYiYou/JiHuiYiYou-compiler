@@ -822,11 +822,14 @@ fn build_il(input: *u8, output: *u8, t: i32) -> i32 {
 
     // ── W-122 (2026-10-20):清掉**上一次**编译留下的 side-file ──
     //
-    // 这四个 side-file 是「codegen 写 → link 路径读」的跨阶段通道,路径**固定**:
-    //   compiler/build/obj/_no_std.flag
-    //   compiler/build/obj/_inline_asm.buf
-    //   compiler/build/obj/_section_directive.buf
-    //   compiler/build/obj/_fence.buf
+    // 这四个 side-file 是「codegen 写 → link 路径读」的跨阶段通道:
+    //   _no_std.flag
+    //   _inline_asm.buf
+    //   _section_directive.buf
+    //   _fence.buf
+    //
+    // 它们的**路径**由 jh_sidefile_path 给(W-136 起带 pid 后缀;W-224 起
+    // 落在 OS 临时目录 ⇒ **绝对路径**,不再相对 CWD 的 compiler/build/obj/)。
     //
     // 它们的生命周期本该是「**本次**编译写 → **本次**编译读」,但固定路径意味着:
     // 一次编译**没走到读的那一步**(比如 `--no-link` 只编 .s 不链),它们就
@@ -1112,7 +1115,7 @@ fn run_backend(il_path: *u8, asm_path: *u8, t: i32) -> i32 {
 //   v1.5.6: 替代裸 system("gcc ...") 拼 cmd_buf. jh_gcc_invoke 内部调
 //   jh_gcc_path() 拿 resolved gcc 路径 + 引号包裹, 写 cmd_buf 头部;
 //   cmd_buf 后续段 (args + -o EXE -lm) 由 caller 拼. 全 cmd 仍传 system().
-// v3.0.0 (3d no_std): if the side-file flag at compiler/build/obj/_no_std.flag
+// v3.0.0 (3d no_std): if the side-file flag `_no_std.flag` (路径见 jh_sidefile_path)
 //   exists (created by codegen when is_no_std=1), use a different link line:
 //     -nostartfiles -nodefaultlibs + link no_std_core/*.obj directly.
 //   Default path is unchanged (byte-equal IL → byte-equal exe behavior).
@@ -1395,7 +1398,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     let _lsd = apply_link_section_directives(temp_asm);
 
     // V3-B v3.0.1: inline asm macro post-QBE concat. If codegen produced any
-    // asm!() block, it appended raw asm text to compiler/build/obj/_inline_asm.buf
+    // asm!() block, it appended raw asm text to side-file `_inline_asm.buf` (路径见 jh_sidefile_path)
     // (fopen "ab" — see feedback_qbe_crlf_root_cause). We read that buffer and
     // append it to temp_asm (binary mode "ab" again) before gcc link, then
     // unlink so the next compile starts clean.
@@ -1425,7 +1428,7 @@ fn link_with_gcc(asm_path: *u8, exe_path: *u8) -> i32 {
     }
 
     // v3.0.5 (3f memory barrier): fence_*() builtin emitted raw mnem
-    // (mfence/lfence/sfence) to `compiler/build/obj/_fence.buf` side-file.
+    // (mfence/lfence/sfence) to side-file `_fence.buf` (路径见 jh_sidefile_path).
     // Same concat pattern as inline_asm: read binary, append to temp_asm
     // before gcc link, then unlink to keep next compile clean. Order matters:
     // append AFTER inline_asm (fences typically come after asm blocks in

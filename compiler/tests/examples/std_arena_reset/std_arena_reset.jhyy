@@ -1,0 +1,84 @@
+// std_arena_reset.jhyy — std::arena 的 `arena_reset` 越界回归(W-222)
+//
+// ⚠️ **这个用例必须待在「没有本地 arena.jhyy」的目录里**。
+//   `import arena;` 的查找顺序是「main 文件旁边 → std lib 目录」⇒
+//   放在 `compiler/tests/examples/arena_test/` 旁边的话,命中的是那份
+//   **本地副本**(`compiler/tests/examples/arena_test/arena.jhyy` —— 编译器
+//   自用 arena 的旧翻译)⇒ 根本碰不到 `compiler/src0/std/arena.jhyy`。
+//   ⇒ W-222 就是这么活下来的:std::arena **一行测试都没有**。
+//   (下面调 `ARENA_SIZE()` 也是同一个用意:它是 std 那份**独有**的函数,
+//    解析到别处就会编译失败 —— 目录摆错的话,这个用例自己就红了。)
+//
+// 复现的 bug(W-222):三个函数对「块有多大」各说各话 ——
+//   arena_new_block 按「本次要的量」malloc(旧:8 + size);
+//   arena_reset 却按 `def_size`(默认块大小,这里 4MB)摆 end;
+//   ⇒ reset 之后的 end 越过块尾 4MB,而真实块只有几十字节
+//   ⇒ 随后的分配**写穿块尾踩坏堆** ⇒ 进程 abort(退出码 != 0)。
+//
+// 现在:块大小 = max(def_size, 本次要的量),并且记在块头的 payload_size 里;
+// reset 从块头读回真实大小 ⇒ end 永远落在块内 ✓。
+//
+// 断言:整块写一遍 + 抽查三个字节读回 ⇒ 写穿的话这一步就把堆踩坏了。
+//
+// EXPECT: 0
+// EXPECT-OUT: "arena reset ok"
+
+import arena;
+
+extern fn printf(fmt: *u8, val: i32) -> i32;
+extern fn memset(p: *u8, val: i32, n: i64) -> *u8;
+
+// 4MB —— 旧实现下,reset 之后的 end 会被摆到 4MB 处,而真实块只有几十字节。
+
+fn main_jhyy() -> i32 {
+    let block: i64 = 4194304 as i64;
+    let mut a: Arena = Arena {
+        start: 0 as *u8,
+        cur: 0 as *u8,
+        end: 0 as *u8,
+        blocks: 0 as *u8,
+        def_size: 0 as i64,
+    };
+    // std 那份独有的函数 —— 解析到别的 arena 就会编译失败(见文件头注释)。
+    if ARENA_SIZE() != (40 as i64) {
+        return 1;
+    }
+    arena_init(&a, block);
+
+    // 先做一次小分配:建块。
+    let p = arena_alloc(&a, 8);
+    if p == (0 as *u8) {
+        return 2;
+    }
+
+    // reset:cur 回到块首。
+    arena_reset(&a);
+
+    // reset 之后再要一大块 —— 必须是**块内**的地址。
+    // 旧实现:fake end = data + 4MB ⇒ 这一块「装得下」⇒ 返回块首
+    // ⇒ 下面的 memset 写穿块尾 ⇒ 踩坏堆 ⇒ 进程 abort。
+    let want: i64 = block - (64 as i64);
+    let q = arena_calloc(&a, want);
+    if q == (0 as *u8) {
+        return 3;
+    }
+
+    // 整块写一遍 —— 写穿的话,堆当场就坏了。
+    memset(q, 90 as i32, want);
+
+    // 抽查三个字节读回(首 / 中 / 尾)。
+    let mut sum: i64 = 0;
+    sum = sum + (*(ptr_add(q, 0 as i64) as *u8) as i64);
+    sum = sum + (*(ptr_add(q, want / (2 as i64)) as *u8) as i64);
+    sum = sum + (*(ptr_add(q, want - (1 as i64)) as *u8) as i64);
+    if sum != (270 as i64) {
+        printf("bad sum %d\n", sum as i32);
+        return 4;
+    }
+
+    // 释放:堆若已被写坏,free 这一步通常也会炸。
+    arena_free(&a);
+
+    printf("arena reset ok\n", 0);
+    return 0;
+}

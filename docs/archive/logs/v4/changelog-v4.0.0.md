@@ -3540,6 +3540,38 @@ module 的 loc_filename）⇒ 自举闭环 / fixed-point 不受影响。（台�
 
 ---
 
+## v4.1.5 — 三条真修:std::arena 的 reset 越界 · `#[naked]` 的标签与体分离 · side-file 路径相对 CWD
+
+**日期:** 2026-11-09 · **台账:** W-222 / W-223 / W-224
+**性质:** **待发布**(变更槽,还没有 tag)。
+
+### 三条真修
+
+| # | 症状 | 台账 |
+|---|---|---|
+| 1 | **`std::arena` 的 `arena_reset` 之后的分配越出真实块** —— `arena_new_block` 按「本次要的量」malloc,`arena_reset` 却按 `def_size`(默认块大小,默认 1MB)摆 `end` ⇒ 真实块只有几十字节、`end` 却摆到 1MB ⇒ 分配写穿块尾**踩坏堆**(实测 exit `0xC0000405`)。⇒ 块大小改成 `max(def_size, 请求大小)`,并**记进块头**(`payload_size`)⇒ reset 从块头读回真实大小 | W-222 |
+| 2 | **`#[naked]` 的标签与函数体永不相遇** —— W-113 把 `asm!` 改走 IL 之后,标签还在旁路文件、体跑到了 IL 顶层 ⇒ 产物里 `irq_entry` 的首指令是一串 `nop`,真正的 `iret` 落在 `.text` 段开头 ⇒ **裸中断入口不可用**。⇒ naked 的**两头合到同一条通道**(体也走旁路文件)⇒ 首指令就是 `iret` | W-223 |
+| 3 | **side-file 的路径相对 CWD** ⇒ 在**自己项目目录**里编译时(`compiler/build/obj/` 不存在)写侧静默失败、读侧读不到 ⇒ `#[no_std]` 走 hosted 链接行 ⇒ hosted `runtime.c` 的 `main` 跟用户的 `fn main` 撞名 ⇒ **链接失败**(而 ld 自己的诊断被 collect2 吞了)。⇒ side-file 路径改成 **OS 临时目录下的绝对路径** ⇒ 任何 CWD 都写得出,也不再往用户源码树里扔临时文件 | W-224 |
+
+### 顺带修掉的两个洞
+
+- **`#[naked]` 函数带参数 ⇒ 编译器自己 segfault**(exit 139,零输出):naked 的 IR 是空的,
+  而 codegen 照常 emit 参数搬运 ⇒ 那些指令变成顶层指令 ⇒ 把 IL 弄坏。
+  ⇒ naked 函数不再登记参数、不 emit sret 搬运(语义上也对:naked 没有 prologue,
+  参数按 ABI 约定留在寄存器里)。**W-223 同一条通道上的同一类问题。**
+- **`std::arena` 此前**零测试覆盖** —— `compiler/tests/examples/arena_reset.jhyy` 是
+  **inline 副本**,而且实现更简单(只重置 `cur`、不碰 `end`)⇒ 真身从没被测过。
+  ⇒ 新增 `compiler/tests/examples/std_arena_reset/std_arena_reset.jhyy`,它**必须**
+  待在「没有本地 `arena.jhyy`」的目录里,否则 `import arena;` 会命中那份副本。
+
+### 门
+
+- 产物级门 `naked_symbol`(W-223 登记时是 KNOWN-FAIL)—— **删掉 KNOWN_FAIL 里那一行
+  ⇒ 自动升级成真门** ⇒ 现在 20 道门**全绿**(PASS 20 / KNOWN-FAIL 0 / FAIL 0)。
+- 回归:+2 个用例 ⇒ 281 PASS / 301 total(此前 279 / 299)。
+
+---
+
 ## v4.x follow-on plans (⏳)
 
 > **2026-10-15 更新:** 原 12 份未启动计划(`v4.1.0` … `v4.12.0`)已合并为单一

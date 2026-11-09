@@ -2528,6 +2528,51 @@ let _e3 = ir_emit_str(ir, "\n" as *u8);
 return 0 as i32;
 }
 
+// cg_emit_raw_asm_sidefile — 把 asm 文本 append 到 `_inline_asm.buf` side-file。
+//
+// ⚠️ 2026-11-09 真修(W-223):**naked 函数的 asm 体走这条路**。
+//   以前(到 W-113 为止)裸函数的体也走这里,而标签(`emit_naked_func_header`)
+//   也走这里 ⇒ 两者相邻 ⇒ `.globl sym` / `sym:` / `<asm 体>` 是一整块 ✓。
+//   W-113 把 asm! 改成走 IL(`dbgasm <hex>`)⇒ **体**改走了 IL,而**标签**
+//   留在 side-file ⇒ 两者**永不相遇**:标签孤零零在 .s 末尾(后面跟的是对齐
+//   填充),真正的 `iret` 落在 .text 段开头 ⇒ 裸中断入口不可用。
+//   (详见台账 W-223。)
+fn cg_emit_raw_asm_sidefile(text: *u8) -> i32 {
+    let buf_path = jh_sidefile_path("_inline_asm.buf" as *u8);
+    let fp = fopen(buf_path, "ab" as *u8);
+    if fp != (0 as *u8) {
+        let n = strlen(text);
+        let _w1 = fwrite(text, 1 as i64, n, fp);
+        let nl = "\n" as *u8;
+        let _w2 = fwrite(nl, 1 as i64, 1 as i64, fp);
+        let _c = fclose(fp);
+    }
+    return 0 as i32;
+}
+
+// cg_emit_raw_asm — 裸汇编文本的**唯一**出口(普通函数 / naked 函数分流)。
+//
+//   普通函数 ⇒ 走 IL(`dbgasm <hex>`)⇒ 后端把它**内联进函数体**(W-113)。
+//   naked 函数 ⇒ 走 side-file ⇒ 与它的 `.globl` + 标签**相邻**(W-223)。
+//
+//   为什么 naked 必须走 side-file:naked 函数**整条 QBE IR 都没有**
+//   (emit_naked_func_header 只往 side-file 写 `.globl` + 标签)⇒ 它的
+//   IR 是空的 ⇒ 体若也走 IL,那条 `dbgasm` 就成了**顶层**指令 ⇒ 落在
+//   .text 段开头,与标签分家。
+//   ⇒ 分流判据 = 「当前函数是不是 naked」(current_fn 已经是 *NodeFuncDecl,
+//     跟 cg_dbg_emit_loc 的判据同款)。
+fn cg_emit_raw_asm(cg_raw: *u8, ir: *IRBuf, text: *u8) -> i32 {
+    let cg = cg_raw as *CGContext;
+    if (*cg).current_fn != (0 as *u8) {
+        // current_fn 是 *NodeFuncDecl(cg_func 里 `current_fn = fd as *u8`)——
+        // **不要**调 node_func_decl_data(那会多算一次 NODE_SIZE())。
+        let cfd = (*cg).current_fn as *NodeFuncDecl;
+        if (*cfd).is_naked != (0 as i32) {
+            return cg_emit_raw_asm_sidefile(text);
+        }
+    }
+    return cg_emit_raw_asm_inline(ir, text);
+}
 
 // cg_expr:代码生成的**递归深度守卫**。
 //
@@ -5389,7 +5434,7 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
     // ── NODE_ASM_BLOCK ──
     // V3-B v3.0.1: asm!(...) inline asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
     //   codegen does NOT emit QBE IL — instead appends raw asm string to a
-    //   side-file (compiler/build/obj/_inline_asm.buf, fopen "ab" per
+    //   side-file `_inline_asm.buf` (路径见 jh_sidefile_path), fopen "ab" per
     //   feedback_qbe_crlf_root_cause). main.jhyy concatenates that file to
     //   the .s file before gcc link. v3.0.1 only supports a single string
     //   literal — operands array always NULL.
@@ -5397,7 +5442,8 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
         let ad = node_asm_block_data(n);
         // W-113:asm 文本走 IL(`dbgasm <hex>`)⇒ 后端把它**内联**进函数体 ✓
         // (之前是 append 到 .s 末的死字节 —— 见 cg_emit_raw_asm_inline 的注释)。
-        let _ra = cg_emit_raw_asm_inline(ir, (*ad).text);
+        // W-223:naked 函数例外 —— 它的体跟标签一起走 side-file(见 cg_emit_raw_asm)。
+        let _ra = cg_emit_raw_asm(cg_raw, ir, (*ad).text);
         // Return zero IRVal (asm is stmt-position; never used as expr value).
         return irval_box(ir, (zero).kind, (zero).id, (zero).ival, (zero).name, (zero).qbe_type);
     }
@@ -5421,7 +5467,8 @@ let cmp = cg_match_pattern(cg_raw, matched, arm_pattern, (*matched_node).type_pt
         }
         // W-113:跟 asm! 一样走 IL(`dbgasm <hex>`)⇒ 内联进函数体 ✓
         // (之前是 append 到 .s 末 —— 同样落在所有函数之外 = 死字节)。
-        let _rf = cg_emit_raw_asm_inline(ir, mnem);
+        // W-223:naked 函数例外(同 asm! 分支)。
+        let _rf = cg_emit_raw_asm(cg_raw, ir, mnem);
         return irval_box(ir, (zero).kind, (zero).id, (zero).ival, (zero).name, (zero).qbe_type);
     }
 
@@ -5648,7 +5695,12 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     (*cg).loop_continues = arena_alloc((*ir).arena, 32 as i64 * IRVAL_SIZE());
 
     // register sret slot if needed
-    if is_sret != 0 {
+    //
+    // ⚠️ 2026-11-09 真修(W-223):**naked 函数不 emit sret 搬运**。
+    //   naked 函数整条 QBE IR 都没有(它只有 side-file 里的 `.globl` + 标签 +
+    //   裸汇编体)⇒ 这里 emit 的 `copy %ret` 会变成**顶层**指令 ⇒ 落在 .text
+    //   段开头,跟函数体分家(还可能把 IL 弄坏)。
+    if is_sret != 0 && (*fd).is_naked == (0 as i32) {
         let sr = *ir_new_tmp(ir, QBE_L());
         (*cg).sret_slot_id = sr.id as i64;
         ir_emit_str(ir, "    %t" as *u8);
@@ -5657,8 +5709,16 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     }
 
     // register params as locals
+    //
+    // ⚠️ 2026-11-09 真修(W-223):**naked 函数不登记参数**。
+    //   两个理由:
+    //   ① 机制:naked 没有 QBE IR ⇒ 这里 emit 的参数搬运(`copy %x` / `alloc` /
+    //      `store`)会变成**顶层**指令 ⇒ 落在 .text 段开头,跟函数体分家。
+    //   ② 语义:naked 没有 prologue ⇒ 参数按 ABI 约定**留在寄存器里**
+    //      (Win x64: RCX/RDX/R8/R9)⇒ 裸汇编直接用寄存器,不该被搬进栈槽。
+    //   (naked 的函数体按 sema 只允许 asm!() 语句 ⇒ 没有局部变量引用参数。)
     let mut pi: i64 = 0 as i64;
-    while pi < nparams {
+    while pi < nparams && (*fd).is_naked == (0 as i32) {
         let param_slot2 = ptr_add_u8((*fd).params, pi * NODE_FUNC_DECL_PARAM_SIZE()) as *NodeFuncDeclParam;
         let p2_sym_raw = (*param_slot2).sym;
         let p2_sym = p2_sym_raw as *Sym;
@@ -6480,7 +6540,7 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
     // byte-identical to v2.4.0 (verified by manual diff; integration test
     // re-checks).
     if is_no_std != (0 as i32) {
-        // Side-file flag at compiler/build/obj/_no_std.flag. Use direct
+        // Side-file flag `_no_std.flag` (路径见 jh_sidefile_path). Use direct
         // fopen "wb" (per feedback_qbe_crlf_root_cause: IL/derived files
         // must use binary mode to avoid Windows \n → \r\n mangling).
         // W-136:同 section_directive —— per-compilation 唯一路径

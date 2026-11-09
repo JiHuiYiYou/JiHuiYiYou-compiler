@@ -247,12 +247,12 @@ Known gaps in the stdlib → [Known limitations](#known-limitations).
 
 ```bash
 python regress.py
-# => 279 passed, 20 skipped (299 total)
+# => 281 passed, 20 skipped (301 total)
 ```
 
 What those numbers mean — one term, one definition each (the counts themselves live
 in the [Status](#status-v414) table). The tool reports it as
-`passed=279/299 failed=0` and `skipped=20`:
+`passed=281/301 failed=0` and `skipped=20`:
 
 - **total** — every `.jhyy` file in `compiler/tests/examples/` except the
   `_`-prefixed helper fixtures.
@@ -440,7 +440,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests — 299 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
+│   │   ├── examples/           integration tests — 301 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -471,14 +471,14 @@ numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (regression suite) | **279 PASS + 0 XFAIL + 0 failed + 20 SKIP** (299 total) |
-| Assertion audit | 299 scanned · 279 runnable · 215 real assertions · 0 zero-signal |
+| `regress.py` (regression suite) | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP** (301 total) |
+| Assertion audit | 301 scanned · 281 runnable · 217 real assertions · 0 zero-signal |
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
-| `artifact_checks.sh` | **20 gates** (PASS 19 / KNOWN-FAIL 1 / FAIL 0) |
+| `artifact_checks.sh` | **20 gates** (PASS 20 / KNOWN-FAIL 0 / FAIL 0) |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
-| ACTIVE workarounds | **3** — see [FACTS.md § 3](docs/internal/FACTS.md) |
+| ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.4.exe` | shipped (~55 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.4.msi` | shipped (~28 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.4.vsix` | shipped (VS Code extension) |

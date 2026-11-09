@@ -1445,11 +1445,13 @@ __attribute__((used)) long long jh_cgstate_get_holds_cap(void) {
    (C-side static BSS-zero init)。 */
 
 /* ── W-136 (2026-10-25 真修):side-file 路径 **per-compilation 唯一** ──
+ * ── W-224 (2026-11-09 真修):side-file 路径改为**绝对路径**(OS 临时目录) ──
  *
- * 背景:编译器有三个「codegen 写 → link 步骤读」的跨阶段通道(side-file):
- *   compiler/build/obj/_inline_asm.buf      (naked fn / 旧 asm 路径)
- *   compiler/build/obj/_section_directive.buf(link_section 指令)
- *   compiler/build/obj/_no_std.flag         (no_std 链接行标志)
+ * 背景:编译器有四个「codegen 写 → link 步骤读」的跨阶段通道(side-file):
+ *   _inline_asm.buf      (naked fn 标签 + 体 / 旧 asm 路径)
+ *   _section_directive.buf(link_section 指令)
+ *   _no_std.flag         (no_std 链接行标志)
+ *   _fence.buf           (fence 内联前的旧通道,当前无写者)
  *
  * 它们以前用**固定路径** ⇒ 两个并发编译会互相踩:
  *   · codegen 用 fopen(path, "wb") 打开 ⇒ **截断** ⇒ 另一个进程刚写的内容没了;
@@ -1459,16 +1461,65 @@ __attribute__((used)) long long jh_cgstate_get_holds_cap(void) {
  * `#[link_section]` 的 `.section` 指令 / B 拿了 A 的 no_std 标志 ⇒ 产物变了,
  * **不报任何错**。
  *
- * 修法:路径加 **pid 后缀** ⇒ 每个进程用自己的文件 ⇒ 结构上不可能互踩。
+ * W-136 修法:路径加 **pid 后缀** ⇒ 每个进程用自己的文件 ⇒ 结构上不可能互踩。
  * (Windows 的 pid 在活进程之间唯一;pid 复用由「开头删干净」兜底。)
+ *
+ * ⚠️ W-224:pid 后缀解决了「互相踩」,但**没解决「相对 CWD」**。
+ *   旧路径是 `compiler/build/obj/<name>.<pid>` —— **相对进程 CWD**。
+ *   ⇒ 在**自己项目目录**里跑编译器(那正是 no_std 内核项目的常态)时,
+ *     `compiler/build/obj/` 根本不存在 ⇒ 写侧 fopen 失败、读侧 stat 失败:
+ *       · `_no_std.flag` 没写出来 ⇒ 链成 hosted ⇒ hosted runtime.c 的 `main`
+ *         跟用户的 `fn main` 撞名 ⇒ `multiple definition of 'main'`
+ *         (gcc/collect2 把这条诊断吞了 ⇒ 只剩一个莫名其妙的链接失败);
+ *       · `_inline_asm.buf` 没写出来 ⇒ `#[naked]` 的标签**全丢**。
+ *   ⇒ 「在自己项目目录里写内核」这个最核心的 no_std 场景,恰恰是唯一挂掉的场景。
+ *   现在:路径 = **OS 临时目录**下的绝对路径 ⇒ 任何 CWD 下都存在、都可写,
+ *   且不往用户的源码树里扔垃圾。
  *
  * 返回的是 **malloc 出来的**缓冲(调用方不释放)—— 编译器是短命进程,一次编译
  * 泄漏几个几十字节无关紧要;而返回静态缓冲会在多次调用时互相覆盖(写侧与读侧
  * 必须拿到**同一个**路径字符串)。
  */
+
+/* side-file 所在目录(绝对路径)—— 进程级缓存,首次调用时算一次。 */
+static char g_jh_sidefile_dir[1024];
+
+static void jh_sidefile_dir_init(void) {
+    if (g_jh_sidefile_dir[0] != '\0') {
+        return;
+    }
+#ifdef _WIN32
+    char tmp[MAX_PATH + 2];
+    DWORD n = GetTempPathA((DWORD)sizeof(tmp), tmp);
+    if (n > 0 && (size_t)n < sizeof(tmp)) {
+        /* GetTempPathA 总是带一个尾部分隔符 —— 去掉,拼的时候自己加。 */
+        size_t len = (size_t)n;
+        while (len > 0 && (tmp[len - 1] == '\\' || tmp[len - 1] == '/')) {
+            len--;
+        }
+        tmp[len] = '\0';
+        if (len > 0) {
+            snprintf(g_jh_sidefile_dir, sizeof(g_jh_sidefile_dir), "%s", tmp);
+            return;
+        }
+    }
+    /* 拿不到临时目录 ⇒ 退回 CWD(退化成 W-224 之前的行为,不更糟)。 */
+    snprintf(g_jh_sidefile_dir, sizeof(g_jh_sidefile_dir), ".");
+#else
+    const char *t = getenv("TMPDIR");
+    if (t == NULL || t[0] == '\0') {
+        t = "/tmp";
+    }
+    snprintf(g_jh_sidefile_dir, sizeof(g_jh_sidefile_dir), "%s", t);
+#endif
+}
+
 __attribute__((used)) char *jh_sidefile_path(const char *name) {
+    jh_sidefile_dir_init();
     size_t n = strlen(name);
-    char *buf = (char *)malloc(n + 64);
+    size_t dlen = strlen(g_jh_sidefile_dir);
+    size_t need = dlen + n + 64;
+    char *buf = (char *)malloc(need);
     if (buf == NULL) {
         /* malloc 失败 = 进程内存见底。此时**不能**返回 NULL:8 个调用点会把
            NULL 直接喂给 fopen / jh_unlink_file ⇒ 无消息崩溃。
@@ -1478,8 +1529,19 @@ __attribute__((used)) char *jh_sidefile_path(const char *name) {
         static int fallback_idx = 0;
         int slot = fallback_idx;
         fallback_idx = (fallback_idx + 1) % 32;
+        /* -Wformat-truncation:gcc 不知道 name 的长度 ⇒ 保守地认为会截断。
+           截断在这里**无害**(截出来的路径一样是「写侧与读侧同一个字符串」),
+           而这条路径只在 malloc 失败时走 ⇒ 忽略即可(同本文件别处的做法)。 */
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wformat-truncation"
+#ifdef _WIN32
         snprintf(fallback[slot], sizeof(fallback[slot]),
-                 "compiler/build/obj/%s", name);
+                 "%s\\%s", g_jh_sidefile_dir, name);
+#else
+        snprintf(fallback[slot], sizeof(fallback[slot]),
+                 "%s/%s", g_jh_sidefile_dir, name);
+#endif
+        #pragma GCC diagnostic pop
         return fallback[slot];
     }
 #ifdef _WIN32
@@ -1490,7 +1552,11 @@ __attribute__((used)) char *jh_sidefile_path(const char *name) {
        明说「其他 OS 留给未来扩展」⇒ 别让这个文件在 POSIX 上编不过。 */
     unsigned long pid = (unsigned long)getpid();
 #endif
-    snprintf(buf, n + 64, "compiler/build/obj/%s.%lu", name, pid);
+#ifdef _WIN32
+    snprintf(buf, need, "%s\\%s.%lu", g_jh_sidefile_dir, name, pid);
+#else
+    snprintf(buf, need, "%s/%s.%lu", g_jh_sidefile_dir, name, pid);
+#endif
     return buf;
 }
 /* jh_cgstate_get_state / jh_cgstate_set_state —— 见上方 v4.0.2.2 (W-096) 的说明。

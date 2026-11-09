@@ -11,6 +11,15 @@
 //     两个 Arena 并存:compiler 用 src0/arena.jhyy,std lib user 用 std::Arena)
 //   - 后端 alloc 走 libc malloc(M0 简化,MMAP 后端留 v3.x 中末)
 //
+// 2026-11-09 真修(W-222):块大小这件事,三个函数曾经各说各话 ——
+//   arena_new_block 按「本次要的量」malloc,arena_reset 却按 def_size 摆 end
+//   ⇒ reset 之后的分配越过块尾写坏堆。
+//   现在:块大小 = max(def_size, 本次要的量),并且**记在块头里**
+//   (payload_size),reset 从块头读回真实大小 ⇒ end 永远落在块内 ✓。
+//   (compiler/src0/arena.jhyy —— 编译器自用的那份 —— 一直是对的:
+//    它的块大小本来就是 max(def_size, min_size) ⇒ end = data + def_size
+//    必然落在块内。本文件是 std 侧另写的一份,没跟上。)
+//
 // API:
 //   std::Arena (struct)
 //   arena_init(a, default_size) -> 1 / 0
@@ -48,12 +57,22 @@ type Arena = struct {
 fn ARENA_SIZE() -> i64 { return 40 as i64; }
 
 // ArenaBlock: linked-list node;arena_alloc 时新建,linked by blocks head
-// 字节布局:next (8) = 8. arena_new_block 时 malloc(8 + alloc_size)。
+// 字节布局:next (8) + payload_size (8) = 16. arena_new_block 时 malloc(16 + payload)。
+//
+// ⚠️ 2026-11-09 真修(W-222):payload_size 这一格**不能省** ——
+//   arena_reset 要知道「这个块到底多大」才能把 end 摆对。
+//   旧布局 [next(8)][payload...] 只有 8 字节头 ⇒ reset 拿不到块的真实大小,
+//   只能拿 def_size 猜 —— 而 def_size 是「**默认**块大小」不是「这个块的
+//   实际大小」⇒ 真实块只有几十字节、end 却摆到 def_size(默认 1MB)⇒
+//   reset 之后的分配**越过块尾写坏堆**。
+//   (compiler/src0/std/string.jhyy 的 mini arena 早就用「把 payload 大小存在
+//    块头里」这套写法 —— 同一个坑,同一个解法。)
 type ArenaBlock = struct {
     next: *u8,
+    payload_size: i64,
 }
 
-fn ARENA_BLOCK_HEADER() -> i64 { return 8 as i64; }
+fn ARENA_BLOCK_HEADER() -> i64 { return 16 as i64; }
 
 // ════════════════════════════════════════════════════
 // ptr_add — 本地指针算术
@@ -72,17 +91,25 @@ fn align_up(x: i64, align: i64) -> i64 {
 // arena_new_block — 私有 API,新建一块并 link 到 blocks head
 // ════════════════════════════════════════════════════
 fn arena_new_block(a: *Arena, size: i64) -> i32 {
-    let raw = malloc(ARENA_BLOCK_HEADER() + size);
+    // 块大小 = max(def_size, 本次要的量) —— def_size 是「**默认**块大小」
+    // (跟 compiler/src0/arena.jhyy 同一套规矩):小请求也占一整块,大请求
+    // 也不会把块切碎。
+    let mut block_size: i64 = (*a).def_size;
+    if block_size < size {
+        block_size = size;
+    }
+    let raw = malloc(ARENA_BLOCK_HEADER() + block_size);
     if raw == (0 as *u8) {
         return 0;
     }
     let b = raw as *ArenaBlock;
     (*b).next = (*a).blocks;
+    (*b).payload_size = block_size;
     (*a).blocks = b as *u8;
     let data = ptr_add(raw, ARENA_BLOCK_HEADER());
     (*a).start = data;
     (*a).cur = data;
-    (*a).end = ptr_add(data, size);
+    (*a).end = ptr_add(data, block_size);
     return 1;
 }
 
@@ -142,13 +169,19 @@ fn arena_calloc(a: *Arena, size: i64) -> *u8 {
 }
 
 // arena_reset — 重置 cur 到 start (不释放 block;arena 后续 alloc 复用这些 block)
+//
+// ⚠️ 2026-11-09 真修(W-222):end 必须按**块的真实大小**摆,不能拿 def_size 猜。
+//   旧实现 `end = data + def_size`:def_size 是「默认块大小」(默认 1MB),
+//   而 reset 到的这个块可能只有几十字节 ⇒ end 越过块尾 ⇒ 之后的分配
+//   **写穿块尾踩坏堆**(实测:写到 64KB 直接踩坏堆 ⇒ 进程 abort)。
+//   现在 end 来自块头的 payload_size ⇒ 永远落在块内 ✓。
 fn arena_reset(a: *Arena) -> i32 {
     if (*a).blocks != (0 as *u8) {
         let first = (*a).blocks;
         let data = ptr_add(first, ARENA_BLOCK_HEADER());
         (*a).start = data;
         (*a).cur = data;
-        (*a).end = ptr_add(data, (*a).def_size);
+        (*a).end = ptr_add(data, (*(first as *ArenaBlock)).payload_size);
     }
     return 1;
 }

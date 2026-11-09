@@ -125,7 +125,7 @@ fn NODE_NULL()           -> i32 { return 50 as i32; }
 fn NODE_DEFER()          -> i32 { return 51 as i32; }
 // V3-B v3.0.1: asm!(...) inline x86-64 asm macro per D42 (docs/plans/v2/v2.0.0-os-prep.md).
 // codegen does NOT emit QBE IL — instead appends raw asm string to a side-file
-// (compiler/build/obj/_inline_asm.buf) that main.jhyy concatenates to the .s
+// (side-file `_inline_asm.buf`,路径见 jh_sidefile_path) that main.jhyy concatenates to the .s
 // file before gcc link. v3.0.1 only supports a single string literal (no
 // operands, no templates); v3.1+ adds operand constraints.
 fn NODE_ASM_BLOCK()      -> i32 { return 52 as i32; }

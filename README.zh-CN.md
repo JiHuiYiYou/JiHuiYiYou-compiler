@@ -236,11 +236,11 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 279 passed, 20 skipped (299 total)
+# => 281 passed, 20 skipped (301 total)
 ```
 
 这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v414)那张表里)。
-工具自己报的是 `passed=279/299 failed=0` 与 `skipped=20`:
+工具自己报的是 `passed=281/301 failed=0` 与 `skipped=20`:
 
 - **total** —— `compiler/tests/examples/` 下除 `_` 前缀的辅助 fixture 外的每一个
   `.jhyy` 文件。
@@ -416,7 +416,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试 —— 299 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
+│   │   ├── examples/           集成测试 —— 301 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -444,14 +444,14 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py`(回归套件) | **279 PASS + 0 XFAIL + 0 failed + 20 SKIP**(299 total) |
-| 断言强度审计 | 扫 299 · 可跑 279 · 真断言 215 · 零信号 0 |
+| `regress.py`(回归套件) | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP**(301 total) |
+| 断言强度审计 | 扫 301 · 可跑 281 · 真断言 217 · 零信号 0 |
 | 基准套件 | 9 道题 · 4 个覆盖轴 —— [已发布快照](bench/baseline/RESULTS-2026-11-04.md)(jhyy 与 gcc 的墙钟对比;**代码生成质量的地板是 gcc `-O0`**,不是及格线) |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
-| `artifact_checks.sh` | **20 道产物级门**(PASS 19 / KNOWN-FAIL 1 / FAIL 0) |
+| `artifact_checks.sh` | **20 道产物级门**(PASS 20 / KNOWN-FAIL 0 / FAIL 0) |
 | `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
-| ACTIVE workaround | **3** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
+| ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
 | `jhyy-installer-4.1.4.exe` | 已发布(~55 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.4.msi` | 已发布(~28 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.4.vsix` | 已发布(VS Code 扩展) |

@@ -77,7 +77,7 @@ fn codegen_amd64_init() -> i32 {
 //
 // V3-B v3.0.1 fill: same side-file append as codegen.jhyy NODE_ASM_BLOCK case.
 // Both paths (QBE + V2-A) append raw asm text to
-// compiler/build/obj/_inline_asm.buf; main.jhyy concatenates that buffer to
+// side-file `_inline_asm.buf` (路径见 jh_sidefile_path); main.jhyy concatenates that buffer to
 // the .s file before gcc link. This keeps the V2-A escape hatch byte-equal
 // with the QBE path. (v2.x mid ship phase will eventually inline-merge the
 // two, but for now we ship the simpler side-file pattern.)
