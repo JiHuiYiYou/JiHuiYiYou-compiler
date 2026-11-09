@@ -1,5 +1,5 @@
 {
-    "version": "4.1.4",
+    "version": "4.1.5",
     "description": "JHYY (机会翼游) — statically-typed language + bootstrapping compiler for Windows",
     "homepage": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler",
     "license": {
@@ -7,8 +7,8 @@
         "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/blob/main/LICENSE"
     },
     "depends": "",
-    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.4/jhyy-installer-4.1.4.exe",
-    "hash": "cdfcc14517671c3a1a00afe194d9bd2bb1f451cd5f612125f2fa195d5f0e1705",
+    "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.5/jhyy-installer-4.1.5.exe",
+    "hash": "65a5246332bbdd7500647f6f59cac7310b4d816ccc31ffa46c57252d51fde7ca",
     "shortcuts": [
         ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
         ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],

@@ -23,6 +23,7 @@
 
 | Version | One-line summary |
 |---|---|
+| **v4.1.5** | Three real fixes: `std::arena` reset no longer writes past the block; a `#[naked]` function's label and body finally sit together (the first instruction is `iret` again); side files live in an absolute path so `#[no_std]` links from any directory |
 | **v4.1.4** | the compiler stops computing the wrong answer silently — call arguments past the 16th were discarded (a 20-argument sum returned 117 instead of 210), SysV stack arguments overwrote the caller's own locals, the floating-point stack-argument path clobbered `%xmm15` (callee-saved under SysV), and a range pattern with identifier endpoints silently matched everything while binding a symbol literally named `..`; path buffers are bounded and byte-wise, the stderr pipe no longer deadlocks, a user program's stderr is no longer swallowed, and deeply nested expressions are rejected with an error instead of a stack overflow; the CLI tells the truth, the gates stop being green by construction, and the release chain pins its ref, its actions and its tool versions |
 | **v4.1.3** | `u32`/`u64` division and remainder are unsigned, signed `>>` is arithmetic, `u32 → i64` zero-extends, integer literals are evaluated exactly as `u64` (an out-of-range literal is now a compile error instead of a silent saturation), `std::fmt` prints `i64::MIN`/`i32::MIN` and every `u32` in full, module-level 64-bit globals keep their value — plus the benchmark suite and a differential gate that is now a real regression gate; the fix uncovered three self-hosting bugs, all fixed |
 | **v4.1.2** | `jhyy --version` never existed — said out loud, plus version-number automation (`VERSION` as the single source of truth) |
@@ -51,7 +52,6 @@
 | v4.4.0 (stage 1) | Register allocator + safety net (byte-identical output); stage 2 is the emit layer consuming registers |
 | v4.2.1 | Frame size computed from what the function actually needs (the hard-coded 8192-byte reserve is gone) ⇒ ~41% runtime |
 | v4.2.0 | Runtime performance gate lands in CI (hard gate on static metrics, wall-clock only reported) + `bench.sh` timer really fixed |
-| v4.1.5 | Three real fixes: `std::arena` reset no longer writes past the block; a `#[naked]` function's label and body finally sit together (the first instruction is `iret` again); side files live in an absolute path so `#[no_std]` links from any directory |
 | v4.0.21 | Side files are unique per PID (concurrent compiles stop colliding) + a Makefile variable that was never updated + a cross-drive rename failure + the C-side compiler deleted |
 | v4.0.20 | An audit of "skipped test / new test" surfaced three problems in the gates themselves |
 | v4.0.18 | Minimal exclusivity check for `&mut` + dead stub removal; lexer EOF guard; reproducible artifacts; `asm!` and memory barriers actually inlined into the function body |
