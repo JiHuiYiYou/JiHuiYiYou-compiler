@@ -201,13 +201,13 @@
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 —— **不预先落文档**，启动时再领版本号。
 
-### 4.5 第三方包管理上游发布（**2026-11-07 随 v4.1.4 发出去**）
+### 4.5 第三方包管理上游发布（**2026-11-07 随 v4.1.4 发出去 · 2026-11-09 随 v4.1.5 跟上**）
 
-| 渠道 | 状态（2026-11-07） |
+| 渠道 | 状态（2026-11-09） |
 |---|---|
-| winget-pkgs | **PR 已提交**（`JiHuiYiYou/winget-pkgs` 的 `jh-4.1.4` 分支 → microsoft/winget-pkgs）—— manifest 三件套在 `manifests/j/JiHuiYiYou/JHYY/4.1.4/`，`InstallerSha256` 按**已发布**的资产回填。**上游合并前 `winget install` 还装不上** —— winget-pkgs 的自动校验 + CLA 签署由上游处理 |
-| scoop | **个人 bucket 已建**（`JiHuiYiYou/scoop-bucket` 的 `bucket/jhyy.json`）—— 按本仓 2026-11-05 的决定：**先走个人 bucket**，Main bucket 另议（装法：`scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket`） |
-| 仓内 manifest | **已修好 + 已随版发布** —— 4.1.4 的三件套 + scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt 实测命中。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样） |
+| winget-pkgs | **PR 已提交**（`JiHuiYiYou/winget-pkgs` 的 `jh-4.1.5` 分支 → microsoft/winget-pkgs，**PR #475435**；4.1.4 的 #473726 仍 OPEN）—— manifest 三件套在 `manifests/j/JiHuiYiYou/JHYY/4.1.5/`，`InstallerSha256` 按**已发布**的资产回填（本地构建那个不算数：MSI 含时间戳，两边差一整个）。本机 `winget validate` **验证成功** ✓。**上游合并前 `winget install` 还装不上** —— winget-pkgs 的自动校验 + CLA 签署由上游处理 |
+| scoop | **个人 bucket 已建**（`JiHuiYiYou/scoop-bucket` 的 `bucket/jhyy.json`）—— 按本仓 2026-11-05 的决定：**先走个人 bucket**，Main bucket 另议（装法：`scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket`）。4.1.5 已回填（版本 + 已发布资产的 sha256）✓ |
+| 仓内 manifest | **已修好 + 已随版发布** —— 4.1.5 的三件套 + scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt **实测命中**（autoupdate 的正则从已发布的 SHA256.txt 里取出的 hash 与 bucket 里写的**逐字相同** ✓）。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样） |
 
 > ⚠️ 别把这一格跟 § 4.4 的「包管理器」混为一谈 —— § 4.4 说的是**语言层面**的
 > 包管理器（`jhyy new/build/test` + `jhyy.toml`），这一格说的是**发行渠道**。
