@@ -91,6 +91,16 @@ def _facts_numbers() -> dict[str, int]:
             "ERR: FACTS.md 里找不到产物级门数"
             "(`artifact-checks` —— **N 道**)"
             " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
+    # 产物级门的 KNOWN-FAIL 数(2026-11-09 补):门面那行现在带 breakdown
+    # (PASS / KNOWN-FAIL / FAIL)⇒ 变异文本要靠它拼 ⇒ 跟门数一样从 FACTS.md
+    # 现场读,**别写死**(写死 = KNOWN-FAIL 数一变就找不到变异点 ⇒ CI 红 ——
+    # 跟 W-220 同一个坑:变异点把「会被改的数」写死在自己身上)。
+    knf = re.search(r"产物级门 KNOWN-FAIL \| \*\*(\d+)\*\*", text)
+    if not knf:
+        raise SystemExit(
+            "ERR: FACTS.md 里找不到产物级门的 KNOWN-FAIL 数"
+            "(`产物级门 KNOWN-FAIL` —— **N 条**)"
+            " —— 变异文本靠它拼 ⇒ 读不到就没法跑。")
     # 产物体积(2026-11-07 补):变异点原来把「~55 MB」写死在
     # 脚本里 ⇒ 体积一变(本轮发版实测 55 → 54)就找不到
     # 变异点。⇒ 与其它数一样,从 FACTS.md 现场读。
@@ -108,6 +118,7 @@ def _facts_numbers() -> dict[str, int]:
         "runnable": int(a.group(2)),
         "assertions": int(a.group(3)),
         "artifact_checks": int(ac.group(1)),
+        "known_fail": int(knf.group(1)),
         "size_installer": int(sz.group(1)),
     }
 
@@ -116,6 +127,7 @@ _N = _facts_numbers()
 _P, _S, _T = _N["pass"], _N["skip"], _N["total"]
 _SC, _RN, _RA = _N["scanned"], _N["runnable"], _N["assertions"]
 _AC = _N["artifact_checks"]
+_KNF = _N["known_fail"]
 _SZ = _N["size_installer"]
 
 # ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
@@ -135,6 +147,12 @@ _AU_EN = f"| Assertion audit | {_SC} scanned · {_RN} runnable · {_RA} real ass
 _RB_ZH = f"# => {_P} passed, {_S} skipped ({_T} total)"
 _RT_ZH = f"| `regress.py`(\u56de\u5f52\u5957\u4ef6) | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**({_T} total) |"
 _AU_ZH = f"| \u65ad\u8a00\u5f3a\u5ea6\u5ba1\u8ba1 | \u626b {_SC} \u00b7 \u53ef\u8dd1 {_RN} \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7 \u96f6\u4fe1\u53f7 0 |"
+# \u4ea7\u7269\u7ea7\u95e8\u90a3\u884c(2026-11-09 \u6539\u7248):\u95e8\u6570\u4ece\u300cN PASS / 0 FAIL\u300d\u6539\u6210
+# \u300cN \u9053 + breakdown(PASS / KNOWN-FAIL / FAIL)\u300d\u2014\u2014
+# \u56e0\u4e3a W-223 \u767b\u8bb0\u6210 KNOWN-FAIL \u4e4b\u540e,\u300cN PASS\u300d\u4e0d\u518d\u662f\u4e8b\u5b9e(N \u91cc\u6709\u4e00\u6761\u662f KNOWN-FAIL)\u3002
+# \u26a0\ufe0f \u6a21\u677f\u5fc5\u987b\u4e0e\u95e8\u9762\u91cc\u90a3\u4e24\u884c**\u9010\u5b57\u4e00\u81f4** \u2014\u2014 \u4e0d\u4e00\u81f4 \u21d2 \u53d8\u5f02\u70b9\u627e\u4e0d\u5230 \u21d2 CI \u7ea2\u3002
+_AC_EN = f"| `artifact_checks.sh` | **{_AC} gates** (PASS {_AC - _KNF} / KNOWN-FAIL {_KNF} / FAIL 0) |"
+_AC_ZH = f"| `artifact_checks.sh` | **{_AC} \u9053\u4ea7\u7269\u7ea7\u95e8**(PASS {_AC - _KNF} / KNOWN-FAIL {_KNF} / FAIL 0) |"
 # FACTS.md(事实单一真相源)
 _FT_REG = f"**{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**\uff08{_T} total\uff09"
 _FT_AUD = f"\u626b\u63cf {_SC} \u00b7 \u53ef\u8dd1 {_RN} \u00b7 \u771f\u65ad\u8a00 {_RA} \u00b7"
@@ -176,12 +194,12 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         f"# => {_P} passed, {_S + 1} skipped ({_T} total)")]),
     ("artifact_checks 门数", [(
         "README.md",
-        f"| `artifact_checks.sh` | **{_AC} PASS / 0 FAIL** |",
-        f"| `artifact_checks.sh` | **{_AC - 4} PASS / 0 FAIL** |")]),
+        _AC_EN,
+        f"| `artifact_checks.sh` | **{_AC - 4} gates** (PASS {_AC - _KNF} / KNOWN-FAIL {_KNF} / FAIL 0) |")]),
     ("artifact_checks 门数（中文门面）", [(
         "README.zh-CN.md",
-        f"| `artifact_checks.sh` | **{_AC} PASS / 0 FAIL** |",
-        f"| `artifact_checks.sh` | **{_AC - 3} PASS / 0 FAIL** |")]),
+        _AC_ZH,
+        f"| `artifact_checks.sh` | **{_AC - 3} 道产物级门**(PASS {_AC - _KNF} / KNOWN-FAIL {_KNF} / FAIL 0) |")]),
     # (e) 产物尺寸:FACTS § 1 声明 vs 两份 README
     # ⇒ 尺寸也从 FACTS.md 现场读(上面），不写死。
     ("产物尺寸（安装器）", [(

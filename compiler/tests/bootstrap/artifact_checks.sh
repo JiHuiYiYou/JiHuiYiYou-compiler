@@ -103,6 +103,13 @@ declare -A KNOWN_FAIL=(
     # W-113 已修(2026-10-20,v4.0.18)—— asm 文本经 IL(`dbgasm <hex>`)内联进
     #   函数体,不再是「append 到 .s 末的死字节」⇒ 这一项升级成真门。
     # W-116 已修(2026-10-19),同一机制。
+    #
+    # W-223(2026-11-09 登记):`#[naked]` 的**标签走旁路文件、函数体走 IL**
+    #   ⇒ 两者永不相遇(标签处是一串 nop,真正的 `iret` 落在 .text 段开头)。
+    #   两个签名 = 同一 bug 的两种形态(与 asm_before_ret 同款做法):
+    #     形态甲:标签压根没进产物 ⇒ 产物里没有 irq_entry 符号
+    #     形态乙:标签进了但函数体分离 ⇒ irq_entry 的首指令不是 iret
+    [naked_symbol]="W-223|产物里没有 irq_entry 符号|首指令不是 iret"
 )
 
 # 从 "link_section(.text.boot 已出现在产物里)" 里取出 "link_section"
@@ -473,6 +480,88 @@ EOF
         return
     fi
     ok "asm_before_ret(asm 字节都在某个函数体的 ret 之前)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3b. W-223 — `#[naked]` 的**标签与函数体**必须落在同一处
+# ════════════════════════════════════════════════════════════════════════════
+#
+# 症状(2026-11-09 实测,v4.1.4):`#[naked] fn irq_entry() { asm!("iret"); }`
+#   ① 最终 exe 里 **`irq_entry` 符号存在**(`.globl` + 标签进了产物);
+#   ② 但它的**首指令是一串 `nop` 填充,不是 `iret`**;
+#   ③ 那串 `iret` 字节落在 **`.text` 段的最开头**(所有函数之外)。
+#   ⇒ 标签与函数体**永不相遇**:跳进 irq_entry 只会执行一串 nop,不会 iret。
+#
+# 根因(W-113 的修复边界没覆盖到 naked 路径 —— 两个通道分家了):
+#   · **头**(`.globl irq_entry` + `irq_entry:`)仍写进旁路文件 `_inline_asm.buf`
+#     —— `compiler/src0/abi_amd64_win.jhyy` 的 `emit_naked_func_header`;
+#   · **体**(`asm!` 的字节)自 W-113(2026-10-20,v4.0.18)起走 IL(`dbgasm <hex>`)
+#     —— `compiler/src0/codegen.jhyy` 的 NODE_ASM_BLOCK 分支;
+#   · 而 naked 函数**不 emit QBE IR** ⇒ 那条 `dbgasm` 落在 IL 的**顶层**
+#     ⇒ 后端把它写在 .text 段开头(所有函数之外);
+#   · 链接时旁路文件被拼到 .s **末尾**(`main.jhyy` 的 `link_with_gcc`)
+#     ⇒ 标签在文件尾、函数体在文件头 ⇒ 两者永不相遇。
+#
+# ⚠️ 为什么这道门不能省:
+#   · `compiler/tests/examples/naked_interrupt_entry.jhyy` 只断言 `EXPECT: 0`
+#     (main_jhyy 的退出码)⇒ 裸中断入口整个坏掉,它照样 PASS(它自己的注释就写了
+#     「哪怕 codegen 明天给它套上完整 prologue,这个测试照样 PASS」)。
+#   · `asm_before_ret` 那道门只覆盖 **hosted** 函数的 inline asm ⇒ 也不覆盖 naked。
+#   ⇒ 两道门都绿着,而 naked 入口是坏的 —— 这类「测的是副本 / 测的不是这一条」
+#     的覆盖缺口,只有产物级的门才抓得到。
+#
+# ⚠️ 隔离说明:本 check 只验「标签与函数体在一起」,**不**验旁路文件能不能写
+#   (那是 W-224 的面)⇒ 先把 `compiler/build/obj/` 建出来,让两个面互不污染。
+check_naked_symbol() {
+    hdr "W-223  #[naked] 函数的标签与函数体必须在一起"
+    [ -x "$JHYY_EXE" ] || { skip "naked_symbol" "jhyy.exe 不存在"; return; }
+    command -v objdump >/dev/null || { skip "naked_symbol" "objdump 不在 PATH"; return; }
+    mkdir -p "$JHYY_ROOT/compiler/build/obj" 2>/dev/null || {
+        badenv "naked_symbol" "建不出 compiler/build/obj/"; return; }
+
+    local f="$WORK/naked.jhyy"
+    cat > "$f" <<'EOF'
+#[naked]
+fn irq_entry() {
+    asm!("iret");
+}
+fn main_jhyy() -> i32 { return 0 as i32; }
+EOF
+    if ! "$JHYY_EXE" compile "$f" -o "$WORK/naked" > "$WORK/naked.log" 2>&1; then
+        badenv "naked_symbol" "编译失败:$(tail -3 "$WORK/naked.log" | tr '\n' ' ')"
+        return
+    fi
+    local exe; exe=$(cygpath -w "$WORK/naked.exe" 2>/dev/null || echo "$WORK/naked.exe")
+    [ -f "$exe" ] || { badenv "naked_symbol" "没产出 .exe"; return; }
+
+    local dis
+    dis=$(objdump -d "$exe" 2>/dev/null)
+
+    # ① 符号在不在(.globl + 标签进了最终产物没有)
+    if ! grep -q '<irq_entry>:' <<< "$dis"; then
+        bad "naked_symbol" "产物里没有 irq_entry 符号 —— naked 函数的 .globl/标签没进最终 exe"
+        return
+    fi
+
+    # ② 标签处的**第一条指令**必须就是函数体
+    # objdump 每行格式 `addr:\tbytes...\tmnemonic operands` —— 助记符列随字节数
+    # 变(1 或 2 字节指令),按文本取第 3 列。
+    local first
+    first=$(awk '/<irq_entry>:/ {f=1; next} f && /^ *[0-9a-f]+:/ {print $3; exit}' <<< "$dis")
+    if [ "$first" != "iret" ]; then
+        bad "naked_symbol" "irq_entry 的首指令不是 iret(实际是 ${first:-?})—— 函数体与标签分离(W-223 未修)"
+        return
+    fi
+
+    # ③ 函数体不许还有一份游离在所有函数之外
+    local nret
+    nret=$(grep -c 'iret' <<< "$dis")
+    if [ "$nret" -gt 1 ]; then
+        bad "naked_symbol" "反汇编里有 $nret 条 iret —— 函数体还有一份落在函数之外"
+        return
+    fi
+
+    ok "naked_symbol(irq_entry 符号存在,首指令就是 iret ✓)"
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1380,6 +1469,7 @@ want build_o_flag && check_build_o_flag
 want link_section    && check_link_section
 want link_section_build && check_link_section_build
 want asm_before_ret  && check_asm_before_ret
+want naked_symbol   && check_naked_symbol
 want holds_bitmap    && check_holds_bitmap
 want holds_cap_source && check_holds_cap_source
 want selfhost_target_flag && check_selfhost_target_flag

@@ -351,6 +351,9 @@
 | [W-219](#w-219) | RESOLVED | `bump_version.py set` 的「刷 Status... |
 | [W-220](#w-220) | RESOLVED | 变异测试的「产物尺寸」变异点把体积**写死**成 `~55 MB` ⇒ 体积一改就找不到变异点 ⇒... |
 | [W-221](#w-221) | RESOLVED | `bump_version.py finalize` **只**替换占位符的 hash ⇒... |
+| [W-222](#w-222) | ACTIVE | `std::arena` 的 `arena_reset` 把 `end` 设成 `start +... |
+| [W-223](#w-223) | ACTIVE | `#[naked]` 的**标签走旁路文件、函数体走 IL** ⇒ 两者永不相遇(裸中断入口不可用) |
+| [W-224](#w-224) | ACTIVE | side-file 的路径是**相对路径** ⇒ 只有 CWD 恰好有... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15471,3 +15474,177 @@ CI 构建的,本地构建的 hash 未必相同 ⇒ 发版后回填 manifest 请�
 
 **引用:** `scripts/dev/bump_version.py`、
 `installer/distribution/winget/manifests/j/JiHuiYiYou/JHYY/4.1.4/`。
+
+<a id="w-222"></a>
+## W-222: `std::arena` 的 `arena_reset` 把 `end` 设成 `start + def_size` ⇒ 之后的分配**越出真实块**
+
+**状态:** ACTIVE since 2026-11-09 (v4.1.4) — std::arena 的 arena_reset 按 def_size 算块大小 ⇒ reset 之后的分配越界写坏堆
+**Filed-by:** 2026-11-09 (v4.1.4 复核实测)
+**日期:** v3.2.2(std::arena 落地)→ 至今(2026-11-09 登记)
+
+**触发面:** `compiler/src0/std/arena.jhyy` —— 三个函数对「块有多大」的认知**不一致**:
+
+| 函数 | 做的事 | 块的真实大小 |
+|---|---|---|
+| `arena_init(a, default_size)`(94-105) | 只记 `def_size`,**不分配任何块** | — |
+| `arena_new_block(a, size)`(74-87) | `malloc(8 + size)`;`end = data + size` ✓ | `size` 字节 |
+| `arena_reset(a)`(145-154) | `end = data + def_size` ✗ | — |
+
+`arena_alloc_aligned`(108-128)的放行判据是 `aligned + size <= end_int`(117)
+⇒ reset 之后 `end` 比真实块**大出 def_size 那么多字节** ⇒ 判据放行
+⇒ 返回的指针落在 malloc 块之外。
+
+**症状(2026-11-09 实测,v4.1.4):** `import arena;` → `arena_init(&a, 1024)` →
+`arena_alloc(&a, 8)` → `arena_reset(&a)` → `arena_alloc(&a, S)` → 往返回值写 S 字节:
+
+| S | 结果 |
+|---|---|
+| 16 | exit 0(**刚好写满真实块** —— 那块的 payload 正好 16 字节 ⇒ 这次没越界) |
+| 32 / 64 | exit 0(**但已经越界 16 / 48 字节** ⇒ 相邻 chunk 的头被写坏,见下) |
+| 128 / 256 / 500 / 1000 / 1024 | exit **3221225477** = `0xC0000005`(STATUS_ACCESS_VIOLATION) |
+| 2000 | exit 0(> def_size ⇒ 走「新建块」路径,`end` 被重新算对) |
+| 同程序去掉 `arena_reset` | exit 0(对照组) |
+
+⇒ 触发区间确定:**分配尺寸落在 (真实块大小, def_size]** ——
+本例里真实块的 payload = 「上次请求 + 对齐量」= 8 + 8 = **16** 字节,
+所以 (16, 1024] 全部越界。
+两端都安全(≤ 真实块大小塞得下、> def_size 另开一块)⇒ 这就是它能活到现在的原因。
+
+**根因:** `arena_reset` 假定「脚下那块至少有 def_size 字节」——
+这个假定**只对编译器自用的 `compiler/src0/arena.jhyy` 成立**
+(它的 `arena_new_block`(53-57)取 `max(def_size, 请求大小)`,块 ≥ def_size ✓),
+而 **std 版只按「请求大小 + 对齐量」分配** ⇒ 假定不成立。
+
+**⚠️ 32/64 那两行不是「安全」:** 越界的那 16 / 48 字节**必然**踩到相邻 chunk 的
+头(堆元数据)⇒ 堆已经被写坏,只是进程没 free ⇒ 堆校验器没被触发 ⇒ 照样 exit 0。
+**静默的堆损坏比立刻崩更危险**(崩溃要等到有人 free 才暴露)。
+
+**workaround:** 别用 `arena_reset`(用户侧可绕);编译器自用的 arena 不受影响。
+
+**影响范围:** 用 `std::arena` 的用户代码(`arena_reset` 是它的公开 API)。
+`compiler/src0/std/string.jhyy` 有**自己的一份** mini arena,它的 reset 是对的
+(把 payload 大小存在块头里)⇒ 不受影响;编译器自用的 arena 也不受影响。
+
+**失效条件:** `arena_reset` 改成按**真实块大小**重算 `end` —— 照 std/string.jhyy 的
+做法把 payload 大小存进块头,或让 `new_block` 也按 `max(def_size, size + align)` 分配。
+
+**⚠️ 覆盖缺口(为什么没被现有门挡住):**
+`compiler/tests/examples/arena_reset.jhyy` 是 std 那份 arena 的 **inline 副本**,
+而且实现**更简单**(只重置 `cur`、不碰 `end`)⇒ 真身零覆盖。
+(同一个毛病 W-141 已经栽过一次 —— std/string.jhyy 的真身当年也被副本遮住了。)
+
+**引用:** `compiler/src0/std/arena.jhyy`、
+`compiler/src0/arena.jhyy`(编译器自用,不受影响)、
+`compiler/tests/examples/arena_reset.jhyy`(inline 副本,零信号)。
+
+<a id="w-223"></a>
+## W-223: `#[naked]` 的**标签走旁路文件、函数体走 IL** ⇒ 两者永不相遇(裸中断入口不可用)
+
+**状态:** ACTIVE since 2026-11-09 (v4.1.4) — naked 函数的标签走旁路文件、函数体走 IL ⇒ 标签处只有 nop
+**Filed-by:** 2026-11-09 (v4.1.4 复核实测)
+**日期:** 2026-10-20 (v4.0.18 W-113 把 asm! 改走 IL)→ 至今
+
+**触发面:** `#[naked]` 函数(裸中断入口那一类)。
+
+**症状(2026-11-09 实测,v4.1.4,用例 `compiler/tests/examples/naked_interrupt_entry.jhyy`):**
+`#[naked] fn irq_entry() { asm!("iret"); }` 编出来的 exe 里:
+
+1. `irq_entry` **符号存在**(`nm` → `000000014000147a T irq_entry`),
+   但它的**首指令是一串 `nop` 填充,不是 `iret`**;
+2. 真正的 `iret`(`cf`)落在 **`.text` 段的最开头**(`0x140001450 <.text>`),
+   在**所有函数之外**;
+3. ⇒ 标签与函数体**永不相遇**:跳进 `irq_entry` 只会执行一串 nop,不会 iret。
+
+**根因(W-113 的修复边界没覆盖到 naked 路径):**
+W-113(2026-10-20,v4.0.18)把 `asm!` 从「旁路文件」改成走 IL(`dbgasm <hex>`),
+**naked 路径的两头没跟着改**:
+
+| 部分 | 该去哪 | 实际去了哪 |
+|---|---|---|
+| 头(`.globl irq_entry` + `irq_entry:`) | 旁路文件 `_inline_asm.buf` | ✅ 旁路文件(`abi_amd64_win.jhyy` 的 `emit_naked_func_header`) |
+| 体(`asm!` 的字节) | 同一个旁路文件 | ❌ 走 IL(`codegen.jhyy` 的 NODE_ASM_BLOCK 分支)⇒ 而裸函数**不 emit QBE IR** ⇒ 那条 `dbgasm` 落在 IL **顶层** ⇒ 后端把它写在 .text 段开头 |
+
+链接时旁路文件被拼到 .s 的**末尾**(`main.jhyy` 的 `link_with_gcc`)⇒
+标签在文件尾、函数体在文件头 ⇒ 两者永不相遇。
+
+**历史锚点:** 台账 W-112 条目里(它 closed 2026-10-20 / v4.0.16,而 W-113 closed
+2026-10-20 / v4.0.18 ⇒ 这条实测**早于** W-113)写着「**旁证(同机制另两处是通的)**:
+`#[naked]` 实测有效 —— `irq_entry` 的首指令就是 `iret`、没有 `push %rbp`」
+⇒ **那时还是好的** ⇒ W-113 把 `asm!` 改走 IL 之后,naked 的两头就分家了。
+(同一个 W-113 条目末尾也写着「剩下的 `_inline_asm.buf`(naked fn 用)仍走旁路文件」
+—— 边界就写在那儿,只是当时没人把两头放一起看。)
+
+**workaround:** 没有真 workaround。真要绕,只能把裸指令挪进**普通函数**里 ——
+`asm!` 在普通函数体内确实落在 ret 之前 ✓(有产物级门 `asm_before_ret` 守着),
+但普通函数仍有 `push %rbp` 序言 ⇒ **当不了中断入口**(iret 会在栈还压着 rbp
+的时候返回)⇒ 覆盖不了 OS 场景。**内核的中断入口必须先修这条。**
+
+**影响范围:** 所有 `#[naked]` 函数;裸中断入口(OS 场景)直接不可用。
+
+**失效条件:** naked 路径的两头合到同一个通道(标签与函数体一起进 IL,或一起进旁路文件)
+⇒ 产物级门 `naked_symbol` 转绿 ⇒ 删掉 KNOWN_FAIL 里那一行,check 自动升级成真门。
+
+**⚠️ 为什么没被现有门挡住:**
+① `compiler/tests/examples/naked_interrupt_entry.jhyy` 只断言 `EXPECT: 0`
+(main_jhyy 的退出码)—— 它自己的注释就写了「哪怕 codegen 明天给它套上完整
+prologue,这个测试照样 PASS」;
+② `artifact_checks.sh` 的 `asm_before_ret` 只测 **hosted** 函数的 inline asm
+⇒ **naked 路径零覆盖**。
+⇒ 已补产物级门 `naked_symbol`(断言「符号在 + 首指令就是 iret + 没有游离的 iret」),
+当前登记为 KNOWN-FAIL(W-223)。
+
+**引用:** `compiler/src0/abi_amd64_win.jhyy`(emit_naked_func_header)、
+`compiler/src0/codegen.jhyy`(NODE_ASM_BLOCK → `cg_emit_raw_asm_inline`)、
+`compiler/src0/main.jhyy`(link_with_gcc 拼旁路文件)、
+`compiler/tests/bootstrap/artifact_checks.sh` 的 `naked_symbol`。
+
+<a id="w-224"></a>
+## W-224: side-file 的路径是**相对路径** ⇒ 只有 CWD 恰好有 `compiler/build/obj/` 时才写得出
+
+**状态:** ACTIVE since 2026-11-09 (v4.1.4) — side-file 路径相对 CWD ⇒ 项目目录里 no_std 链接失败、naked 标签全丢
+**Filed-by:** 2026-11-09 (v4.1.4 复核实测)
+**日期:** v3.0.0 (side-file 落地)→ 至今(2026-11-09 登记)
+
+**触发面:** `compiler/src0/jhyy_helpers.c:1469` 的 `jh_sidefile_path`:
+
+```c
+snprintf(buf, n + 64, "compiler/build/obj/%s.%lu", name, pid);   /* ← 相对 CWD */
+```
+
+四个「codegen 写 → link 步骤读」的跨阶段通道都走它:
+`_no_std.flag` / `_inline_asm.buf` / `_section_directive.buf` / `_fence.buf`。
+
+**症状(2026-11-09 实测,v4.1.4):**
+
+| CWD | `#[no_std]` 程序 | `#[naked]` 函数 |
+|---|---|---|
+| 编译器仓根目录(有 `compiler/build/obj/`) | ✅ 编过,exe 退出 42 | ⚠️ 标签在,但函数体分离(见 W-223) |
+| 任意项目目录(没有 `compiler/build/obj/`) | ❌ **链接失败** | ❌ **`.globl`/标签整个丢失** ⇒ exe 里没有 `irq_entry` 符号 |
+
+**根因:** 写侧 `fopen(相对路径, "wb")` 在目录不存在时返回 NULL,而调用点
+(`codegen.jhyy:6489` / `abi_amd64_win.jhyy:174`)**静默跳过**(`if fp != 0`);
+读侧 `jh_file_stat_ok(相对路径)` 读不到 ⇒ `is_no_std = 0` ⇒
+**走 hosted 链接行**(带 `runtime.c` + `jhyy_helpers.c` + `-lm -lkernel32 …`)
+而不是 no_std 链接行(`-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc`)⇒ 链接失败。
+
+**⚠️ 真实原因被报错藏住了:** 链接失败时编译器只打
+「`collect2.exe: error: ld returned 1 exit status`」—— **ld 自己的诊断是空的**
+(实测:直接跑 `ld` 才看得到 `multiple definition of 'main'` ——
+hosted 链接行把 `compiler/runtime/runtime.c` 也链进去,而 runtime.c 自己
+定义了 `int main(int argc, char **argv)`(`runtime.c:65`)⇒ 与用户的 `fn main` 撞名)。
+⇒ 报错把排错方向带偏成「链接器坏了」,实际是「走错了链接行」。
+
+**workaround:** 在项目目录里 `mkdir -p compiler/build/obj`(实测有效)。
+—— 这是给用户加的土办法,不是修法。
+
+**影响范围:** 所有依赖 side-file 的特性:`#[no_std]`、`#[naked]`、`#[link_section]`。
+最难受的是 `#[no_std]`:普通程序在任何目录都正常 ⇒ **「在自己项目目录里写内核」
+这个最核心的 no_std 场景,恰恰是唯一挂掉的场景**。
+
+**失效条件:** side-file 路径改成**绝对路径**(写到临时目录 / 编译器自己的 obj 目录),
+或写侧失败时**报错而不是静默跳过**。
+
+**引用:** `compiler/src0/jhyy_helpers.c`(jh_sidefile_path)、
+`compiler/src0/codegen.jhyy`(写 `_no_std.flag`)、
+`compiler/src0/main.jhyy`(读 `_no_std.flag` / `_inline_asm.buf`)、
+`compiler/runtime/runtime.c`(hosted 的 `main` 桥接函数)。
