@@ -1,28 +1,28 @@
 {
   "metric": "code lines (non-blank, non-comment-only)",
   "source": "git ls-files",
-  "total_lines": 52669,
-  "total_files": 479,
+  "total_lines": 53105,
+  "total_files": 480,
   "languages": [
     {
       "lang": "JHYY",
       "lines": 36992,
       "files": 377,
-      "pct": 70.2,
+      "pct": 69.7,
       "color": "#00d4aa"
     },
     {
       "lang": "Python",
-      "lines": 9111,
-      "files": 36,
-      "pct": 17.3,
+      "lines": 9547,
+      "files": 37,
+      "pct": 18.0,
       "color": "#4c8fbd"
     },
     {
       "lang": "Shell",
       "lines": 2512,
       "files": 20,
-      "pct": 4.8,
+      "pct": 4.7,
       "color": "#5fa85f"
     },
     {

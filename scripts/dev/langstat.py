@@ -35,6 +35,7 @@ GitHub 侧栏那个语言条是 Linguist 算的 —— Linguist 没有 `.jhyy` �
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 from collections import Counter
@@ -127,9 +128,13 @@ THEMES = {
 }
 
 WIDTH = 760
-BAR_H = 30
-LEGEND_ROW = 22
-COLS = 2
+HEIGHT = 280
+DONUT_CX = 140.0
+DONUT_CY = 140.0
+DONUT_RO = 125.0
+DONUT_RI = 80.0
+LEGEND_X = 285
+LEGEND_ROW = 23
 
 
 def fail(msg: str) -> None:
@@ -220,60 +225,92 @@ def collect() -> dict:
     }
 
 
+def _pt(cx: float, cy: float, r: float, deg: float) -> tuple[float, float]:
+    """极坐标 → 直角坐标。角度从 12 点方向起，顺时针。"""
+    rad = math.radians(deg - 90.0)
+    return cx + r * math.cos(rad), cy + r * math.sin(rad)
+
+
+def _donut(cx: float, cy: float, ro: float, ri: float,
+           a0: float, a1: float) -> str:
+    """圆环的一段。角度从 12 点方向起，顺时针。"""
+    x0, y0 = _pt(cx, cy, ro, a0)
+    x1, y1 = _pt(cx, cy, ro, a1)
+    x2, y2 = _pt(cx, cy, ri, a1)
+    x3, y3 = _pt(cx, cy, ri, a0)
+    large = 1 if (a1 - a0) > 180.0 else 0
+    return (
+        f"M {x0:.2f} {y0:.2f} "
+        f"A {ro} {ro} 0 {large} 1 {x1:.2f} {y1:.2f} "
+        f"L {x2:.2f} {y2:.2f} "
+        f"A {ri} {ri} 0 {large} 0 {x3:.2f} {y3:.2f} Z"
+    )
+
+
 def render_svg(data: dict, theme: str) -> str:
-    """浅/深两版图表。语言名是 ASCII ⇒ 不依赖任何字体。"""
+    """浅/深两版扇形图。语言名是 ASCII ⇒ 不依赖任何字体。
+
+    形状跟 GitHub 自己那张「Top Languages by Commit」一致（圆环 + 右侧图例）——
+    这正是我们要**替掉**的那张：那张的圈是 Linguist 算的，缺了 `.jhyy`。
+    """
     t = THEMES[theme]
     rows = data["languages"]
     total = data["total_lines"]
+    mono = "SFMono-Regular,Consolas,Liberation Mono,monospace"
 
-    bar_parts: list[str] = []
-    x = 0.0
+    # ── 圆环 ────────────────────────────────────────────────────────────
+    cx, cy = DONUT_CX, DONUT_CY
+    segs: list[str] = []
+    ang = 0.0
     for r in rows:
-        w = r["lines"] / total * WIDTH if total else 0.0
-        if w <= 0:
+        if total <= 0:
+            break
+        sweep = r["lines"] / total * 360.0
+        if sweep <= 0:
             continue
-        bar_parts.append(
-            f'<rect x="{x:.2f}" y="0" width="{w:.2f}" height="{BAR_H}" fill="{r["color"]}"/>'
-        )
-        x += w
+        segs.append(f'<path d="{_donut(cx, cy, DONUT_RO, DONUT_RI, ang, ang + sweep)}" '
+                     f'fill="{r["color"]}"/>')
+        ang += sweep
 
-    # 图例：两列固定列位（名字 / 百分比 / 文件数），不靠猜字宽对齐
+    # 环心的两个数（最大语言）
+    top = rows[0] if rows else None
+    centre: list[str] = []
+    if top is not None:
+        centre = [
+            f'<text x="{cx}" y="{cy - 2}" font-family="{mono}" font-size="30" font-weight="700" '
+            f'fill="{t["fg"]}" text-anchor="middle">{top["pct"]}%</text>',
+            f'<text x="{cx}" y="{cy + 20}" font-family="{mono}" font-size="13" '
+            f'fill="{top["color"]}" text-anchor="middle">{top["lang"]}</text>',
+        ]
+
+    # ── 图例 ────────────────────────────────────────────────────────────
     legend: list[str] = []
-    col_w = WIDTH // COLS
+    n = len(rows)
+    rows_h = n * LEGEND_ROW
+    first = cy - rows_h / 2 + LEGEND_ROW / 2
     for i, r in enumerate(rows):
-        cx = (i % COLS) * col_w
-        cy = BAR_H + 20 + (i // COLS) * LEGEND_ROW
-        mono = "SFMono-Regular,Consolas,Liberation Mono,monospace"
+        y = first + i * LEGEND_ROW
         # 单复数：不写嵌套同型引号的 f-string（那是 3.12+ 才有的语法）
         nfiles = "1 file" if r["files"] == 1 else f'{r["files"]} files'
         legend.append(
-            f'<rect x="{cx}" y="{cy + 4}" width="10" height="10" rx="2.5" fill="{r["color"]}"/>'
-            f'<text x="{cx + 18}" y="{cy + 14}" font-family="{mono}" font-size="13" '
+            f'<rect x="{LEGEND_X}" y="{y - 9}" width="10" height="10" rx="2.5" fill="{r["color"]}"/>'
+            f'<text x="{LEGEND_X + 18}" y="{y}" font-family="{mono}" font-size="13" '
             f'fill="{t["fg"]}">{r["lang"]}</text>'
-            f'<text x="{cx + 296}" y="{cy + 14}" font-family="{mono}" font-size="13" '
+            f'<text x="{LEGEND_X + 190}" y="{y}" font-family="{mono}" font-size="13" '
             f'fill="{t["fg"]}" text-anchor="end">{r["pct"]}%</text>'
-            f'<text x="{cx + 366}" y="{cy + 14}" font-family="{mono}" font-size="12" '
+            f'<text x="{LEGEND_X + 290}" y="{y}" font-family="{mono}" font-size="12" '
             f'fill="{t["muted"]}" text-anchor="end">{nfiles}</text>'
         )
 
-    n_rows = (len(rows) + COLS - 1) // COLS
-    height = BAR_H + 20 + n_rows * LEGEND_ROW + 6
-
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{height}" '
-        f'viewBox="0 0 {WIDTH} {height}" role="img" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" '
+        f'viewBox="0 0 {WIDTH} {HEIGHT}" role="img" '
         f'aria-label="Language composition by code lines">\n'
         f'  <title>Language composition — code lines</title>\n'
-        f'  <g>\n'
-        f'    <clipPath id="bar"><rect x="0" y="0" width="{WIDTH}" height="{BAR_H}" rx="6"/></clipPath>\n'
-        f'    <g clip-path="url(#bar)">\n'
-        + "".join(f"      {p}\n" for p in bar_parts)
-        + f'    </g>\n'
-        f'    <rect x="0.5" y="0.5" width="{WIDTH - 1}" height="{BAR_H - 1}" rx="5.5" fill="none" '
-        f'stroke="{t["rule"]}" stroke-opacity="0.6"/>\n'
-        + "".join(f"    {p}\n" for p in legend)
-        + f'  </g>\n'
-        f'</svg>\n'
+        + "".join(f"  {p}\n" for p in segs)
+        + "".join(f"  {p}\n" for p in centre)
+        + "".join(f"  {p}\n" for p in legend)
+        + f'</svg>\n'
     )
 
 

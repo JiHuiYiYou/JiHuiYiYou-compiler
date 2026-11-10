@@ -482,7 +482,7 @@ numbers.
 | `jhyy-installer-4.1.5.exe` | shipped (~54 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.5.msi` | shipped (~27 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.5.vsix` | shipped (VS Code extension) |
-| Language composition | **70.2%** of the code is JHYY — 36992 of 52669 lines, 377 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| Language composition | **69.7%** of the code is JHYY — 36992 of 53105 lines, 377 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">
