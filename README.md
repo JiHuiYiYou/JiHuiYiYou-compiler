@@ -114,19 +114,19 @@ Unsigned binaries also trip third-party antivirus more often than signed ones.
 The MSI meant for enterprise/SCCM distribution is unsigned as well, and some
 organizations' software-distribution policies reject unsigned MSIs outright.
 
-**Package managers** (added with v4.1.4):
+**Package managers**:
 
 ```powershell
-# winget (Windows Package Manager)
-winget install JiHuiYiYou.JHYY
-
-# scoop (personal bucket — the Main bucket is a separate decision)
+# scoop (personal bucket)
 scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket
 scoop install jhyy
 ```
 
-Both install the same Burn bundle that is attached to the GitHub release, and both
-verify its SHA-256 before running it.
+`winget install JiHuiYiYou.JHYY` is **not available yet** — the upstream PR is still
+awaiting review. Until it is merged, use scoop or the installer above.
+
+Both install the same Burn bundle that is attached to the GitHub release, and verify
+its SHA-256 before running it.
 
 **VSCode users**: with the extension installed, `.jhyy` files get a ▶ run button in the
 title bar (`Ctrl+F5`). Opening this repo triggers `.vscode/settings.json`, which adds

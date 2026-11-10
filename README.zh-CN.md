@@ -108,16 +108,16 @@ fn main_jhyy() -> i32 {
 给企业/SCCM 分发用的那个 MSI 同样没签名 ⇒ 有些单位的软件分发策略会**直接拒收**
 未签名的 MSI。
 
-**包管理器**(v4.1.4 起):
+**包管理器**:
 
 ```powershell
-# winget(Windows Package Manager)
-winget install JiHuiYiYou.JHYY
-
-# scoop(个人 bucket —— Main bucket 是另一个决定)
+# scoop(个人 bucket)
 scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket
 scoop install jhyy
 ```
+
+`winget install JiHuiYiYou.JHYY` **暂时还装不上** —— 上游 PR 还在等审核。
+在那之前用 scoop,或直接用上面的安装器。
 
 两者装的都是 GitHub release 上那个 Burn bundle,装之前都会先校验它的 SHA-256。
 
