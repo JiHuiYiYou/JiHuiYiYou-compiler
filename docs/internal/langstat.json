@@ -1,0 +1,78 @@
+{
+  "metric": "code lines (non-blank, non-comment-only)",
+  "source": "git ls-files",
+  "total_lines": 52669,
+  "total_files": 479,
+  "languages": [
+    {
+      "lang": "JHYY",
+      "lines": 36992,
+      "files": 377,
+      "pct": 70.2,
+      "color": "#00d4aa"
+    },
+    {
+      "lang": "Python",
+      "lines": 9111,
+      "files": 36,
+      "pct": 17.3,
+      "color": "#4c8fbd"
+    },
+    {
+      "lang": "Shell",
+      "lines": 2512,
+      "files": 20,
+      "pct": 4.8,
+      "color": "#5fa85f"
+    },
+    {
+      "lang": "PowerShell",
+      "lines": 1900,
+      "files": 20,
+      "pct": 3.6,
+      "color": "#a06bb5"
+    },
+    {
+      "lang": "C",
+      "lines": 1315,
+      "files": 13,
+      "pct": 2.5,
+      "color": "#6e7781"
+    },
+    {
+      "lang": "C#",
+      "lines": 287,
+      "files": 1,
+      "pct": 0.5,
+      "color": "#3f9e4f"
+    },
+    {
+      "lang": "Assembly",
+      "lines": 225,
+      "files": 6,
+      "pct": 0.4,
+      "color": "#c98a4b"
+    },
+    {
+      "lang": "Batchfile",
+      "lines": 137,
+      "files": 4,
+      "pct": 0.3,
+      "color": "#b9a55f"
+    },
+    {
+      "lang": "JavaScript",
+      "lines": 125,
+      "files": 1,
+      "pct": 0.2,
+      "color": "#d9c04a"
+    },
+    {
+      "lang": "TypeScript",
+      "lines": 65,
+      "files": 1,
+      "pct": 0.1,
+      "color": "#4a90c4"
+    }
+  ]
+}

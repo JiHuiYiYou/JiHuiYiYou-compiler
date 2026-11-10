@@ -87,6 +87,7 @@
 | 架构断言 | `arch-claims` | `architecture.md` 的结构性断言与源码一致 | ci.yml · build-and-test · `python scripts/dev/check_arch_claims.py` |
 | 寄存器分配对拍 | `regalloc-parity` | Python 参考实现与编译器侧的分配数**逐项相同**（两套独立实现） | ci.yml · build-and-test · `python scripts/dev/check_regalloc_parity.py` |
 | VSCode grammar | `vscode-grammar` | grammar == 语言真实规则 | ci.yml · vscode-ext · `node vscode-ext/scripts/check-grammar.mjs` |
+| 语言构成 | `langstat` | 语言构成的产物（图表 + 本文件 § 7 + 两份 README 的数）与**当前源码树**一致 | ci.yml · build-and-test · `python scripts/dev/langstat.py --check` |
 | SysV ABI | `sysv-abi` | 链 + 跑 + 比 `// EXPECT:` | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_link_run.sh` |
 | SysV 跨实现对拍 | `sysv-cross` | jhyy ↔ gcc 能否互调（W-104） | ci.yml · sysv · `bash compiler/tests/bootstrap/sysv_abi_cross.sh` |
 | 发布：版本 == tag | `release-version` | `VERSION` 文件与 tag 不符 ⇒ 拒发 | release.yml · 内联 pwsh |
@@ -251,3 +252,30 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 例外：**仓库门面**（`README.md` / `README.zh-CN.md`）可以在「Status」段直接给数字 ——
 但那里的数字由 `docs_facts_check.py` 一并对拍。
+
+---
+
+## 7. 语言构成
+
+<!-- langstat:begin —— 这一节由 `scripts/dev/langstat.py` 生成，别手改 -->
+
+| 语言 | 代码行 | 占比 | 文件数 |
+|---|---|---|---|
+| JHYY | 36992 | 70.2% | 377 |
+| Python | 9111 | 17.3% | 36 |
+| Shell | 2512 | 4.8% | 20 |
+| PowerShell | 1900 | 3.6% | 20 |
+| C | 1315 | 2.5% | 13 |
+| C# | 287 | 0.5% | 1 |
+| Assembly | 225 | 0.4% | 6 |
+| Batchfile | 137 | 0.3% | 4 |
+| JavaScript | 125 | 0.2% | 1 |
+| TypeScript | 65 | 0.1% | 1 |
+| **合计** | **52669** | **100%** | **479** |
+
+> 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
+> ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。
+> **`.jhyy` → JHYY 这条映射是 GitHub Linguist 没有的** —— Linguist 不认这门语言，
+> 所以 GitHub 侧栏那个语言条里，编译器真正的实现**一行都不出现**。
+<!-- langstat:end -->
+

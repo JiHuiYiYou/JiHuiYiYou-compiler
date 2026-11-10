@@ -753,6 +753,19 @@ jobs:
           # gate: arch-claims
           python scripts/dev/check_arch_claims.py
 
+      - name: Language composition gate (our own language bar, vs the source tree)
+        # 2026-11-10 新增:GitHub 侧栏那个语言条是 Linguist 算的 —— Linguist 没有
+        # `.jhyy` 的映射 ⇒ **编译器真正的实现(377 个 .jhyy 文件)一行都不出现**,
+        # 取而代之的是参考实现 Python ⇒ 一个「用这门语言自己写的编译器」在主页上
+        # 看起来像是用 Python 写的。所以口径自己定、工具自己写。
+        # 本门盯的是:图表 + FACTS § 7 + 两份 README 的数,与**当前源码树**是否一致
+        # (源码一改而产物没重刷 ⇒ 红 —— 数字会漂是这类产物唯一的失效方式)。
+        if: always()
+        shell: msys2 {0}
+        run: |
+          # gate: langstat
+          python scripts/dev/langstat.py --check
+
       # ── 寄存器分配器的独立实现对拍(2026-11-03 加)────────────────────
       #
       # 为什么要有这道门:`scripts/dev/regalloc_reference.py` 是一份**独立写的**
