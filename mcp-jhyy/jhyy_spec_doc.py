@@ -62,7 +62,13 @@ def load_spec_doc(path: str | Path) -> dict:
     def flush():
         if current is not None:
             current["body"] = "\n".join(body_lines).strip()
-            if current["body"]:  # skip empty sections
+            # ⚠️ **不要丢掉正文为空的 section**（W-225）——
+            #   规范的**章（h2）下面全是子节（h3）**，章标题与第一个 h3 之间**没有正文**
+            #   ⇒ 每个章的 body 都是空串 ⇒ 旧代码「正文为空就跳过」把**整段章**丢掉了
+            #   ⇒ 索引里 24 个章只剩 17 个 ⇒ **按章标题查规范永远查不到**
+            #   （实测 `search("程序结构")` → 0 命中）
+            # ⇒ 现在只跳过**连标题都没有**的残片。
+            if current["title"] or current["num"]:
                 sections.append(current)
 
     for line in lines:
