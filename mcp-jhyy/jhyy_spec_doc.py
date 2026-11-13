@@ -187,16 +187,100 @@ _ALIASES: Dict[str, List[str]] = {
     "error":         ["错误"],
 }
 
+# ⚠️ **CN→EN 反向表** —— 原来的 `_ALIASES` 只有 EN→CN 方向 ⇒ 中文查询拿不到
+# 英文 token 的加成（实测：`search("命名空间")` 只有 1 条命中、score 6；
+# 而 `search("namespace")` 有 3 条、top score 22）。
+# ⇒ 自动从 EN→CN 反查出来（不用手写第二张表 ⇒ 不会漂移）。
+for _en, _cns in list(_ALIASES.items()):
+    for _cn in _cns:
+        if not re.search(r"[\u4e00-\u9fff]", _cn):
+            continue
+        _ALIASES.setdefault(_cn, []).append(_en)
+
+
+# 中文连续串 —— ⚠️ **不分词就永远匹配不上**
+#
+# 实测（2026-11-13）：`search("怎么写命名空间")` → **0 命中**。
+# 原因：分词只按空白+ASCII 标点切 ⇒ 中文整串成一个 token
+# ⇒ 「怎么写命名空间」这个 token 在正文里根本不存在 ⇒ 匹配不上。
+#
+# ⇒ 切成 **bigram**（相邻两字）：怎么/么写/写命/命名/名空/空间
+# ⇒ 「命名」「空间」就命中了 ✓
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]+")
+
+
+def _cjk_bigrams(text: str) -> List[str]:
+    """中文串 → 相邻两字的 bigram。"""
+    out: List[str] = []
+    for run in _CJK_RUN_RE.findall(text):
+        if len(run) == 1:
+            out.append(run)
+        else:
+            for i in range(len(run) - 1):
+                out.append(run[i:i + 2])
+    return out
+
 
 def _tokenize(text: str, drop_stops: bool = False) -> List[str]:
     """Split text into lowercase tokens (whitespace + common punctuation).
 
     If drop_stops=True, filter out common stop words (for token-AND queries).
+
+    ⚠️ **中文额外切 bigram** —— 不切就查不到（见上面）。
     """
-    tokens = [t for t in re.split(r"[\s,;.()\[\]{}<>:/\\'\"]+", text.lower()) if t]
+    tokens: List[str] = []
+    for raw in re.split(r"[\s,;.()\[\]{}<>:/\\'\"]+", text.lower()):
+        if not raw:
+            continue
+        if _CJK_RUN_RE.search(raw):
+            tokens.extend(_cjk_bigrams(raw))
+            # 原串也留着（万一正文里就是整串出现）
+            tokens.append(raw)
+        else:
+            tokens.append(raw)
     if drop_stops:
         tokens = [t for t in tokens if t not in _STOP_WORDS]
     return tokens
+
+
+# 整节正文的返回上限（字符）—— 规范最长的 § 15 有 ~2200 字符 ⇒ 上限够用
+BODY_LIMIT = 4000
+
+# 「章节号」的 query 形态：18 / 10.4 / 附录 B / B
+_SECTION_QUERY_RE = re.compile(r"^(?:\u00a7\s*)?(?:\u9644\u5f55\s*)?([0-9]+(?:\.[0-9]+)*|[A-D])$", re.I)
+
+
+def _sections_by_num(doc: dict, query: str):
+    """按**章节号**精确取节（含该章的子节）。
+
+    ⇒ 返回 None 表示「这个 query 不是章节号」⇒ 走关键词搜索。
+    """
+    m = _SECTION_QUERY_RE.match(query.strip())
+    if not m:
+        return None
+    key = m.group(1).upper() if re.match(r"^[A-D]$", m.group(1), re.I) else m.group(1)
+    out = []
+    for sec in doc.get("sections", []):
+        num = sec.get("num") or ""
+        num_cmp = num.upper() if re.match(r"^[A-D]$", num, re.I) else num
+        if num_cmp == key or num_cmp.startswith(key + "."):
+            out.append(sec)
+    return out or None
+
+
+def _match_of(sec: dict, score: int, excerpt: str = "") -> Dict[str, Any]:
+    """一节的 match 形状 —— **带整节正文**（旧版只有 excerpt ⇒ 代码块常被切掉）。"""
+    body = sec.get("body", "")
+    truncated = len(body) > BODY_LIMIT
+    return {
+        "section": sec.get("num", ""),
+        "title": sec.get("title", ""),
+        "level": sec.get("level", 0),
+        "score": score,
+        "excerpt": excerpt,
+        "body": body[:BODY_LIMIT],
+        "body_truncated": truncated,
+    }
 
 
 def search_spec_doc(doc: dict, query: str, limit: int = 20) -> dict:
@@ -230,6 +314,20 @@ def search_spec_doc(doc: dict, query: str, limit: int = 20) -> dict:
     q_tokens = _tokenize(query, drop_stops=True)
     if not q_lower:
         return {"ok": True, "version": doc.get("version", ""), "query": query, "matches": []}
+
+    # ── 章节号精确查 ─────────────────────────────────────────────
+    # ⚠️ **这是 jhyy_error_lookup 指路的前提** —— 它告诉模型「去查 § 18」，
+    #    那 `jhyy_lang_ref("18")` 就必须能取到那一节 ⇒ 否则链条断在中间
+    #    （2026-11-13 实测：按章节号查原来一律 0 命中）。
+    exact = _sections_by_num(doc, q_lower)
+    if exact is not None:
+        return {
+            "ok": True,
+            "version": doc.get("version", ""),
+            "query": query,
+            "exact": True,
+            "matches": [_match_of(sec, 1000) for sec in exact],
+        }
 
     # Build phrase variants: original + each combo where one query token is
     # replaced by a CN/EN alias. "struct pass-by-value" → also try
@@ -309,13 +407,7 @@ def search_spec_doc(doc: dict, query: str, limit: int = 20) -> dict:
             if end < len(sec["body"]):
                 excerpt = excerpt + "..."
 
-            matches.append({
-                "section": sec["num"],
-                "title": sec["title"],
-                "level": sec["level"],
-                "score": score,
-                "excerpt": excerpt,
-            })
+            matches.append(_match_of(sec, score, excerpt))
 
     # Sort by score desc, then section num
     def sort_key(m):
@@ -326,6 +418,14 @@ def search_spec_doc(doc: dict, query: str, limit: int = 20) -> dict:
         return (-m["score"], num_tuple)
 
     matches.sort(key=sort_key)
+
+    # ⚠️ **整节正文只给 top 3** —— `jhyy_lang_ref` 默认 limit=20，
+    # 每条都带整节（最长 4000 字符）⇒ 一次调用吐 80k 字符 ⇒ 白吃上下文。
+    # ⇒ 分数最高的 3 条带 body，其余只给 excerpt。
+    for _m in matches[3:]:
+        _m.pop("body", None)
+        _m.pop("body_truncated", None)
+
     return {
         "ok": True,
         "version": doc.get("version", ""),

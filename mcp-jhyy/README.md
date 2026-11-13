@@ -85,7 +85,7 @@ print(compile_and_run('compiler/tests/examples/hello.jhyy'))"
 | 工具 | 用途 |
 |---|---|
 | `jhyy_workarounds` | 查 W-NNN workaround 的状态 / 详情（实时读台账） |
-| `jhyy_lang_ref` | 查语言规范（关键词搜索） |
+| `jhyy_lang_ref` | 查语言规范（**支持按章节号精确取** + 关键词搜索 + 中文提问；结果带**整节正文**） |
 | `jhyy_error_lookup` | **把一条编译器报错翻成「什么意思 / 怎么改 / 该查哪一节 / 相关台账条目」** |
 | `jhyy_abi_info` | 查 ABI 信息（`sret` / `struct pass` / `FFI` …） |
 | `jhyy_format` | 简单格式化（最小占位实现） |
@@ -122,8 +122,8 @@ print(compile_and_run('compiler/tests/examples/hello.jhyy'))"
 C:/Users/liuzhen/miniconda3/python.exe -m pytest mcp-jhyy/tests -q
 ```
 
-测试文件（10 个）：`test_abi_info` · `test_env` · `test_error_lookup` · `test_get_il` ·
-`test_il_diff` · `test_lang_ref` · `test_ntstatus` · `test_regress` ·
+测试文件（11 个）：`test_abi_info` · `test_env` · `test_error_lookup` · `test_get_il` ·
+`test_il_diff` · `test_lang_ref` · `test_lang_ref_recall` · `test_ntstatus` · `test_regress` ·
 `test_selfhost_check` · `test_workarounds`。
 
 `jhyy_ntstatus.py` 是**内部 helper**（NTSTATUS 解析），**未注册**成 MCP 工具。
