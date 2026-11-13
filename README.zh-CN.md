@@ -455,7 +455,7 @@ JiHuiYiYou-compiler/
 | `jhyy-installer-4.1.5.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.5.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.5.vsix` | 已发布(VS Code 扩展) |
-| 语言构成 | **69.7%** 的代码是 JHYY —— 53105 行里的 36992 行，377 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| 语言构成 | **69.1%** 的代码是 JHYY —— 53523 行里的 36992 行，377 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">

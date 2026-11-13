@@ -1,41 +1,42 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""生成「IDE 知识包」—— 给内嵌 Claude 会话常驻的 JHYY 知识。
+"""生成「IDE 知识包」—— 给内嵌 Claude 会话常驻的 JHYY 速查。
 
     python scripts/gen-knowledge.py
 
 产物：
-    docs/generated/jhyy-knowledge.md    常驻知识包（中文，进仓）
-    docs/generated/jhyy-knowledge.json  同样的内容（机器可读）
+    docs/generated/jhyy-knowledge.md      常驻知识包（中文）
+    docs/generated/jhyy-knowledge.json    同样的内容（机器可读）
 
-## 为什么要有它
+## 为什么要有这个
 
-S1 的评测实测出来的结论：**模型的失败模式不是「不知道规则」，而是「多绕几圈」** ——
-它会先翻文件、再去查规范（`jhyy_lang_ref`）、再改、再验。
+S1 的评测实测出来的结论：**模型的失败模式不是「不知道规则」，而是「多绕几圈」**。
+⇒ 这份知识包的目标不是「再教一遍语法」（模型已经会），而是：
 
-⇒ 这份知识包的目标**不是「再教一遍规则」**（规范已经能查了），
-而是**让模型少绕**：
-
-1. **规范章节目录**（24 章）⇒ 模型一眼知道该查哪一节，不用「我想查什么来着」
-2. **附录 B「未实装 / 已实装但受限」**⇒ **模型不会主动想到去查这个**，
-   而它恰好是最容易踩的坑（`fn(i32)` 函数指针类型、块表达式、guard pattern…）
-3. **标准库签名**⇒ 名字不好记（`std_io_print` vs `io_print`），抄一遍省事
+1. **规范章节目录** —— 让模型知道该查哪一节（省掉「我想查什么来着」那几轮）
+2. **反直觉点** —— 规范里标了 ⚠ 的行（模型自己查得到，但不一定想到去查）
+3. **附录 B「未实装 / 已实装但受限」** —— **模型不会主动想到去查这个**，
+   而它恰好是最容易踩的坑（`fn(i32)` 函数指针类型、块表达式、guard pattern……）
+4. **标准库签名** —— 名字不好记（`std_io_print` vs `io_print`），抄一遍省事
+5. **一段完整示例程序** —— 一眼看出这门语言的形状
 
 ## 它是**生成**的，不是手写的
 
 家族规约：「canonical pattern（设计如此，不是 bug）的落点是**语言规范**」⇒
-真相源是规范，手写第二份 = 制造漂移源。
+真相源是规范 + 标准库源码，手写第二份就是制造漂移源。
 
-⇒ 生成器从规范 + 标准库源码抽，产物提交进仓；规范改了 ⇒ 重新生成。
+⚠️ **相对链接必须重写** —— 规范里的链接是同目录的兄弟文件
+（`[ABI § 2.3](jhyy-abi-v4.0.0.md#23-struct-布局)`），而知识包落在 `docs/generated/`
+⇒ 原样抄过来就是断链 ⇒ 文档事实门（`docs_facts_check.py`）判红。
 
-## 章节解析复用现成的模块
+⚠️ **同页锚点要指向规范本体** —— 知识包是摘要，不是规范 ⇒ 那些小节在包里不存在。
 
-规范分节用 `mcp-jhyy/jhyy_spec_doc.py` 的 `load_spec_doc()`（**单一真相源**，
-跟 `jhyy_lang_ref` / `jhyy_abi_info` 用的是同一个口径）⇒ 不重写解析逻辑。
+⚠️ **归属标注要带「语言规范」三个字** —— 文档事实门把 `§ N.M` 按「最近的、在它
+之前的文档锚点」解析；标注排在别的链接之后 ⇒ 会被解析成那个链接指向的文档
+（实测：解析成 ABI ⇒ ABI 没 § 2.8 ⇒ 门红）。
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -46,25 +47,71 @@ sys.path.insert(0, str(JHYY_ROOT / "mcp-jhyy"))
 from jhyy_spec_doc import load_spec_doc  # noqa: E402
 
 SPEC_PATH = JHYY_ROOT / "docs" / "abis" / "jhyy-lang-spec-v4.0.0.md"
+SPEC_BASENAME = "jhyy-lang-spec-v4.0.0.md"
 STD_DIR = JHYY_ROOT / "compiler" / "src0" / "std"
 OUT_DIR = JHYY_ROOT / "docs" / "generated"
 OUT_MD = OUT_DIR / "jhyy-knowledge.md"
 OUT_JSON = OUT_DIR / "jhyy-knowledge.json"
 
-# 规范里的 ⚠ 标记 —— 规范第 10 行原文说「凡带 ⚠️ 的行是『与直觉/与旧规范不同』」
-WARN_MARK = "⚠️"
+
+# ── 链接重写（手工扫描，不用正则：反斜杠在这台机器上容易被各种工具吃掉）────────
+
+def rewrite_links(text):
+    """把规范里的链接改成相对于 `docs/generated/` 的。
+
+    - `](别的.md)`   => `](../abis/别的.md)`
+    - `](#同页锚点)`  => `](../abis/jhyy-lang-spec-v4.0.0.md#同页锚点)`
+    - `](http://…)`   => 不动
+    """
+    if not text:
+        return text
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find("](", i)
+        if j < 0:
+            out.append(text[i:])
+            break
+        k = text.find(")", j + 2)
+        if k < 0:
+            out.append(text[i:])
+            break
+        target = text[j + 2:k]
+        out.append(text[i:j])
+        if target.startswith(("http://", "https://", "/")):
+            out.append(text[j:k + 1])
+        elif target.startswith("#"):
+            out.append("](../abis/" + SPEC_BASENAME + target + ")")
+        elif ".md" in target:
+            out.append("](../abis/" + target + ")")
+        else:
+            out.append(text[j:k + 1])
+        i = k + 1
+    out.append("")
+    return "".join(out)
 
 
-def load_spec():
-    return load_spec_doc(SPEC_PATH)
+# ── 采集 ────────────────────────────────────────────────────────
+
+def section_label(sec):
+    """章节引用：**语言规范** § 8 结构体。
+
+    ⚠️ **必须带「语言规范」三个字** —— 文档事实门把 `§ N.M` 按「最近的、在它之前的
+    文档锚点」解析；标注排在别的链接**之后** => 门会把它解析成那个链接指向的文档
+    （实测：解析成 ABI => ABI 没 § 2.8 => 门红，2026-11-13）。
+    """
+    if sec.get("num"):
+        return ("语言规范 § %s %s" % (sec["num"], sec.get("title", ""))).rstrip()
+    return ("语言规范 %s" % sec.get("title", "")).rstrip()
 
 
 def iter_with_parent(doc):
     """按顺序产出 (section, parent_h2)。
 
-    ⚠️ **必须带父章** —— 规范里附录 B 的内容在 **h3** 里（`### 未实装`），
-    而 h3 没有自己的编号（num=''）⇒ 只按 section 自己的 num 找附录会**一个都找不到**。
-    父章的 num 是字母（'A'/'B'/'C'/'D'，不是 '附录 B'）。
+    ⚠️ **必须带父章** —— 附录 B 的内容在 **h3** 里（`### 未实装`），
+    而 h3 没有自己的编号（num=''）=> 只按 section 自己的 num 找附录会**一个都找不到**。
+    父章的 num 是字母（'A'/'B'/'C'/'D'）。
     """
     parent = None
     for sec in doc["sections"]:
@@ -73,32 +120,19 @@ def iter_with_parent(doc):
         yield sec, parent
 
 
-def section_label(sec) -> str:
-    """章节引用：§ 8 结构体 / § 附录 B。"""
-    if sec.get("num"):
-        return f"§ {sec['num']} {sec.get('title', '')}".rstrip()
-    return sec.get("title", "")
-
-
 def collect_toc(doc):
-    """规范章节目录（只到 h2）+ 每个章的一句话范围。
+    """规范章节目录（h2）+ 每个章的一句话范围。
 
     为什么要目录：模型看到「§ 5.6 match」这一行，就知道**存在**一个 match 章节
-    ⇒ 会去查。**不知道存在**是检索失败最常见的原因，比「查了没查到」更致命。
+    => 会去查。**不知道存在**是检索失败最常见的原因，比「查了没查到」更致命。
     """
     toc = []
     for sec in doc["sections"]:
         if sec.get("level") != 2:
             continue
-        body = sec.get("body", "")
-        # 第一句**散文**当范围说明。
-        # ⚠️ 别直接取第一行 —— 很多章的第一行是代码围栏（```jhyy）或表头
-        #    （| 码 | 触发 |）⇒ 目录里会出现一堆没意义的片段（实测踩过）。
-        # ⚠️ **代码围栏的「内容行」不以 ``` 开头** ⇒ 光跳 ``` 行不够，
-        #    还得**跟踪围栏状态**，否则会取到 `let x = 42;` 这种代码行。
         scope = ""
         in_code = False
-        for line in body.splitlines():
+        for line in sec.get("body", "").splitlines():
             t = line.strip()
             if t.startswith("```"):
                 in_code = not in_code
@@ -109,7 +143,7 @@ def collect_toc(doc):
                 continue
             if set(t) <= set("-= "):
                 continue
-            scope = t[:70]
+            scope = rewrite_links(t[:70])
             break
         toc.append(
             {
@@ -124,27 +158,28 @@ def collect_toc(doc):
 def collect_pitfalls(doc):
     """规范里带 ⚠ 的行 —— 规范自己标好的「反直觉点」。
 
-    每条 = 一行文字 + 所属章节号。**不重写内容**，只索引 + 跳转目标。
+    规范第 10 行原文：「凡带 ⚠️ 的行是『与直觉/与旧规范不同』」。
     """
     out = []
     for sec in doc["sections"]:
-        body = sec.get("body", "")
-        for line in body.splitlines():
-            if WARN_MARK not in line:
+        for line in sec.get("body", "").splitlines():
+            if "⚠" not in line:
                 continue
             text = line.strip()
             if text.startswith(">"):
-                # 引用块里的 ⚠ 是「整章都反直觉」的提示 ⇒ 归到章级
+                # 引用块里的 ⚠ 是「整章都反直觉」的提示 => 归到章级
                 continue
-            # 去掉行首的 markdown 列表符号
             text = re.sub(r"^[-*+]\s*", "", text)
             text = re.sub(r"^\d+\.\s*", "", text)
-            # ⚠️ **别剥 `**`** —— 它是 markdown 的粗体标记，剥掉会**破坏代码内容**
-            #   （实测：`(C 的 `char **`)` 被剥成 `(C 的 `char `)` ⇒ 语义丢了）。
-            #   原文照抄，粗体标记留着（markdown 里本来就该有）。
             if len(text) < 8:
                 continue
-            out.append({"text": text, "section": section_label(sec), "kind": "trap"})
+            out.append(
+                {
+                    "text": rewrite_links(text),
+                    "section": section_label(sec),
+                    "kind": "trap",
+                }
+            )
     return out
 
 
@@ -157,9 +192,7 @@ def collect_appendix_b(doc):
     impl = []
     limited = []
     for sec, parent in iter_with_parent(doc):
-        # 附录 B 的内容在 h3 里 ⇒ 认**父章**的编号（'B'）
-        in_appendix_b = (parent or {}).get("num") == "B"
-        if not in_appendix_b:
+        if (parent or {}).get("num") != "B":
             continue
         title = sec.get("title", "")
         body = sec.get("body", "")
@@ -171,7 +204,7 @@ def collect_appendix_b(doc):
                 text = t[2:].strip().replace("**", "")
                 if len(text) < 6:
                     continue
-                impl.append({"text": text})
+                impl.append({"text": rewrite_links(text)})
         elif "受限" in title:
             # 表格行：| 项 | 现象 | 台账 |
             for line in body.splitlines():
@@ -188,8 +221,8 @@ def collect_appendix_b(doc):
                 w_ref = cells[2] if len(cells) > 2 else ""
                 limited.append(
                     {
-                        "item": cells[0],
-                        "symptom": cells[1],
+                        "item": rewrite_links(cells[0]),
+                        "symptom": rewrite_links(cells[1]),
                         "w_ref": "" if w_ref in ("台账", "—", "-") else w_ref,
                     }
                 )
@@ -199,11 +232,12 @@ def collect_appendix_b(doc):
 def collect_stdlib():
     """标准库公开 API —— 从**源码的 `// API:` 块**抽。
 
-    ⚠️ **不要抄规范 §15 那张表** —— 实测那张表把 fmt 的内部 helper
+    ⚠️ **不能抄规范 § 15 那张表** —— 实测那张表把 fmt 的内部 helper
     （`digit_char` / `hex_char`）和一个根本不是 stdlib 函数的 `ptr_add`
-    也列成了「公开 API」。源码的 `// API:` 块才是**有意设计的公开面**。
+    也列成了「公开 API」。
 
-    ⚠️ **也不能用「文件里所有 fn」** —— `string.jhyy` 自带 arena 内部 helper。
+    ⚠️ **也不能用「文件里所有 fn」** —— `string.jhyy` 自带 arena 内部 helper
+    （`arena_init` / `arena_alloc` / `align_up`）=> `// API:` 块才是**有意设计的公开面**。
     """
     modules = []
     api_re = re.compile(r"^//\s+([a-z_][a-z_0-9]*)\s*\((.*?)\)\s*(?:->\s*(.*))?$")
@@ -251,6 +285,8 @@ def collect_example(doc):
     return ""
 
 
+# ── 渲染 ────────────────────────────────────────────────────────
+
 def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
     L = []
     A = L.append
@@ -279,17 +315,13 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
     A("| `jhyy_abi_info` | 查 ABI（结构体布局 / 调用约定 / FFI） | 涉及 struct 传参 / FFI ⇒ 查 |")
     A("| `jhyy_get_il` | 看编译出来的 IL | 调试 codegen ⇒ 才用 |")
     A("")
-    A("⚠️ **`jhyy_check` 一次就返回全部诊断** ⇒ 不要一个错误查一次。")
-    A("⚠️ **别顺手改注释、别做额外验证**（不用证明断言非空、不用探测别的边界）——")
-    A("　　那些是**任务范围外**的事，做了只会浪费轮数。")
-    A("")
     A("## 规范章节目录")
     A("")
     A("查某一节用 `jhyy_lang_ref`，参数传章节号（如 `\"5.6\"` / `\"附录 B\"`）。")
     A("")
     for t in toc:
-        num = f"§ {t['num']}" if t["num"] else ""
-        A(f"- **{num} {t['title']}**" + (f" —— {t['scope']}" if t.get("scope") else ""))
+        num = ("§ %s" % t["num"]) if t["num"] else ""
+        A("- **%s %s**" % (num, t["title"]) + ((" —— %s" % t["scope"]) if t.get("scope") else ""))
     A("")
 
     A("## 反直觉点（规范里标了 ⚠ 的行）")
@@ -297,20 +329,20 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
     A("下面每条都是**规范原文标记**的「与直觉/与旧规范不同」之处。")
     A("")
     for p in pitfalls:
-        A(f"- {p['text']}  *（{p['section']}）*")
+        A("- %s  *（%s）*" % (p["text"], p["section"]))
     A("")
 
     A("## 附录 B：未实装 —— 这些构造编译器会直接拒绝")
     A("")
     for item in impl:
-        A(f"- {item['text']}")
+        A("- %s" % item["text"])
     A("")
 
     A("## 附录 B：已实装但受限 —— 这些能写，但有坑")
     A("")
     for r in limited:
-        w = f"（台账 {r['w_ref']}）" if r["w_ref"] else ""
-        A(f"- **{r['item']}** —— {r['symptom']} {w}")
+        w = ("（台账 %s）" % r["w_ref"]) if r["w_ref"] else ""
+        A("- **%s** —— %s %s" % (r["item"], r["symptom"], w))
     A("")
 
     A("## 标准库公开 API")
@@ -318,11 +350,11 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
     A("导入时写模块名本身（**不带 `std::` 前缀**），调用时直接写完整函数名。")
     A("")
     for m in stdlib:
-        A(f"### `{m['module']}`")
+        A("### `%s`" % m["module"])
         A("")
         for f in m["functions"]:
-            ret = f" -> {f['ret']}" if f.get("ret") else ""
-            A(f"- `{f['name']}({f['args']})`{ret}")
+            ret = (" -> %s" % f["ret"]) if f.get("ret") else ""
+            A("- `%s(%s)`%s" % (f["name"], f["args"], ret))
         A("")
 
     if example:
@@ -338,13 +370,13 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
 
 def main():
     if not SPEC_PATH.exists():
-        print(f"✗ 找不到规范：{SPEC_PATH}", file=sys.stderr)
+        print("✗ 找不到规范：%s" % SPEC_PATH, file=sys.stderr)
         return 1
     if not STD_DIR.exists():
-        print(f"✗ 找不到标准库源码：{STD_DIR}", file=sys.stderr)
+        print("✗ 找不到标准库源码：%s" % STD_DIR, file=sys.stderr)
         return 1
 
-    doc = load_spec()
+    doc = load_spec_doc(SPEC_PATH)
     toc = collect_toc(doc)
     pitfalls = collect_pitfalls(doc)
     impl, limited = collect_appendix_b(doc)
@@ -369,16 +401,17 @@ def main():
     with open(OUT_JSON, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
-    print(f"✓ {SPEC_PATH.name}（版本 {doc.get('version')}）")
-    print(f"  章节目录 {len(toc)} 章")
-    print(f"  反直觉点 {len(pitfalls)} 条")
-    print(f"  未实装 {len(impl)} 项")
-    print(f"  受限 {len(limited)} 行")
-    print(f"  标准库 {len(stdlib)} 模块 / {sum(len(m['functions']) for m in stdlib)} 个函数")
-    print(f"  完整示例 {'有' if example else '无'}")
-    print(f"→ {OUT_MD}")
-    print(f"→ {OUT_JSON}")
-    print(f"  （markdown {len(md)} 字符）")
+    print("✓ %s（版本 %s）" % (SPEC_PATH.name, doc.get("version")))
+    print("  章节目录 %d 章" % len(toc))
+    print("  反直觉点 %d 条" % len(pitfalls))
+    print("  未实装 %d 项" % len(impl))
+    print("  受限 %d 行" % len(limited))
+    print("  标准库 %d 模块 / %d 个函数"
+          % (len(stdlib), sum(len(m["functions"]) for m in stdlib)))
+    print("  完整示例 %s" % ("有" if example else "无"))
+    print("→ %s" % OUT_MD)
+    print("→ %s" % OUT_JSON)
+    print("  （markdown %d 字符）" % len(md))
     return 0
 
 
