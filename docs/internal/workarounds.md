@@ -354,6 +354,8 @@
 | [W-222](#w-222) | RESOLVED | `std::arena` 的 `arena_reset` 把 `end` 设成 `start +... |
 | [W-223](#w-223) | RESOLVED | `#[naked]` 的**标签走旁路文件、函数体走 IL** ⇒ 两者永不相遇(裸中断入口不可用) |
 | [W-224](#w-224) | RESOLVED | side-file 的路径是**相对路径** ⇒ 只有 CWD 恰好有... |
+| [W-225](#w-225) | RESOLVED | 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到** |
+| [W-226](#w-226) | ACTIVE | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit status」 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15713,3 +15715,112 @@ hosted 链接行把 `compiler/runtime/runtime.c` 也链进去,而 runtime.c 自�
 `compiler/src0/codegen.jhyy`(写 `_no_std.flag`)、
 `compiler/src0/main.jhyy`(读 `_no_std.flag` / `_inline_asm.buf`)、
 `compiler/runtime/runtime.c`(hosted 的 `main` 桥接函数)。
+
+<a id="w-225"></a>
+## W-225: 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到**
+
+**状态:** RESOLVED closed 2026-11-13 — `flush()` 改成只跳过「连标题都没有」的残片，章级 h2 回到索引里
+**提交/说明:** 本轮提交（`mcp-jhyy/jhyy_spec_doc.py` + `mcp-jhyy/tests/test_spec_sections.py`）
+**Filed-by:** 2026-11-13 (做 IDE 知识包生成器时实测)
+**日期:** 2026-11-13
+
+**触发面:** `mcp-jhyy/jhyy_spec_doc.py` 的 `load_spec_doc()` ⇒ 被
+`jhyy_lang_ref`（查规范）与 `jhyy_abi_info`（查 ABI）共用 ⇒ 也影响
+`scripts/gen-knowledge.py`（知识包生成器）。
+
+**症状:**
+- 规范里 `## 1. 程序结构`、`## 2. 类型系统`、`## 4. 运算符`、`## 5. 控制流`、
+  `## 7. 指针与借用`、`## 10. 数组与切片`、`## 11. 泛型`、`## 17. 底层与 OS 扩展`
+  这些 **h2（章）** 在索引里**根本不存在**。
+- 实测：`jhyy_lang_ref.search("程序结构")` → **0 命中**；
+  `"类型系统"` → 0；`"指针与借用"` → 0；`"数组与切片"` → 0。
+  而 `"泛型"` → 2 条（命中的是 h3 子节 `11.1`/`11.2`，不是章 `11`）。
+- 后果：**按章名/按主题词查规范查不到** —— 而这正是 AI 最自然的查法
+  （"程序结构是什么"、"指针与借用怎么写"）。它只能靠子节的正文侥幸命中，
+  或者**什么都查不到** ⇒ 白白多绕几轮工具调用。
+
+**根因:** `flush()` 里有一句 `if current["body"]: sections.append(current)`
+—— **正文为空的 section 被跳过**。而规范的写法是：h2（章）下面全是 h3（节），
+章标题与第一个 h3 之间**没有正文** ⇒ 每个章的 body 都是空串 ⇒
+**17 个章（h2）被丢掉，71 节里只剩 54 个存活**。
+
+⇒ 这是**规范的组织方式**（章只做标题、内容在子节）撞上**分节器的"丢弃空节"规则**。
+
+**workaround:** 查规范时**传章节号或子节标题**，别只传章名；或者直接读
+`docs/abis/jhyy-lang-spec-v4.0.0.md` 全文（MCP 的 `jhyy://spec` 资源能给全文）。
+
+**影响范围:** `mcp-jhyy/jhyy_spec_doc.py`（`load_spec_doc`）、
+`mcp-jhyy/jhyy_lang_ref.py`、`mcp-jhyy/jhyy_abi_info`（server.py 内联）、
+`JiHuiYiYou/scripts/gen-knowledge.py`。
+
+**什么修法能取代它:** 分节器**保留正文为空的 section**（只跳过连标题都没有的残片），
+而不是丢弃 ⇒ 章级章节回到索引里 ⇒ 「按章名查」能命中。
+⚠️ 改 `load_spec_doc` 会同时影响 `jhyy_lang_ref` / `jhyy_abi_info` 的既有行为
+⇒ 必须配一条**新断言**（按章标题查要能命中该章）⇒ 门红一次再改。
+
+**修法（已落):** `mcp-jhyy/jhyy_spec_doc.py:71` — `flush()` 里
+`if current["body"]: sections.append(current)` 改成
+`if current["title"] or current["num"]: sections.append(current)`
+⇒ 只跳过「连标题都没有」的残片，**章（h2）全部回到索引**。
+
+**回归门:** `mcp-jhyy/tests/test_spec_sections.py`（3 个测试）——
+① 24 个章（1..20 + 附录 A/B/C/D + Cross-ref）**全部**在索引里；
+② 按**章标题**查（程序结构 / 类型系统 / 控制流 / 指针与借用 / 结构体 / 数组与切片）
+必须命中该章；③ 章标题的精确匹配要**排第一**。
+⚠️ **门验证过能红**：把 `flush()` 退回旧行为 ⇒ 3 个测试全红 ⇒ 修完转绿 ✓。
+
+**效果（实测）:** 索引节数 **71 → 80**；
+`search("程序结构")` 0 → 1 命中（§ 1）；`"类型系统"` 0 → 1（§ 2）；
+`"指针与借用"` 0 → 1（§ 7）；`"数组与切片"` 0 → 1（§ 10）。
+
+**引用:**
+- `mcp-jhyy/jhyy_spec_doc.py:62-73`（`flush()`）、`:71`（修法那行）
+- `mcp-jhyy/tests/test_spec_sections.py`（回归门）
+- 实测：`python -c "import sys;sys.path.insert(0,'mcp-jhyy');import jhyy_lang_ref as L;print(L.search('程序结构'))"`
+
+<a id="w-226"></a>
+## W-226: 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit status」
+
+**状态:** ACTIVE since 2026-11-13 — `ld` 的 "undefined reference to `X'" 没进 collect2 的 stderr
+**Filed-by:** 2026-11-13 (做 IDE 知识包 + 评测时实测)
+**日期:** 2026-11-13
+
+**触发面:** `compiler/src0/main.jhyy` 的链接步骤（`gcc … -o …`）⇒
+任何**链接期**失败（最常见：入口函数名写错 —— `fn main` 而非 `fn main_jhyy`）。
+
+**症状:** 链接失败时 stderr 只有：
+
+```
+gcc link failed: "…\gcc.exe" …
+gcc stderr:
+collect2.exe: error: ld returned 1 exit status
+```
+
+⇒ **看不到 `undefined reference to 'main'`** ⇒ 拿到这条错误**根本不知道该改什么**。
+
+**根因:** 跟 W-045 是**同一类**（子进程的 stderr 传不回父进程），但这次断在**更里面一层**：
+`gcc` 调 `collect2`，`collect2` 调 `ld` —— **`ld` 的 stderr 没被 collect2 转发**
+（实测：本机 gcc 直接跑，`stderr` 里也只有 `collect2.exe: error: ld returned 1 exit status`，
+`stdout` 是空的 ⇒ **`ld` 的输出彻底丢了**，不是被谁截断）。
+
+⇒ 编译器已经做对的那部分（`main.jhyy:1622-1629` 打印 `captured` 的 stderr）是对的，
+但 **`captured` 里本来就没有那条信息**。
+
+**影响:** 直接影响 **AI 写 JHYY 的效率** —— 「入口函数名写错」是模型最常见的错，
+而它拿到的是一条**不可操作**的错误 ⇒ 只能靠「回忆/查规范」才知道该改成 `main_jhyy`
+⇒ **白白多花几轮**。评测的轨迹归因里「验证」占了 31~34% 的轮数，这是其中一部分。
+
+**workaround:** IDE 侧在**编译回灌**时补一句针对性提示（钩子 `scripts/jhyy-check-hook.mjs`
+遇到 "ld returned" 就附带「hosted 入口必须叫 `main_jhyy`」）。
+
+**什么修法能取代它:** 编译器在链接失败时**自己判定**缺哪个符号 —— 它知道 hosted 的入口符号
+就是 `main_jhyy` ⇒ 链接失败且 `.s` 里没有 `main_jhyy` ⇒ 直接报
+「链接失败：找不到入口符号 `main_jhyy`（hosted 模式的入口函数名是 `main_jhyy`，不是 `main`）」。
+⚠️ 改 `compiler/src0/main.jhyy` 是**逻辑改动** ⇒ 会移位模块级 temp 编号 ⇒ 自举产物漂移
+⇒ 要走**全量 regress + `make` 刷锚点 + `git add compiler/build/bin/jhyy.exe` + 三个 closure 门**
+（**不是免费改动**）⇒ 这是一个**要单独立项的改动**，不在「做知识包」这一轮里顺手做。
+
+**引用:**
+- `compiler/src0/main.jhyy:1617-1629`（打印 captured stderr 的那段）
+- 实测：`gcc u.c -o u.exe`（缺符号）⇒ stderr 只有 `collect2.exe: error: ld returned 1 exit status`
+- IDE 侧临时绕法：`JiHuiYiYou-IDE/scripts/jhyy-check-hook.mjs`
