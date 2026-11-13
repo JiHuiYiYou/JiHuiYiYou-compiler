@@ -261,17 +261,17 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 | 语言 | 代码行 | 占比 | 文件数 |
 |---|---|---|---|
-| JHYY | 36992 | 69.1% | 377 |
-| Python | 10012 | 18.7% | 39 |
-| Shell | 2512 | 4.7% | 20 |
+| JHYY | 36992 | 68.4% | 377 |
+| Python | 10558 | 19.5% | 42 |
+| Shell | 2512 | 4.6% | 20 |
 | PowerShell | 1900 | 3.5% | 20 |
-| C | 1315 | 2.5% | 13 |
+| C | 1315 | 2.4% | 13 |
 | C# | 287 | 0.5% | 1 |
 | Assembly | 225 | 0.4% | 6 |
 | Batchfile | 137 | 0.3% | 4 |
 | JavaScript | 125 | 0.2% | 1 |
 | TypeScript | 65 | 0.1% | 1 |
-| **合计** | **53570** | **100%** | **482** |
+| **合计** | **54116** | **100%** | **485** |
 
 > 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
 > ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。
@@ -345,66 +345,6 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
    ⇒ **知识包里的工具速查治不了它**；写全 `--allowedTools` 的工具名也只从 1.25/题降到 1/题
    ⇒ **要消掉它只能靠 IDE 侧的 PostToolUse hook**（模型压根不用调 MCP 工具 ⇒ 装载也不需要）。
 
-
-
-### 8.4 「编译器报错 → 该改哪」索引（MCP 工具 `jhyy_error_lookup`）
-
-| 项 | 值 |
-|---|---|
-| 工具 | `jhyy_error_lookup`（MCP 侧 `mcp-jhyy/jhyy_errors.py`） |
-| 索引条数 | **166** 条（编译器源码 + 规范 § 18 + 附录 B + 语料实测 + 台账） |
-| 数据来源 | 全部**只读**：静态扫描 `compiler/src0/*.jhyy`、规范 § 18 / 附录 B、56 个 `EXPECT-ERROR` 用例的实测报错、台账 |
-| 回归门 | `mcp-jhyy/tests/test_error_lookup.py`（8 个测试，含**走 server 层**的那条） |
-
-**为什么有它** —— 语言对照（29 对）测出来的：「少声明」「格式符错」这两类在 JHYY 上
-**多 5~8 轮** ⇒ 根因是 **C 的编译器报错自带修复线索**
-（`implicit declaration of function 'printf'`），而 JHYY 只说
-「undefined variable printf」⇒ 模型得自己查规范才知道怎么改
-⇒ 这个索引做的就是那一步翻译。
-
-**⚠️ 不改编译器** —— 改 `compiler/src0/*.jhyy` 的逻辑会移位模块级 temp 编号
-⇒ 自举产物漂移 ⇒ 要走全量 regress + `make` 刷锚点 + 三个 closure 门
-⇒ 索引**只读**编译器源码。
-
-**顺带修的三处**（`jhyy_workarounds.py`）：
-- `根因` alias 缺失 ⇒ 台账里 134 条用 `**根因:**` ⇒ 它们的 root_cause 解析成空串
-  ⇒ 修完**有 root_cause 的条目从 17 条涨到 150 条**、failure_condition 124 条
-  （错误索引靠台账关联 ⇒ 关联面直接变大）
-- `search()` 只透出 9 个字段（丢了 `fix`/`verify`/`failure_condition`/`reference`）
-  ⇒ 补到 14 个
-- 每次调用重读 1 MB markdown ⇒ 加 **mtime 缓存**（实测 0.107s → 0.0006s）
-
-### 8.4 IDE 侧的「编译回灌」（PostToolUse hook）
-
-模型写完 `.jhyy` ⇒ **IDE 立刻编译 ⇒ 真实诊断回灌上下文**（不是靠模型自觉去调工具）。
-
-| 项 | 值 |
-|---|---|
-| 钩子脚本 | IDE 仓 `scripts/jhyy-check-hook.mjs` |
-| settings 生成 | IDE 仓 `src/main/claude/hooks.ts`（`buildHookSettings`） |
-| 打包 | `package.json` 的 `extraResources`（**必须放 asar 外面** —— asar 里的文件没法被外部 node 执行） |
-| 端到端验证 | IDE 仓 `scripts/claude-hook-e2e.ts`（真 CLI + **marker 铁证**：模型复述出注入的标记 ⇒ 进了上下文） |
-
-⚠️ **端到端验证挖出三个真 bug**（没验证就上线全是空话）：
-
-1. **hook 命令里的路径不能用反斜杠** —— CLI 跑 hook 命令**经过 shell** ⇒
-   sh 把反斜杠当转义符 ⇒ `C:\Users\...` → `C:Users...` ⇒ 找不到文件 ⇒ hook 静默死掉
-   ⇒ 统一转**正斜杠**。
-2. **hook 里必须用 `bash -lc` 跑编译器** —— hook 继承 CLI 的 env ⇒ PATH 带着
-   **错的 `C:\msys\usr\bin`** ⇒ `windres`（嵌 exe 图标）预处理失败 ⇒
-   编译器改用占位对象 `__jhyy_icon_obj_missing__` 链接 ⇒ **链接必挂且与代码无关**
-   ⇒ 模型拿到**假错误**，连编译正确的代码也被判失败。
-3. **PostToolUse 的输出要带 `tool_response: {success: true}`** —— CLI 的 hook 文档明写。
-
-⚠️ **顺带修了一个 IDE 侧的真问题**：Claude 会话原来用 `env: { ...process.env }` 起
-⇒ **不带 MSYS2 的 login shell env** ⇒ **IDE 里 Claude 自己编译 JHYY 代码也会撞上
-「windres 失败 ⇒ 链接必挂」的假错误** ⇒ 现在会话带上了 `mergeShellEnv(...)`
-（终端那条路早就走了，见 `src/main/ptyNode.ts`）。
-
-⚠️ **一个设计改动**：hook 在**编译成功时也注入一句**「✓ 现在编译通过了」——
-① 「注入进了上下文」这件事**每次**都可观测（否则模型一次就改对时注入路径根本测不到）；
-② **省一轮**（模型改完就知道过了 ⇒ 不用自己再编译一次确认）。
-
 ### 8.3 语言对照组 —— **同样的实现，大众语言 vs 小众语言**
 
 语料：语言仓 `bench/difftest.py` 的随机程序生成器 ⇒ **同一个 AST** 发出
@@ -450,3 +390,78 @@ C（`emit_c`）和 JHYY（`emit_jhyy`）**两个实现**，再对两者施加**�
 >
 > ⚠️ 成本数字是**本机实测**（provider 走 MiniMax-M3.1-Flash）⇒
 > 换模型/换供应商要重测；报告里必须写明当时的模型 id。
+
+### 8.4 「编译器报错 → 该改哪」索引（MCP 工具 `jhyy_error_lookup`）
+
+| 项 | 值 |
+|---|---|
+| 工具 | `jhyy_error_lookup`（MCP 侧 `mcp-jhyy/jhyy_errors.py`） |
+| 索引条数 | **166** 条（编译器源码 + 规范 § 18 + 附录 B + 语料实测 + 台账） |
+| 数据来源 | 全部**只读**：静态扫描 `compiler/src0/*.jhyy`、规范 § 18 / 附录 B、56 个 `EXPECT-ERROR` 用例的实测报错、台账 |
+| 回归门 | `mcp-jhyy/tests/test_error_lookup.py`（8 个测试，含**走 server 层**的那条） |
+
+**为什么有它** —— 语言对照（29 对）测出来的：「少声明」「格式符错」这两类在 JHYY 上
+**多 5~8 轮** ⇒ 根因是 **C 的编译器报错自带修复线索**
+（`implicit declaration of function 'printf'`），而 JHYY 只说
+「undefined variable printf」⇒ 模型得自己查规范才知道怎么改
+⇒ 这个索引做的就是那一步翻译。
+
+**⚠️ 不改编译器** —— 改 `compiler/src0/*.jhyy` 的逻辑会移位模块级 temp 编号
+⇒ 自举产物漂移 ⇒ 要走全量 regress + `make` 刷锚点 + 三个 closure 门
+⇒ 索引**只读**编译器源码。
+
+**顺带修的三处**（`jhyy_workarounds.py`）：
+- `根因` alias 缺失 ⇒ 台账里 134 条用 `**根因:**` ⇒ 它们的 root_cause 解析成空串
+  ⇒ 修完**有 root_cause 的条目从 17 条涨到 150 条**、failure_condition 124 条
+  （错误索引靠台账关联 ⇒ 关联面直接变大）
+- `search()` 只透出 9 个字段（丢了 `fix`/`verify`/`failure_condition`/`reference`）
+  ⇒ 补到 14 个
+- 每次调用重读 1 MB markdown ⇒ 加 **mtime 缓存**（实测 0.107s → 0.0006s）
+
+### 8.5 检索改造（`jhyy_lang_ref`）
+
+| 项 | 值 |
+|---|---|
+| 章节号精确查 | `"18"` / `"10.4"` / `"附录 B"` / `"B"` ⇒ 直接取那一节**连它的子节** |
+| 整节返回 | matches 带 `body`（整节正文，上限 4000 字符，**只给 top 3**） |
+| 中文提问 | 中文连续串切 **bigram** ⇒ `search("怎么写命名空间")` 从 **0 命中**变成命中 § 13 |
+| CN→EN 反向别名 | 从 `_ALIASES` 自动反查（不用手写第二张表 ⇒ 不会漂移）⇒ `search("命名空间")` 的 top 分 6 → 9 |
+| 回归门 | `mcp-jhyy/tests/test_lang_ref_recall.py`（7 个测试） |
+
+**为什么必须做章节号精确查** —— 它是 `jhyy_error_lookup` **指路的前提**：
+错误索引告诉模型「去查 § 18」，那 `jhyy_lang_ref("18")` 就必须取得到那一节
+⇒ 否则**链条断在中间**（错误索引指了路，检索却取不到）。
+
+**⚠️ 不是每一章都有子节** —— § 13 / § 15 / § 18 的内容直接写在章下；
+§ 1 / § 2 / § 5 才有（§ 5 → 5.1~5.7）。
+
+### 8.6 IDE 侧的「编译回灌」（PostToolUse hook）
+
+模型写完 `.jhyy` ⇒ **IDE 立刻编译 ⇒ 真实诊断回灌上下文**（不是靠模型自觉去调工具）。
+
+| 项 | 值 |
+|---|---|
+| 钩子脚本 | IDE 仓 `scripts/jhyy-check-hook.mjs` |
+| settings 生成 | IDE 仓 `src/main/claude/hooks.ts`（`buildHookSettings`） |
+| 打包 | `package.json` 的 `extraResources`（**必须放 asar 外面** —— asar 里的文件没法被外部 node 执行） |
+| 端到端验证 | IDE 仓 `scripts/claude-hook-e2e.ts`（真 CLI + **marker 铁证**：模型复述出注入的标记 ⇒ 进了上下文） |
+
+⚠️ **端到端验证挖出三个真 bug**（没验证就上线全是空话）：
+
+1. **hook 命令里的路径不能用反斜杠** —— CLI 跑 hook 命令**经过 shell** ⇒
+   sh 把反斜杠当转义符 ⇒ `C:\Users\...` → `C:Users...` ⇒ 找不到文件 ⇒ hook 静默死掉
+   ⇒ 统一转**正斜杠**。
+2. **hook 里必须用 `bash -lc` 跑编译器** —— hook 继承 CLI 的 env ⇒ PATH 带着
+   **错的 `C:\msys\usr\bin`** ⇒ `windres`（嵌 exe 图标）预处理失败 ⇒
+   编译器改用占位对象 `__jhyy_icon_obj_missing__` 链接 ⇒ **链接必挂且与代码无关**
+   ⇒ 模型拿到**假错误**，连编译正确的代码也被判失败。
+3. **PostToolUse 的输出要带 `tool_response: {success: true}`** —— CLI 的 hook 文档明写。
+
+⚠️ **顺带修了一个 IDE 侧的真问题**：Claude 会话原来用 `env: { ...process.env }` 起
+⇒ **不带 MSYS2 的 login shell env** ⇒ **IDE 里 Claude 自己编译 JHYY 代码也会撞上
+「windres 失败 ⇒ 链接必挂」的假错误** ⇒ 现在会话带上了 `mergeShellEnv(...)`
+（终端那条路早就走了，见 `src/main/ptyNode.ts`）。
+
+⚠️ **一个设计改动**：hook 在**编译成功时也注入一句**「✓ 现在编译通过了」——
+① 「注入进了上下文」这件事**每次**都可观测（否则模型一次就改对时注入路径根本测不到）；
+② **省一轮**（模型改完就知道过了 ⇒ 不用自己再编译一次确认）。
