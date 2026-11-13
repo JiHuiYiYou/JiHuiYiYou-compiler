@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """JHYY MCP Server — 让 Claude Code 能编译、运行、检查 .jhyy 代码。
 
-提供 11 个工具:
+提供 12 个工具:
   - jhyy_compile         编译 .jhyy 文件
   - jhyy_run             编译并运行
   - jhyy_check           仅做语法/语义检查
   - jhyy_get_il          获取 JHYY IL 输出(自写后端的 IR 文本)
   - jhyy_lang_ref        查询语言规范
   - jhyy_abi_info        查询 ABI 信息
+  - jhyy_error_lookup    把一条编译器报错翻成「什么意思/怎么改/该查哪一节/相关台账条目」
   - jhyy_format          代码格式化 (简单对齐 / 占位)
   - jhyy_regress         跑 regress (Sprint mcp-1, 替代 Bash regress.py)
   - jhyy_il_diff         diff 两个 .il 文件 (Sprint mcp-1, 替代 sha256sum + diff)
@@ -60,6 +61,7 @@ Routing (intent → tool):
 - diff two .il / byte-equal check → jhyy_il_diff
 - verify selfhost closure (v1→v2→v3 byte-equal) → jhyy_selfhost_check
 - search workarounds / "is W-XXX still active" → jhyy_workarounds
+- "what does this error mean" / compiler error → jhyy_error_lookup
 
 DO NOT: Bash("jhyy.exe ..."), Bash("python regress*.py"), Bash("sha256sum *.il"), Read("docs/abis/jhyy-*.md"), Read("compiler/build/bin/*.il"), Read("docs/internal/workarounds.md"). Use the tools above.
 
@@ -72,6 +74,7 @@ mcp = FastMCP("jhyy", instructions=JHYY_INSTRUCTIONS)
 sys.path.insert(0, str(MCP_DIR))
 import jhyy_runner as runner  # noqa: E402
 import jhyy_regress as regress_mod  # noqa: E402
+import jhyy_errors as errors_mod
 import jhyy_workarounds as workarounds_mod  # noqa: E402
 
 
@@ -423,6 +426,40 @@ def jhyy_workarounds(query: str, status: Optional[str] = None) -> dict:
     返回结构化结果, 不用正则手撕 markdown.
     """
     return workarounds_mod.search(query, status)
+
+
+@mcp.tool
+def jhyy_error_lookup(error: str, limit: int = 5) -> dict:
+    """Explain a JHYY compiler error: what it means, how to fix it, where to read more.
+
+    USE THIS WHEN the compiler rejected the code and you need to know what to change.
+    Triggers: "what does this error mean", "how do I fix this error",
+              "explain the compiler error", "unexpected token in expression",
+              "这个报错什么意思", "这个错误怎么改", "为什么报 type mismatch",
+              "解释一下这条编译错误", "这条报错怎么修".
+
+    Pass the compiler message **verbatim** (a substring is fine) — the index is keyed
+    by the exact message text, so paraphrasing loses the match.
+
+    比读规范再自己推更快: 索引已经把「报错 → 含义 / 修法 / 该查哪一节 / 相关台账条目」
+    对好了 —— 尤其 C 的编译器报错自带修复线索（implicit declaration of function 'printf'），
+    而 JHYY 只说「undefined variable printf」⇒ 这一步就是替模型补上那条线索。
+
+    Args:
+        error: 编译器报错的**原文**（子串就行）. 例如 "unexpected token ';' in expression" /
+               "type mismatch in let" / "undefined variable printf".
+               整行诊断（带路径和行列号）也认 —— 前缀会被剥掉.
+        limit: 最多返回几条 (默认 5)
+
+    Returns:
+        {ok, version, query, indexed, matches: [{id, text, kind, score, meaning, fix,
+         spec_ref, w_ref, w_status, example_file, origin}]}
+
+    ⚠️ **meaning / fix 可能有空** —— 自动抽出来的只覆盖「规范 § 18 的错误码表 +
+    高频文本表」「附录 B 的现象」「台账的症状与绕法」；其余条目给的是
+    **该查哪一节**（spec_ref）与**相关台账编号**（w_ref），剩下的自己查那一节.
+    """
+    return errors_mod.search(error, limit)
 
 
 # ========== MCP Resources ==========

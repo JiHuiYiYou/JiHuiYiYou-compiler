@@ -262,7 +262,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 | 语言 | 代码行 | 占比 | 文件数 |
 |---|---|---|---|
 | JHYY | 36992 | 69.1% | 377 |
-| Python | 9965 | 18.6% | 39 |
+| Python | 10012 | 18.7% | 39 |
 | Shell | 2512 | 4.7% | 20 |
 | PowerShell | 1900 | 3.5% | 20 |
 | C | 1315 | 2.5% | 13 |
@@ -271,7 +271,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 | Batchfile | 137 | 0.3% | 4 |
 | JavaScript | 125 | 0.2% | 1 |
 | TypeScript | 65 | 0.1% | 1 |
-| **合计** | **53523** | **100%** | **482** |
+| **合计** | **53570** | **100%** | **482** |
 
 > 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
 > ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。
@@ -346,6 +346,33 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
    ⇒ **要消掉它只能靠 IDE 侧的 PostToolUse hook**（模型压根不用调 MCP 工具 ⇒ 装载也不需要）。
 
 
+
+### 8.4 「编译器报错 → 该改哪」索引（MCP 工具 `jhyy_error_lookup`）
+
+| 项 | 值 |
+|---|---|
+| 工具 | `jhyy_error_lookup`（MCP 侧 `mcp-jhyy/jhyy_errors.py`） |
+| 索引条数 | **166** 条（编译器源码 + 规范 § 18 + 附录 B + 语料实测 + 台账） |
+| 数据来源 | 全部**只读**：静态扫描 `compiler/src0/*.jhyy`、规范 § 18 / 附录 B、56 个 `EXPECT-ERROR` 用例的实测报错、台账 |
+| 回归门 | `mcp-jhyy/tests/test_error_lookup.py`（8 个测试，含**走 server 层**的那条） |
+
+**为什么有它** —— 语言对照（29 对）测出来的：「少声明」「格式符错」这两类在 JHYY 上
+**多 5~8 轮** ⇒ 根因是 **C 的编译器报错自带修复线索**
+（`implicit declaration of function 'printf'`），而 JHYY 只说
+「undefined variable printf」⇒ 模型得自己查规范才知道怎么改
+⇒ 这个索引做的就是那一步翻译。
+
+**⚠️ 不改编译器** —— 改 `compiler/src0/*.jhyy` 的逻辑会移位模块级 temp 编号
+⇒ 自举产物漂移 ⇒ 要走全量 regress + `make` 刷锚点 + 三个 closure 门
+⇒ 索引**只读**编译器源码。
+
+**顺带修的三处**（`jhyy_workarounds.py`）：
+- `根因` alias 缺失 ⇒ 台账里 134 条用 `**根因:**` ⇒ 它们的 root_cause 解析成空串
+  ⇒ 修完**有 root_cause 的条目从 17 条涨到 150 条**、failure_condition 124 条
+  （错误索引靠台账关联 ⇒ 关联面直接变大）
+- `search()` 只透出 9 个字段（丢了 `fix`/`verify`/`failure_condition`/`reference`）
+  ⇒ 补到 14 个
+- 每次调用重读 1 MB markdown ⇒ 加 **mtime 缓存**（实测 0.107s → 0.0006s）
 
 ### 8.4 IDE 侧的「编译回灌」（PostToolUse hook）
 

@@ -258,7 +258,11 @@ FIELD_ALIASES = {
     "date": ["日期"],
     "trigger": ["触发面"],
     "symptom": ["症状"],
-    "root_cause": ["根因嫌疑"],
+    # ⚠️ **「根因」也要认** —— 台账里两种写法都有：
+    #    「根因嫌疑」是老写法，「根因」是新写法（**134 条**用后者）
+    #    ⇒ 只认前者 ⇒ 那一批的 root_cause 全解析成空串
+    #    ⇒ 错误索引靠台账关联时也关联不上（2026-11-13 实测）。
+    "root_cause": ["根因嫌疑", "根因"],
     "workaround": ["workaround", "Workaround"],
     "scope": ["影响范围"],
     "failure_condition": ["失效条件"],
@@ -372,11 +376,29 @@ def _parse_entry_body(body: str) -> dict:
     return fields
 
 
+# 解析结果缓存：{路径: (mtime, 条目列表)}
+# ⚠️ **按 mtime 失效** —— 台账会被改，改了要能重读（2026-11-13 加）。
+# ⚠️ **调用方只读** ⇒ 直接返回同一个 list 是安全的。
+_parse_cache: dict = {}
+
+
 def parse_workarounds(path: Optional[Path] = None) -> list[dict]:
-    """解析整个 workarounds.md, 返回 [{id, status, date, trigger, symptom, ...}, ...]."""
+    """解析整个 workarounds.md, 返回 [{id, status, date, trigger, symptom, ...}, ...].
+
+    ⚠️ **带缓存** —— 台账 1.0 MB / 222 条，每次调用重读重解析就是纯浪费
+    （MCP 会话里反复调）。缓存按 **mtime** 失效 ⇒ 改了台账能立刻看到。
+    """
     p = Path(path) if path else DEFAULT_PATH
     if not p.exists():
         return []
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return []
+    key = str(p)
+    cached = _parse_cache.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
     text = p.read_text(encoding="utf-8", errors="replace")
     entries = []
     for heading, body in _split_entries(text):
@@ -386,6 +408,7 @@ def parse_workarounds(path: Optional[Path] = None) -> list[dict]:
         for canonical in FIELD_ALIASES:
             fields.setdefault(canonical, "")
         entries.append(fields)
+    _parse_cache[key] = (mtime, entries)
     return entries
 
 
@@ -461,6 +484,10 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
         ]
         haystack = "\n".join(haystacks).lower()
         if q_lower in haystack:
+            # ⚠️ **十四个字段全给** —— 旧版只给 9 个，丢了
+            #    `fix` / `verify` / `failure_condition` / `reference`
+            #    ⇒ 而「怎么修」「什么时候失效」「怎么验证」正是**反直觉知识的核心**
+            #    （错误索引 jhyy_errors 也要靠台账的 symptom/fix 关联）。
             matches.append({
                 "id": entry.get("id", ""),
                 "status": entry.get("status", ""),
@@ -471,6 +498,10 @@ def search(query: str, status: Optional[str] = None, path: Optional[Path] = None
                 "workaround": entry.get("workaround", "")[:300],
                 "scope": entry.get("scope", "")[:200],
                 "superseder": entry.get("superseder", "")[:200],
+                "fix": entry.get("fix", "")[:300],
+                "verify": entry.get("verify", "")[:300],
+                "failure_condition": entry.get("failure_condition", "")[:300],
+                "reference": entry.get("reference", "")[:300],
             })
 
     # 5-state counts

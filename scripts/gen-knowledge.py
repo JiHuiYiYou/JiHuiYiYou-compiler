@@ -310,6 +310,7 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
     A("|---|---|---|")
     A("| `jhyy_check` | 编译检查，返回**全部**诊断（行:列 + 错误原文） | 改完代码 ⇒ 必调一次 |")
     A("| `jhyy_run` | 编译**并运行**，返回 stdout / 退出码 | 要看程序实际输出 ⇒ 才调 |")
+    A("| `jhyy_error_lookup` | **把一条报错翻成「什么意思/怎么改/该查哪一节/相关台账条目」** | 拿到报错但不知道该改哪 ⇒ 先问它 |")
     A("| `jhyy_lang_ref` | 查语言规范（传章节号最准，如 `\"5.6\"`） | 不确定语法/规则 ⇒ 查目录里那节 |")
     A("| `jhyy_workarounds` | 查已知坑台账（含「已修」和「设计如此」） | 报错看着像编译器 bug ⇒ 查 |")
     A("| `jhyy_abi_info` | 查 ABI（结构体布局 / 调用约定 / FFI） | 涉及 struct 传参 / FFI ⇒ 查 |")
