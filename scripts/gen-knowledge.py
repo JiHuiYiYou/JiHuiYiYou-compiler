@@ -285,9 +285,104 @@ def collect_example(doc):
     return ""
 
 
+# 像报错的特征词（用来把附录 B 现象列里的**代码片段/文件名**滤掉）
+_ERR_WORDS = (
+    "not supported", "unexpected", "mismatch", "cannot", "can not", "must",
+    "expected", "non-exhaustive", "undefined", "invalid", "duplicate",
+    "not allowed", "failed", "too many", "not defined", "not found",
+)
+# 代码味太重的符号 —— 报错原文里几乎不出现
+_CODE_CHARS = ";={}()[]"
+
+
+def _looks_like_error(text: str) -> bool:
+    """这段反引号里的东西**像不像一条报错原文**。"""
+    t = text.strip()
+    if len(t) < 8 or len(t) > 60:
+        return False
+    if t.startswith("spec_err_") or t.endswith(".jhyy"):
+        return False
+    if any(c in t for c in _CODE_CHARS):
+        return False
+    low = t.lower()
+    return any(w in low for w in _ERR_WORDS)
+
+
+def _clean(text: str, limit: int = 120) -> str:
+    """现象说明压到一行、限长、表格里的竖线换掉。"""
+    t = " ".join(text.split()).replace("|", "/")
+    if len(t) > limit:
+        t = t[:limit] + "…"
+    return t
+
+
+def collect_error_lookup(doc):
+    """**常见报错速查** —— 报错原文 → 怎么改。
+
+    ## 为什么要有这一节（数据驱动的）
+
+    评测（29 道配对任务，n=1）测到：加了 `jhyy_error_lookup` 之后
+    **正确率 72% → 83%**（mask-change 那组 13% → 63%），
+    **但轮数 +25%、成本 +45%** ⇒ 模型**开始查了**，而**每次查就是一轮**。
+
+    ⇒ 既然答案是固定的、高频的，**就该前置到常驻知识包里** ⇒
+    同样的信息、**零轮次**（不用调工具）。
+
+    ⇒ 来源：规范 § 18 的「高频文本」表（用户最常撞上的）+ 附录 B 现象列里
+    **确实像报错原文**的那些。
+    """
+    rows = []
+    seen = set()
+
+    def add(key: str, meaning: str, ref: str) -> None:
+        k = key.strip()
+        if not k or k in seen:
+            return
+        seen.add(k)
+        rows.append((k, _clean(meaning), ref))
+
+    for sec, parent in iter_with_parent(doc):
+        num = (parent or {}).get("num")
+        title = sec.get("title", "")
+        body = sec.get("body", "")
+
+        # ① § 18 的**高频文本表** —— 在「高频文本：」标记**之后**的那张表
+        if num == "18" and "高频文本" in body:
+            after = body.split("高频文本", 1)[1] if "高频文本" in body else ""
+            for line in after.splitlines():
+                t = line.strip()
+                if not t.startswith("|"):
+                    continue
+                cells = [c.strip().replace("**", "") for c in t.strip("|").split("|")]
+                if len(cells) < 2:
+                    continue
+                key = cells[0].replace("`", "")
+                if key in ("文本", "---") or set(key) <= set("-: "):
+                    continue
+                add(key, cells[1], "§ 18")
+
+        # ② 附录 B 的「已实装但受限」—— 只取**确实像报错原文**的
+        if num == "B" and "受限" in title:
+            for line in body.splitlines():
+                t = line.strip()
+                if not t.startswith("|"):
+                    continue
+                cells = [c.strip().replace("**", "") for c in t.strip("|").split("|")]
+                if len(cells) < 2:
+                    continue
+                if not cells[0] or cells[0] in ("项", "---"):
+                    continue
+                if set(cells[0]) <= set("-: "):
+                    continue
+                for quoted in re.findall(r"`([^`]{8,120})`", cells[1]):
+                    if _looks_like_error(quoted):
+                        add(quoted, cells[1], "附录 B")
+    return rows
+
+
 # ── 渲染 ────────────────────────────────────────────────────────
 
-def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
+def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_lookup):
     L = []
     A = L.append
 
@@ -346,6 +441,17 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example):
         A("- **%s** —— %s %s" % (r["item"], r["symptom"], w))
     A("")
 
+    if error_lookup:
+        A("## 常见报错速查 —— 报错原文 → 怎么改")
+        A("")
+        A("**不用去查工具**（`jhyy_error_lookup` 里有更全的，但下面这些最常撞上）。")
+        A("")
+        A("| 报错原文 | 什么意思 / 怎么改 |")
+        A("|---|---|")
+        for key, meaning, ref in error_lookup:
+            A("| `%s` | %s（%s） |" % (key, meaning.replace("|", "/"), ref))
+        A("")
+
     A("## 标准库公开 API")
     A("")
     A("导入时写模块名本身（**不带 `std::` 前缀**），调用时直接写完整函数名。")
@@ -383,9 +489,10 @@ def main():
     impl, limited = collect_appendix_b(doc)
     stdlib = collect_stdlib()
     example = collect_example(doc)
+    error_lookup = collect_error_lookup(doc)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example)
+    md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_lookup)
     with open(OUT_MD, "w", encoding="utf-8", newline="") as f:
         f.write(md)
 
@@ -398,6 +505,7 @@ def main():
         "limited": limited,
         "stdlib": stdlib,
         "example": example,
+        "error_lookup": error_lookup,
     }
     with open(OUT_JSON, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -410,6 +518,7 @@ def main():
     print("  标准库 %d 模块 / %d 个函数"
           % (len(stdlib), sum(len(m["functions"]) for m in stdlib)))
     print("  完整示例 %s" % ("有" if example else "无"))
+    print("  常见报错速查 %d 条" % len(error_lookup))
     print("→ %s" % OUT_MD)
     print("→ %s" % OUT_JSON)
     print("  （markdown %d 字符）" % len(md))

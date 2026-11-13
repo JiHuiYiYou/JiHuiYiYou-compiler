@@ -156,6 +156,22 @@
 - **SysV 下 MEMORY class 参数与寄存器溢出参数混排** —— 编译报错（[ABI § 12.4](../abis/jhyy-abi-v4.0.0.md#abi-12-4)） 
 - **无交叉编译容器后端** —— `--target` 不切换 PE / ELF 产出 
 
+## 常见报错速查 —— 报错原文 → 怎么改
+
+**不用去查工具**（`jhyy_error_lookup` 里有更全的，但下面这些最常撞上）。
+
+| 报错原文 | 什么意思 / 怎么改 |
+|---|---|
+| `non-exhaustive match: missing variant` | enum match 未覆盖全变体（§ 18） |
+| `closure cannot capture outer variables (not supported yet): the closure body may only use its own parameters and literals` | 闭包捕获外层变量（§ 18） |
+| `cannot assign to immutable variable (use let mut)` | 给不可变绑定赋值（§ 18） |
+| `cannot borrow this variable as mutable more than once at the same time` | 同作用域双 `&mut`（§ 18） |
+| `circular import '<path>'` | import 成环（§ 18） |
+| `unexpected token ';' in expression` | `type` 声明后多写了 `;`（§ 18） |
+| `expected ;, got ::` | `import std::xxx;`（应为 `import xxx;`）（§ 18） |
+| `field type mismatch` | `type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再…（附录 B） |
+| `nested pattern is not supported` | pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代（OR 包着的也算）⇒ 编译期报错 `nested pattern is not supported`。外层 tag 比较与内层 payload…（附录 B） |
+
 ## 标准库公开 API
 
 导入时写模块名本身（**不带 `std::` 前缀**），调用时直接写完整函数名。
