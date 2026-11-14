@@ -355,8 +355,8 @@
 | [W-223](#w-223) | RESOLVED | `#[naked]` 的**标签走旁路文件、函数体走 IL** ⇒ 两者永不相遇(裸中断入口不可用) |
 | [W-224](#w-224) | RESOLVED | side-file 的路径是**相对路径** ⇒ 只有 CWD 恰好有... |
 | [W-225](#w-225) | RESOLVED | 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到** |
-| [W-226](#w-226) | ACTIVE | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit... |
-| [W-227](#w-227) | ACTIVE | AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`^` ⇒... |
+| [W-226](#w-226) | RESOLVED | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit... |
+| [W-227](#w-227) | RESOLVED | AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`\` ⇒... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15782,7 +15782,7 @@ hosted 链接行把 `compiler/runtime/runtime.c` 也链进去,而 runtime.c 自�
 <a id="w-226"></a>
 ## W-226: 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit status」
 
-**状态:** ACTIVE since 2026-11-13 — `ld` 的 "undefined reference to `X'" 没进 collect2 的 stderr
+**状态:** RESOLVED closed 2026-11-14 — 链接失败时编译器**自己**判定「入口符号缺失」并点名 `main_jhyy`
 **Filed-by:** 2026-11-13 (做 IDE 知识包 + 评测时实测)
 **日期:** 2026-11-13
 
@@ -15814,22 +15814,39 @@ collect2.exe: error: ld returned 1 exit status
 **workaround:** IDE 侧在**编译回灌**时补一句针对性提示（钩子 `scripts/jhyy-check-hook.mjs`
 遇到 "ld returned" 就附带「hosted 入口必须叫 `main_jhyy`」）。
 
-**什么修法能取代它:** 编译器在链接失败时**自己判定**缺哪个符号 —— 它知道 hosted 的入口符号
-就是 `main_jhyy` ⇒ 链接失败且 `.s` 里没有 `main_jhyy` ⇒ 直接报
-「链接失败：找不到入口符号 `main_jhyy`（hosted 模式的入口函数名是 `main_jhyy`，不是 `main`）」。
-⚠️ 改 `compiler/src0/main.jhyy` 是**逻辑改动** ⇒ 会移位模块级 temp 编号 ⇒ 自举产物漂移
-⇒ 要走**全量 regress + `make` 刷锚点 + `git add compiler/build/bin/jhyy.exe` + 三个 closure 门**
-（**不是免费改动**）⇒ 这是一个**要单独立项的改动**，不在「做知识包」这一轮里顺手做。
+**怎么修的（2026-11-14 已修）:** `ld` 的真实原因拿不到，但**「入口符号缺失」是我们自己能判定的**
+—— hosted 模式的 runtime.c 的 `main` 会调 `main_jhyy`（`compiler/runtime/runtime.c:140`）
+⇒ `.s` 里没有 `main_jhyy:` 标签 ⇒ 入口符号一定缺。
+⇒ 在链接失败分支（`compiler/src0/main.jhyy` 的 `link_with_gcc`）加这条诊断：
+
+```
+error: link failed - no entry symbol `main_jhyy` in the generated assembly
+note: hosted programs must define `fn main_jhyy` (not `main`) - see lang-spec 1.1
+```
+
+- 判据要**精确**：标签必须**独占一行**（前一个字节是 `\n`）⇒ `xmain_jhyy:` /
+  `main_jhyy_helper:` 不会被误判成命中。
+- ⚠️ **只在 hosted 模式判**（`is_no_std == 0`）：no_std 的入口是 `main`
+  （链接行是 `-Wl,--entry=main`）。
+- ⚠️ W-065 的编译期预检**只覆盖 `cmd_run`** ⇒ `compile` / `build` 路径上链接失败时
+  **只有这条诊断兜底** —— 这正是 IDE hook 踩到的形态（它跑的是 `jhyy compile`）。
+- **回归网**：`compiler/tests/bootstrap/artifact_checks.sh` 的 `check_link_entry_diag`
+  （产物级门）—— 走 `jhyy compile` 那条路，断言链接失败时输出里**点名 `main_jhyy`**。
+  ⇒ 造过红灯：用修前的锚点二进制跑，同一条断言不成立（输出里只有
+  `collect2.exe: error: ld returned 1 exit status`）。
 
 **引用:**
-- `compiler/src0/main.jhyy:1617-1629`（打印 captured stderr 的那段）
+- `compiler/src0/main.jhyy:1617-1629`（打印 captured stderr 的那段 —— 修前的行号）
+- `compiler/src0/main.jhyy:1362`（`asm_has_entry_label`）/ `:1701`（诊断触发点）/ `:1703`（诊断文本）
+- `compiler/runtime/runtime.c:140`（hosted 入口桥：`main` 调 `main_jhyy`）
 - 实测：`gcc u.c -o u.exe`（缺符号）⇒ stderr 只有 `collect2.exe: error: ld returned 1 exit status`
 - IDE 侧临时绕法：`JiHuiYiYou-IDE/scripts/jhyy-check-hook.mjs`
+  ⇒ **编译器自己会说了** ⇒ IDE 侧那条临时提示可以撤（不撤也只是重复一句，不冲突）。
 
 <a id="w-227"></a>
-## W-227: AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`^` ⇒ 浮点位模式全错
+## W-227: AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`\` ⇒ 浮点位模式全错
 
-**状态:** ACTIVE since 2026-11-14 — `jhyy dump` 的 `bits=0x…` 字段在 nib≥10 时输出非 hex 字符
+**状态:** RESOLVED closed 2026-11-14 — hex 字母位改用 `'a'`(97) 起算 ⇒ `bits=0x…` 是合法 hex
 **Filed-by:** 2026-11-14 (for-VEX 线：给 JHYY 加 VEX 目标时读 AST dump 实测)
 **日期:** 2026-11-14
 
@@ -15837,7 +15854,7 @@ collect2.exe: error: ld returned 1 exit status
 `jhyy dump` 打印**任何 f32 / f64 字面量的位模式**时
 （唯一调用点 `compiler/src0/ast_dump.jhyy:196`）。
 
-**症状:** 十六进制数字 ≥ 10 的那几位被打成 `W`..`^` 而不是 `a`..`f` ⇒
+**症状:** 十六进制数字 ≥ 10 的那几位被打成 `W`..`\`（0x57..0x5C）而不是 `a`..`f` ⇒
 位模式**逐位错**，而且输出**不是合法 hex**（按 hex 解析的下游要么直接失败、
 要么读到错值）：
 
@@ -15861,19 +15878,26 @@ FLOAT @flt.jhyy:3:18 bits=0x3\X999999999999W prim=9    ← 期望 0x3fb999999999
 已知消费方：for-VEX 线的两个 emitter 探针（AST→C / AST→ARM）
 —— 它们**已经**自带 `decode_broken_hex` 绕法（`W`→`a`、`X`→`b`、…、`\`→`f`）⇒ 不阻塞。
 
-**什么修法能取代它:** `ast_dump.jhyy:86` 把 `87` 改成 `97`（**一个字符**）。
-⚠️ 改 `compiler/src0/*.jhyy` 是**逻辑改动** ⇒ 会移位模块级 temp 编号 ⇒ 自举产物漂移
-⇒ 要走**全量 regress + `make` 刷锚点 + `git add compiler/build/bin/jhyy.exe` + 三个 closure 门**
-（**不是免费改动**）⇒ 需**单独立项**，不在本轮（for-VEX 线）顺手做。
+**怎么修的（2026-11-14 已修）:** `compiler/src0/ast_dump.jhyy:90` 把 `87` 改成 `97`
+（**一个字符**），并把约定写进注释（`87 + nib` ≡ `'a'` 起算）免得再算错。
+改 `compiler/src0/*.jhyy` 是**逻辑改动** ⇒ 移位模块级 temp 编号 ⇒ 自举产物漂移
+⇒ 走了**全量 regress + `make` 刷锚点 + `git add compiler/build/bin/jhyy.exe` + 三个 closure 门**。
+
+- **回归网**：`compiler/tests/bootstrap/artifact_checks.sh` 的 `check_dump_float_hex`
+  （产物级门）—— 拿两个已知常量断言 dump 的位模式：
+  `1.5 ⇒ 0x3ff8000000000000`、`0.1 ⇒ 0x3fb999999999999a`（末尾那个 `'a'` 正是 nib=10 的位置）。
+  ⇒ 造过红灯：用修前的锚点二进制跑，输出是 `0x3\X999999999999W` ⇒ 断言不成立。
+- 消费侧（for-VEX 线的 `decode_broken_hex` 旁路）现在**可以撤了** —— 留着也不冲突
+  （新输出是合法 hex，旁路的替换规则匹配不到 ⇒ 等于空转）。
 
 **影响范围:** 只影响 `jhyy dump` 的**浮点位模式字段**；
 编译产物（`.s` / `.exe`）**不受影响**（dump 是旁路的诊断输出）。
 不涉及语言语义、不涉及 ABI。
 
-**失效条件:** `ast_dump.jhyy:86` 改成 `97` 并 ship 后。
+**失效条件:** `ast_dump.jhyy:90` 已改成 `97`（2026-11-14）⇒ 本条**已闭合**。
 
 **引用:**
-- `compiler/src0/ast_dump.jhyy:86`（`ad_kv_hex64` 的那行算术）· `:196`（唯一调用点）
+- `compiler/src0/ast_dump.jhyy:90`（`ad_kv_hex64` 的那行算术 —— 修后行号）· `:200`（唯一调用点）
 - `compiler/src0/ir.jhyy:841`（同约定的**正确**解码侧：`hex - 87`）
 - `compiler/src0/codegen.jhyy`（IL `dbgasm` 的 hex **编码**侧，正确）
 - 引入 commit `a284df33`（2026-11-05，`jhyy dump` 真实现）⇒ 引入版本 **v4.1.3**

@@ -49,7 +49,7 @@
 |---|---|
 | `python regress.py` | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP**（301 total） |
 | 断言强度审计 | `python scripts/dev/audit_test_assertions.py --strict` —— 扫描 301 · 可跑 281 · 真断言 217 · literal-return-ok 8 · expect-error 56 · skipped 6 · library 14 · **零信号 0** |
-| 产物级门数 | `artifact-checks` —— **21 道**（`check_*` 函数数） |
+| 产物级门数 | `artifact-checks` —— **23 道**（`check_*` 函数数） |
 | 产物级门 KNOWN-FAIL | **0** 条（当前没有预期失败的门 —— 每道门都该自己绿） |
 
 ### 2.2 CI 门（完整清单）
@@ -71,7 +71,7 @@
 | 全量回归 | `regress` | 每个用例的退出码 / stdout 断言 | ci.yml · build-and-test · `python regress.py --all` |
 | 回归事实对拍 | `regress-facts` | § 2.1 的数 == 本轮**实测**数（缺摘要即红） | ci.yml · build-and-test · `python scripts/dev/check_regress_facts.py tmp/regress-summary.json` |
 | 断言强度 | `assert-strength` | 每个用例都有能失败的断言（零信号即红）**＋ 指令 ⇄ 读点对照**（测试里用到的每条指令都必须在 harness 里有读点；harness 里解析了却没登记的指令 ⇒ 死指令，红） | ci.yml · build-and-test · `python scripts/dev/audit_test_assertions.py --strict` |
-| 产物级门 | `artifact-checks` | **21 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
+| 产物级门 | `artifact-checks` | **23 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
 | 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
 | 运行时性能 | `perf` | 静态指标硬门（指令数 / 访存 / 帧大小 / chkstk；墙钟只报告） | ci.yml · build-and-test · `python scripts/dev/bench/runtime_perf.py --ci` |
 | 基准套件 | `bench-perf` | 每道基准题的 stdout 与 gcc 逐字相同 + 二进制体积不回归 + 静态指标不回归（墙钟只报告） | ci.yml · build-and-test · `python bench/bench.py --ci` |
@@ -128,9 +128,9 @@
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
 | 条目总数 | **223** |
-| ACTIVE | **2** |
+| ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 198 / 19 / 3 |
+| RESOLVED / SUPERSEDED / INVALID | 200 / 19 / 3 |
 
 ---
 

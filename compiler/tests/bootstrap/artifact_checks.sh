@@ -1545,6 +1545,86 @@ EOF
     ok "build_o_flag(-o 生效 + 默认行为不变)"
 }
 
+# ════════════════════════════════════════════════════════════════════════════
+# W-226 —— 链接失败时能不能说清「入口符号缺失」
+#
+# 为什么需要:链接失败时 gcc → collect2 → ld 三层,`ld` 的真实原因
+# (undefined reference to `main_jhyy`)没被 collect2 转发 ⇒ 用户只看到
+# 「collect2.exe: error: ld returned 1 exit status」⇒ 根本不知道该改什么。
+# 而「入口符号缺失」是**编译器自己能判定**的(.s 里没有 `main_jhyy:` 标签)。
+#
+# ⚠️ 这条门走 `jhyy compile`(不是 `jhyy run`)—— W-065 的编译期预检**只覆盖
+# cmd_run** ⇒ compile/build 路径上链接失败时只有这条诊断兜底。
+# 这正是 IDE hook 踩到的形态(它跑的就是 `jhyy compile`)。
+check_link_entry_diag() {
+    hdr "W-226  链接失败时能否点名「入口符号 main_jhyy 缺失」"
+    [ -x "$JHYY_EXE" ] || { skip "link_entry_diag" "jhyy.exe 不存在"; return; }
+
+    local src="$WORK/badentry.jhyy"
+    cat > "$src" <<'EOF'
+fn main() -> i32 { return 0; }
+EOF
+    local out rc
+    out=$("$JHYY_EXE" compile "$src" 2>&1)
+    rc=$?
+    # ① 必须真的链接失败(入口叫 main ⇒ runtime.c 的 main 找不到 main_jhyy)
+    if [ "$rc" = "0" ]; then
+        bad "link_entry_diag" "入口写成 \`fn main\` 的程序居然链接成功了 —— 那这条诊断没机会出现"
+        return
+    fi
+    # ② 诊断必须点名 main_jhyy(以前只有 "ld returned 1 exit status")
+    case "$out" in
+        *main_jhyy*) : ;;
+        *)
+            bad "link_entry_diag" "链接失败的输出里没有 \`main_jhyy\` ⇒ 用户还是不知道该改什么(输出末尾:$(echo "$out" | tail -3 | tr '\n' ' '))"
+            return
+            ;;
+    esac
+    ok "link_entry_diag(链接失败时点名 main_jhyy ✓)"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# W-227 —— `jhyy dump` 打印的 f64 位模式是不是**合法 hex**
+#
+# 为什么需要:dump 是 AST 的对外视图(for-VEX 线读它)⇒ 位模式必须逐位可解析。
+# 此前 nib≥10 的位被打成 'W'..'\' ⇒ 输出**不是合法 hex** ⇒ 下游要么直接失败、
+# 要么读到错值(位模式逐位错)。
+#
+# 判据用两个已知常量:1.5 的 f64 位模式 = 0x3ff8000000000000,
+# 0.1 的 f64 位模式 = 0x3fb999999999999a(末尾那个 'a' 正是 nib≥10 的位置)。
+check_dump_float_hex() {
+    hdr "W-227  jhyy dump 的 f64 位模式是不是合法 hex"
+    [ -x "$JHYY_EXE" ] || { skip "dump_float_hex" "jhyy.exe 不存在"; return; }
+
+    local src="$WORK/flt.jhyy"
+    cat > "$src" <<'EOF'
+fn main_jhyy() -> i32 {
+    let a: f64 = 1.5;
+    let b: f64 = 0.1;
+    return 0;
+}
+EOF
+    local out
+    out=$("$JHYY_EXE" dump "$src" 2>&1)
+    # ① 1.5 ⇒ 0x3ff8000000000000
+    case "$out" in
+        *0x3ff8000000000000*) : ;;
+        *)
+            bad "dump_float_hex" "dump 里没有 1.5 的正确位模式 0x3ff8000000000000 ⇒ hex 打印还是坏的(输出:$(echo "$out" | grep -i FLOAT | head -2 | tr '\n' ' '))"
+            return
+            ;;
+    esac
+    # ② 0.1 ⇒ 0x3fb999999999999a(末尾 'a' = nib 10 ⇒ 正是坏掉的那一档)
+    case "$out" in
+        *0x3fb999999999999a*) : ;;
+        *)
+            bad "dump_float_hex" "dump 里没有 0.1 的正确位模式 0x3fb999999999999a ⇒ hex 打印还是坏的(输出:$(echo "$out" | grep -i FLOAT | head -2 | tr '\n' ' '))"
+            return
+            ;;
+    esac
+    ok "dump_float_hex(f64 位模式是合法 hex ✓)"
+}
+
 want helpers_symbols && check_helpers_symbols
 want crossvolume_rename && check_crossvolume_rename
 want build_o_flag && check_build_o_flag
@@ -1566,6 +1646,8 @@ want many_functions   && check_many_functions
 want compiler_icon    && check_compiler_icon
 want program_icon     && check_program_icon
 want run_cmd          && check_run_cmd
+want link_entry_diag  && check_link_entry_diag
+want dump_float_hex   && check_dump_float_hex
 
 echo
 echo "=== artifact_checks 结果: $PASS_N PASS / $KNOWN_N KNOWN-FAIL / $FAIL_N FAIL / $SKIP_N SKIP ==="

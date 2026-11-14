@@ -83,7 +83,11 @@ fn ad_kv_hex64(key: *u8, bits: i64) -> i32 {
         let nib: i32 = ((bits >> shift) as i32) & (15 as i32);
         let mut ch: i32 = (48 as i32) + nib;
         if nib >= (10 as i32) {
-            ch = (87 as i32) + (nib - (10 as i32));
+            // hex 字母位用 'a'(97) 起算 —— 全仓约定就是 `87 + nib`
+            // (ir.jhyy 的解码用 `hex - 87`,codegen 的编码用 `48 + nib` 再 +39)
+            // ⇒ nib 10..15 ⇒ 'a'..'f'。
+            // W-227:此前误写 `87 + (nib - 10)` ⇒ 少减了 10 ⇒ 打成 'W'..'\'。
+            ch = (97 as i32) + (nib - (10 as i32));
         }
         let p = (buf as i64 + (i as i64)) as *i32;
         (*p) = ch;
