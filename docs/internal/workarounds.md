@@ -355,7 +355,8 @@
 | [W-223](#w-223) | RESOLVED | `#[naked]` 的**标签走旁路文件、函数体走 IL** ⇒ 两者永不相遇(裸中断入口不可用) |
 | [W-224](#w-224) | RESOLVED | side-file 的路径是**相对路径** ⇒ 只有 CWD 恰好有... |
 | [W-225](#w-225) | RESOLVED | 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到** |
-| [W-226](#w-226) | ACTIVE | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit status」 |
+| [W-226](#w-226) | ACTIVE | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit... |
+| [W-227](#w-227) | ACTIVE | AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`^` ⇒... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15824,3 +15825,56 @@ collect2.exe: error: ld returned 1 exit status
 - `compiler/src0/main.jhyy:1617-1629`（打印 captured stderr 的那段）
 - 实测：`gcc u.c -o u.exe`（缺符号）⇒ stderr 只有 `collect2.exe: error: ld returned 1 exit status`
 - IDE 侧临时绕法：`JiHuiYiYou-IDE/scripts/jhyy-check-hook.mjs`
+
+<a id="w-227"></a>
+## W-227: AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`^` ⇒ 浮点位模式全错
+
+**状态:** ACTIVE since 2026-11-14 — `jhyy dump` 的 `bits=0x…` 字段在 nib≥10 时输出非 hex 字符
+**Filed-by:** 2026-11-14 (for-VEX 线：给 JHYY 加 VEX 目标时读 AST dump 实测)
+**日期:** 2026-11-14
+
+**触发面:** `compiler/src0/ast_dump.jhyy:86` 的 `ad_kv_hex64()` ⇒
+`jhyy dump` 打印**任何 f32 / f64 字面量的位模式**时
+（唯一调用点 `compiler/src0/ast_dump.jhyy:196`）。
+
+**症状:** 十六进制数字 ≥ 10 的那几位被打成 `W`..`^` 而不是 `a`..`f` ⇒
+位模式**逐位错**，而且输出**不是合法 hex**（按 hex 解析的下游要么直接失败、
+要么读到错值）：
+
+```
+$ jhyy dump flt.jhyy
+FLOAT @flt.jhyy:2:18 bits=0x3\\8000000000000 prim=9    ← 期望 0x3ff8000000000000
+FLOAT @flt.jhyy:3:18 bits=0x3\X999999999999W prim=9    ← 期望 0x3fb999999999999a
+```
+
+（`1.5` 的 f64 位模式 = `0x3ff8000000000000`；`0.1` = `0x3fb999999999999a`。）
+
+**根因:** 一处**偏移 10** 的算术 —— nib ≥ 10 时用了 `87 + (nib - 10)`；
+`'a'` = 97 ⇒ 应是 `97 + (nib - 10)`（等价于 `87 + nib`，或 `48 + nib` 再 +39）。
+同仓 `compiler/src0/ir.jhyy:841` 的 hex **解码**用 `hex - 87`
+（`'a'`=97 ⇒ 97-87=10 ✔ 正确）⇒ **约定就是 `87 + nib`**；
+同仓 `compiler/src0/codegen.jhyy` 的 hex **编码**（IL `dbgasm` 用它）也是对的
+（`48 + nib`，> 57 时 +39）⇒ **只有 `ast_dump` 这一处多减了一次 10**。
+
+**workaround:** 消费侧：`bits=` 字段对 nib ≥ 10 **不可信** ⇒
+别拿它做位模式比对（从字面值自己算，或忽略该字段）。
+已知消费方：for-VEX 线的两个 emitter 探针（AST→C / AST→ARM）
+—— 它们**已经**自带 `decode_broken_hex` 绕法（`W`→`a`、`X`→`b`、…、`\`→`f`）⇒ 不阻塞。
+
+**什么修法能取代它:** `ast_dump.jhyy:86` 把 `87` 改成 `97`（**一个字符**）。
+⚠️ 改 `compiler/src0/*.jhyy` 是**逻辑改动** ⇒ 会移位模块级 temp 编号 ⇒ 自举产物漂移
+⇒ 要走**全量 regress + `make` 刷锚点 + `git add compiler/build/bin/jhyy.exe` + 三个 closure 门**
+（**不是免费改动**）⇒ 需**单独立项**，不在本轮（for-VEX 线）顺手做。
+
+**影响范围:** 只影响 `jhyy dump` 的**浮点位模式字段**；
+编译产物（`.s` / `.exe`）**不受影响**（dump 是旁路的诊断输出）。
+不涉及语言语义、不涉及 ABI。
+
+**失效条件:** `ast_dump.jhyy:86` 改成 `97` 并 ship 后。
+
+**引用:**
+- `compiler/src0/ast_dump.jhyy:86`（`ad_kv_hex64` 的那行算术）· `:196`（唯一调用点）
+- `compiler/src0/ir.jhyy:841`（同约定的**正确**解码侧：`hex - 87`）
+- `compiler/src0/codegen.jhyy`（IL `dbgasm` 的 hex **编码**侧，正确）
+- 引入 commit `a284df33`（2026-11-05，`jhyy dump` 真实现）⇒ 引入版本 **v4.1.3**
+- 实测复现：`printf 'fn main_jhyy() -> i32 { let c: f64 = 1.5 as f64; 0 }' > f.jhyy && jhyy dump f.jhyy`
