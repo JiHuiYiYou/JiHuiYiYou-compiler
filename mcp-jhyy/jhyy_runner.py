@@ -219,12 +219,46 @@ def check_syntax(file: str) -> dict:
             "warnings": _extract_warnings(r["stderr"]),
         }
     errors = _parse_diagnostics(r["stderr"])
+    # ⚠️ **顺带带上「怎么改」** —— 评测测出来的（2026-11-13）：
+    #   PostToolUse hook 注入的是「哪里错」（行:列 + 错误原文）⇒ 模型被拽去
+    #   「照诊断改」而不是「去查规范」⇒ **省了 20% 轮数、却掉了 10% 正确率**
+    #   （退步最大的是 `mask-change`：63% → 25%）。
+    #   ⇒ 诊断里直接带上 meaning/fix ⇒ 模型**不用多调一次工具**就知道怎么改
+    #   ⇒ 「省轮次」和「给修法」两个好处一起拿。
+    errors = _enrich_diagnostics(errors)
     return {
         "ok": False,
         "exit_code": r["exit_code"],
         "errors": errors,
         "stderr": r["stderr"],
     }
+
+
+def _enrich_diagnostics(errors: list) -> list:
+    """给每条诊断补上「什么意思 / 怎么改 / 该查哪一节 / 相关台账条目」。
+
+    ⚠️ **查不到就原样返回** —— 不要瞎猜一个意思（瞎猜比不猜更糟）。
+    ⚠️ **索引 import 失败也要能跑** —— 错误索引是「锦上添花」，不是必需品。
+    """
+    if not errors:
+        return errors
+    try:
+        import jhyy_errors
+    except Exception:
+        return errors
+    out = []
+    for e in errors:
+        msg = str(e.get("message", ""))
+        try:
+            hit = jhyy_errors.lookup(msg)
+        except Exception:
+            hit = None
+        if hit:
+            for key in ("meaning", "fix", "spec_ref", "w_ref", "w_status"):
+                if hit.get(key) and not e.get(key):
+                    e[key] = hit[key]
+        out.append(e)
+    return out
 
 
 def _extract_warnings(stderr: str) -> list:

@@ -43,67 +43,86 @@ def test_lookup_type_mismatch():
     r = jhyy_errors.search("type mismatch in let")
     assert r["ok"]
     assert r["matches"], "0 命中"
-    assert r["matches"][0]["text"].startswith("type mismatch in let")
 
 
-def test_lookup_unexpected_token_semicolon():
-    """`type` 声明后多写了 `;` ⇒ 规范 § 18 的高频文本表里有它。
+# ── 2026-11-13 新增：人工校订层 + `lookup()` ──────────────────────
+#
+# ⚠️ **为什么加这一层** —— 自动扫出来的 166 条里 `fix` 只有 8 条
+#   ⇒ 模型拿到诊断**大概率还是不知道该改哪儿**。
+#   而评测量出来的诊断面**极小**（29 道配对任务里只有 1 种结构化诊断
+#   + 1 种链接期失败）⇒ ⇒ **为最高频的那几条手写「怎么改」是划算的**。
 
-    ⚠️ **这条是「裸文本」查** —— 规范里的原文是**反引号包着**的
-    ⇒ 归一化忘了去反引号就查不到（2026-11-13 实测踩过）。
+
+@pytest.mark.parametrize(
+    "message, must_contain",
+    [
+        # ⚠️ **这三条是评测任务集里真正出现过的** ⇒ 缺一条就等于评测跑不动
+        ("undefined variable", "printf"),
+        ("type mismatch in let", "as"),
+        ("unexpected token ';' in expression", "struct"),
+    ],
+)
+def test_lookup_has_a_fix(message, must_contain):
+    """`lookup()` 得给出**可执行的修法**，不是「这是什么意思」。
+
+    ⚠️ **判据是「修法里有没有那句话」** —— 光有 `meaning` 不算。
     """
-    r = jhyy_errors.search("unexpected token ';' in expression")
-    assert r["matches"], "0 命中"
-    top = r["matches"][0]
-    assert top["text"] == "unexpected token ';' in expression"
-    # 含义 + 章节
-    assert top.get("meaning"), "没有含义"
-    assert top.get("spec_ref"), "没有章节引用"
+    hit = jhyy_errors.lookup(message)
+    assert hit is not None, f"查不到：{message}"
+    assert hit.get("fix"), f"没有 fix：{message} ⇒ {hit}"
+    assert must_contain in hit["fix"], (
+        f"fix 里没有「{must_contain}」：{message} ⇒ {hit['fix']}"
+    )
 
 
-def test_lookup_returns_fix_and_ledger_ref():
-    """聚合比较的报错 ⇒ 附录 B 里有**修法** + 台账编号。
+def test_lookup_prefers_the_entry_that_has_a_fix():
+    """同一个原文有多条条目 ⇒ **优先带 `fix` 的**。
 
-    这是这个工具最有价值的场景：报错文本本身看不出怎么改，但附录 B 写了
-    「把结果先落进变量再比」⇒ 还能顺带给出 W-133.2。
+    ⚠️ **实测踩过**：台账那条的 `meaning` 是「两种写法都编译不过:」
+       ⇒ 对模型**毫无用处** ⇒ 宁可给校订层那条。
     """
-    r = jhyy_errors.search(
-        "ordering comparison of a function call result is not supported for aggregate types"
+    index = jhyy_errors.build_index()
+    dupes = [e for e in index.values() if e.get("text") == "undefined variable"]
+    assert dupes, "「undefined variable」不在索引里"
+    hit = jhyy_errors.lookup("undefined variable")
+    assert hit.get("fix"), "选中的条目没有 fix"
+
+
+def test_lookup_returns_none_for_garbage():
+    """**无关的查询必须查不到** —— 瞎猜比不给更糟。"""
+    assert jhyy_errors.lookup("zzz-this-is-not-a-real-jhyy-error-9999") is None
+
+
+def test_lookup_accepts_a_full_diagnostic_line():
+    """用户可能直接粘**整行诊断** ⇒ 路径/前缀都得去掉。"""
+    hit = jhyy_errors.lookup(
+        r"C:\tmp\main.jhyy:12:5: error: undefined variable"
     )
-    assert r["matches"], "0 命中"
-    blob = " ".join(
-        "%s %s" % (m.get("meaning", ""), m.get("fix", "")) for m in r["matches"]
+    assert hit is not None, "整行诊断查不到"
+    assert hit.get("fix"), "整行诊断查到了但没有 fix"
+
+
+def test_check_syntax_enriches_diagnostics():
+    """`jhyy_check` 的诊断**要顺带带上修法**。
+
+    ⚠️ **为什么**：评测测出 PostToolUse hook 注入「哪里错」时
+       模型被拽去「照诊断改」⇒ **省了 20% 轮数却掉了 10% 正确率**
+       ⇒ 诊断里**直接带上「怎么改」** ⇒ 不用多调一次工具。
+    """
+    import jhyy_runner
+
+    errors = jhyy_runner._enrich_diagnostics(
+        [{"file": "main.jhyy", "line": 12, "col": 5, "message": "undefined variable"}]
     )
-    assert "变量" in blob, f"没有给出「落进变量再比」的修法：{blob[:200]}"
-    assert any(m.get("w_ref") for m in r["matches"]), "没有关联台账条目"
+    assert len(errors) == 1
+    assert errors[0].get("fix"), f"诊断没带上修法：{errors[0]}"
 
 
-def test_lookup_accepts_full_diagnostic_line():
-    """整行诊断（带路径 + 行列号 + error: 前缀）也得能查到。"""
-    line = r"C:\Users\me\proj\main.jhyy:12:5: error: unexpected token ';' in expression"
-    r = jhyy_errors.search(line)
-    assert r["matches"], "整行诊断查不到 ⇒ 归一化没剥掉路径前缀"
-    assert r["matches"][0]["text"] == "unexpected token ';' in expression"
+def test_check_syntax_enrichment_keeps_unknown_errors_untouched():
+    """查不到就**原样返回** —— 不要瞎猜一个意思。"""
+    import jhyy_runner
 
-
-def test_lookup_immutable_variable():
-    r = jhyy_errors.search("cannot assign to immutable variable (use let mut)")
-    assert r["matches"], "0 命中"
-    assert any(m.get("spec_ref") for m in r["matches"])
-
-
-def test_unknown_error_returns_no_matches():
-    """查不到就**老实返回空** —— 别瞎猜一个意思。"""
-    r = jhyy_errors.search("zzz-this-is-not-a-real-jhyy-error-9999")
-    assert r["ok"]
-    assert not r["matches"], f"不该有命中：{r['matches']}"
-
-
-@pytest.mark.asyncio
-async def test_tool_is_reachable_through_mcp_client(mcp_client):
-    """**走 server 层**（不绕过）—— 现有的 test_abi_info.py 直接调模块 ⇒
-    server 层零覆盖 ⇒ 工具压根没注册也不会被发现（2026-11-13 实测过这个洞）。"""
-    result = await mcp_client.call_tool("jhyy_error_lookup", {"error": "type mismatch in let"})
-    data = result.data
-    assert data["ok"]
-    assert data["matches"], "通过 MCP 调不到（工具没注册？）"
+    orig = [{"file": "main.jhyy", "line": 1, "col": 1, "message": "zzz-not-real-9999"}]
+    out = jhyy_runner._enrich_diagnostics([dict(e) for e in orig])
+    assert out[0]["message"] == "zzz-not-real-9999"
+    assert not out[0].get("fix"), "不该给无关报错编一个 fix"

@@ -52,6 +52,8 @@ STD_DIR = JHYY_ROOT / "compiler" / "src0" / "std"
 OUT_DIR = JHYY_ROOT / "docs" / "generated"
 OUT_MD = OUT_DIR / "jhyy-knowledge.md"
 OUT_JSON = OUT_DIR / "jhyy-knowledge.json"
+# 「报错 → 修法」表（给 IDE 的 hook 用 —— 诊断顺手带上怎么改）
+OUT_ERROR_FIX = OUT_DIR / "jhyy-error-fix.json"
 
 
 # ── 链接重写（手工扫描，不用正则：反斜杠在这台机器上容易被各种工具吃掉）────────
@@ -475,6 +477,36 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_loo
     return "\n".join(L) + "\n"
 
 
+def collect_error_fix():
+    """导出「编译器报错 → 什么意思 / 怎么改 / 该查哪一节 / 相关台账条目」。
+
+    ⚠️ **真相在 `mcp-jhyy/jhyy_errors.py`**（它把编译器源码、规范 § 18、
+    规范附录 B、56 个 EXPECT-ERROR 用例、台账**五个只读来源**合在一起）
+    ⇒ 这里**只导表**，不重新实现匹配逻辑 ⇒ 两边不会漂移。
+
+    ⚠️ **索引模块 import 失败也要能跑** —— 这张表是「锦上添花」，
+    缺了不该让整个知识包生成挂掉。
+    """
+    try:
+        import jhyy_errors
+    except Exception as e:
+        print("! 错误索引 import 失败（跳过「报错速查表」）：%s" % e)
+        return []
+    entries = []
+    for e in jhyy_errors.build_index().values():
+        item = {
+            "text": e.get("text", ""),
+            "kind": e.get("kind", ""),
+        }
+        for k in ("meaning", "fix", "spec_ref", "w_ref", "w_status",
+                  "example_file", "origin"):
+            if e.get(k):
+                item[k] = e[k]
+        entries.append(item)
+    entries.sort(key=lambda x: x["text"])
+    return entries
+
+
 def main():
     if not SPEC_PATH.exists():
         print("✗ 找不到规范：%s" % SPEC_PATH, file=sys.stderr)
@@ -510,6 +542,14 @@ def main():
     with open(OUT_JSON, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
+    error_fix = collect_error_fix()
+    fix_payload = {
+        "version": doc.get("version", ""),
+        "entries": error_fix,
+    }
+    with open(OUT_ERROR_FIX, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(fix_payload, ensure_ascii=False, indent=2) + "\n")
+
     print("✓ %s（版本 %s）" % (SPEC_PATH.name, doc.get("version")))
     print("  章节目录 %d 章" % len(toc))
     print("  反直觉点 %d 条" % len(pitfalls))
@@ -521,6 +561,7 @@ def main():
     print("  常见报错速查 %d 条" % len(error_lookup))
     print("→ %s" % OUT_MD)
     print("→ %s" % OUT_JSON)
+    print("  报错速查表 %d 条 → %s" % (len(error_fix), OUT_ERROR_FIX))
     print("  （markdown %d 字符）" % len(md))
     return 0
 

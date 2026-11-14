@@ -1,0 +1,1024 @@
+{
+  "version": "4.0.0",
+  "entries": [
+    {
+      "text": "(struct / enum / 数组 / 切片)编译期报错(",
+      "kind": "spec",
+      "meaning": "`a < b` / `a >= b`(struct / enum / 数组 / 切片)编译期报错(`ordering comparison is not supported for struct/enum/array/slice types`)—— 聚合的大小比较无定义",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.2"
+    },
+    {
+      "text": "--target",
+      "kind": "spec",
+      "meaning": "`--target` 不切换 PE / ELF 产出",
+      "spec_ref": "附录 B",
+      "w_ref": "W-130",
+      "w_status": "RESOLVED"
+    },
+    {
+      "text": "E0050",
+      "kind": "spec",
+      "meaning": "实例化 `PhantomData<T>`（带 init 的 `let`）",
+      "spec_ref": "§ 18",
+      "example_file": "spec_err_phantomdata_e0050.jhyy"
+    },
+    {
+      "text": "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "E0060",
+      "kind": "spec",
+      "meaning": "在非泛型作用域出现未实例化的裸 type-param `T`（`unresolved type parameter; generic must be instantiated`）",
+      "spec_ref": "§ 18"
+    },
+    {
+      "text": "E0060: unresolved type parameter; generic must be instantiated",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "E0062",
+      "kind": "spec",
+      "meaning": "泛型 type-param 无法从实参推断 / 推断冲突",
+      "spec_ref": "§ 18",
+      "example_file": "spec_err_generic_e0062.jhyy"
+    },
+    {
+      "text": "E0062: cannot infer type parameter from argument (unsupported type kind)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "E0062: cannot infer type parameter from arguments (no argument for some type parameter)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "E0062: conflicting types for type parameter",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "OR pattern",
+      "kind": "corpus",
+      "fix": "- `compiler/src/codegen.c:1918-1922`:param declaration 加 `else if (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4) ir_emit(ir, \"l ...\");`",
+      "w_ref": "W-016",
+      "w_status": "RESOLVED",
+      "example_file": "v137_or_diff_bind_err.jhyy"
+    },
+    {
+      "text": "OR pattern bindings must match",
+      "kind": "sema",
+      "fix": "- `compiler/src/codegen.c:1918-1922`:param declaration 加 `else if (pt && pt->kind == KIND_ENUM && pt->enum_type.total_size > 4) ir_emit(ir, \"l ...\");`",
+      "w_ref": "W-016",
+      "w_status": "RESOLVED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "OR pattern bindings must match (left binds, right doesn't)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "OR pattern bindings must match (right binds, left doesn't)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "P { c: 7 }",
+      "kind": "spec",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3"
+    },
+    {
+      "text": "P { c: c }",
+      "kind": "spec",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3"
+    },
+    {
+      "text": "QBE backend removed in v3.1.0 — self-backend sole production path",
+      "kind": "parse",
+      "origin": "main.jhyy"
+    },
+    {
+      "text": "R(PRect)",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "SysV 下 MEMORY class 参数与寄存器溢出参数混排",
+      "kind": "spec",
+      "meaning": "编译报错（[ABI § 12.4](jhyy-abi-v4.0.0.md#abi-12-4)）",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "agg_eq_enum.jhyy",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "argv as u8",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "argv 的类型写作 *u8，实际是 char",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "array literal elements must have same type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "array size must be an integer constant",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "array size too large",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "asm!(...) operands are not supported",
+      "kind": "corpus",
+      "example_file": "spec_err_asm_operands.jhyy"
+    },
+    {
+      "text": "asm!(...) requires a string literal as the first argument (v3.0.1)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "assignment type mismatch",
+      "kind": "sema",
+      "meaning": "赋值两边类型不一致。",
+      "fix": "⚠️ **整数 ↔ 浮点不能隐式转换** ⇒ 写 `as`。两边类型真不一样就改标注。",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot access field on type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot allocate the synthetic loop index (symbol table full)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "cannot assign null to non-pointer type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot assign to immutable variable",
+      "kind": "corpus",
+      "meaning": "给不可变变量赋值。",
+      "fix": "改成 `let mut x: T = ...;`（⚠️ 不可变变量不能原地改）。",
+      "example_file": "spec_err_immutable_assign.jhyy"
+    },
+    {
+      "text": "cannot assign to immutable variable (use let mut)",
+      "kind": "sema",
+      "meaning": "给不可变绑定赋值",
+      "spec_ref": "§ 18",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot bind loop variable (symbol table full)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "cannot borrow",
+      "kind": "corpus",
+      "example_file": "borrow_mut_conflict.jhyy"
+    },
+    {
+      "text": "cannot borrow this variable as mutable more than once at the same time",
+      "kind": "sema",
+      "meaning": "同作用域双 `&mut`",
+      "spec_ref": "§ 18",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot dereference non-pointer type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot index",
+      "kind": "corpus",
+      "example_file": "for_in_slice_err.jhyy"
+    },
+    {
+      "text": "cannot index into type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot infer type",
+      "kind": "corpus",
+      "meaning": "类型推不出来。",
+      "fix": "⚠️ **类型必须显式标注**：`let x: i32 = 5;`；函数参数也要标：`fn f(a: i32) -> i32`。⚠️ `null` 推不出类型 ⇒ 写成 `let p: *u8 = null;`。",
+      "spec_ref": "§ 2.2",
+      "example_file": "null_untyped_err.jhyy"
+    },
+    {
+      "text": "cannot infer type of null (declare as *T, e.g. let p: *u8 = null;)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "cannot open import '",
+      "kind": "parse",
+      "meaning": "import 的模块找不到。",
+      "fix": "⚠️ **import 只写模块名本身**（`import vec;`），**不带 `std::` 前缀**；模块名要跟标准库里的一致。",
+      "origin": "main.jhyy"
+    },
+    {
+      "text": "chained & is not allowed (borrow type is terminal — use one & per level)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "chained &&T not allowed",
+      "kind": "corpus",
+      "example_file": "borrow_check_err.jhyy"
+    },
+    {
+      "text": "chained &&T not allowed (borrow is terminal — use one & per level)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "chained &&T not allowed (borrow is terminal)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "chained volatile volatile is not allowed",
+      "kind": "corpus",
+      "example_file": "spec_err_volatile_chained.jhyy"
+    },
+    {
+      "text": "chained volatile volatile is not allowed (volatile is primitive-only qualifier)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "chained volatile volatile not allowed",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "circular import '",
+      "kind": "parse",
+      "origin": "main.jhyy"
+    },
+    {
+      "text": "circular import '<path>'",
+      "kind": "spec",
+      "meaning": "import 成环",
+      "spec_ref": "§ 18"
+    },
+    {
+      "text": "closure cannot capture outer variables",
+      "kind": "corpus",
+      "meaning": "闭包捕获了外层的变量。",
+      "fix": "⚠️ **闭包不能捕获外层变量** ⇒ 把要用的值**当参数传进去**。",
+      "example_file": "closure_capture_unsupported.jhyy"
+    },
+    {
+      "text": "closure cannot capture outer variables (not supported yet): the closure body may only use its own parameters and literals",
+      "kind": "spec",
+      "meaning": "闭包捕获外层变量",
+      "spec_ref": "§ 18"
+    },
+    {
+      "text": "const decl requires array type annotation",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "const declaration must be an array type [T; N]",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "const 元素不做 const 检查",
+      "kind": "spec",
+      "meaning": "元素位置放函数调用能编译，但不会被求值，运行时取到 0",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "defer not allowed in nested scope (only at function-body top level)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "defer requires fncall (got non-call expression)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "defer 不覆盖隐式返回",
+      "kind": "spec",
+      "meaning": "函数体末表达式返回时 defer 不执行",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "enum has no variant",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "enum 变体最多只能带一个 payload",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "equality comparison of a function call result is not supported for aggregate types",
+      "kind": "sema",
+      "meaning": "`make_p(1) == make_p(2)` 编译期报错(`equality comparison of a function call result is not supported for aggregate types`)。聚合返回值在 ABI 下不统一是地址(>16B 走 sret 是地址;≤16B 走寄存器)⇒ 按地址比会读到寄存器里的头几个字节。形态差别:`let a = make_p(1); a == b` 里的 `a` 是变量(值在栈槽里)⇒ 安全 ⇒ 不报错",
+      "fix": "把结果先落进变量再比 —— `let a = make_p(1); a == b` 里的 `a` 是",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.1",
+      "w_status": "SUPERSEDED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "expected",
+      "kind": "parse",
+      "meaning": "`compile gdb_pretty_test.jhyy` 报:",
+      "w_ref": "W-020",
+      "w_status": "RESOLVED",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "expected '..' or '{' after for-in expression, got",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "expected '<' after turbofish '::'",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "expected ), got ,",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B",
+      "example_file": "spec_err_enum_multi_payload.jhyy"
+    },
+    {
+      "text": "expected ), got ->",
+      "kind": "corpus",
+      "example_file": "spec_err_fn_ptr_type.jhyy"
+    },
+    {
+      "text": "expected ), got =",
+      "kind": "corpus",
+      "example_file": "spec_err_default_param.jhyy"
+    },
+    {
+      "text": "expected ;, got ->",
+      "kind": "corpus",
+      "example_file": "spec_err_arrow_member.jhyy"
+    },
+    {
+      "text": "expected ;, got ::",
+      "kind": "spec",
+      "meaning": "`import std::xxx;`（应为 `import xxx;`）",
+      "spec_ref": "§ 18",
+      "example_file": "spec_err_import_nested_path.jhyy"
+    },
+    {
+      "text": "expected ;, got ident",
+      "kind": "corpus",
+      "meaning": "`let x: &&i32 = 0 as &&i32;` → parser 报四条噪声错:",
+      "w_ref": "W-125",
+      "w_status": "RESOLVED",
+      "example_file": "spec_err_float_exponent.jhyy"
+    },
+    {
+      "text": "expected =>, got if",
+      "kind": "corpus",
+      "example_file": "spec_err_match_guard.jhyy"
+    },
+    {
+      "text": "expected > after type param list, got :",
+      "kind": "corpus",
+      "example_file": "spec_err_generic_constraint.jhyy"
+    },
+    {
+      "text": "expected type name",
+      "kind": "corpus",
+      "meaning": "`let x: &&i32 = 0 as &&i32;` → parser 报四条噪声错:",
+      "w_ref": "W-125",
+      "w_status": "RESOLVED",
+      "example_file": "sizeof_err_expr.jhyy"
+    },
+    {
+      "text": "expected type name, got (",
+      "kind": "corpus",
+      "example_file": "spec_err_unit_type.jhyy"
+    },
+    {
+      "text": "fence_*() takes no arguments (v3.0.5)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "field type mismatch",
+      "kind": "sema",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "fix": "如上 —— 先声明带类型的局部变量再放进字面量。",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3",
+      "w_status": "SUPERSEDED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "function body type does not match return type",
+      "kind": "sema",
+      "meaning": "两种写法都编译不过:",
+      "w_ref": "W-129",
+      "w_status": "RESOLVED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "function call result is not supported",
+      "kind": "corpus",
+      "meaning": "编译期报错",
+      "fix": "把结果先落进变量再比 —— `let a = make_p(1); a == b` 里的 `a` 是",
+      "w_ref": "W-133.1",
+      "w_status": "SUPERSEDED",
+      "example_file": "agg_eq_call_result_error.jhyy"
+    },
+    {
+      "text": "if condition must be bool",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "import path too long (module name over ~1000 bytes):",
+      "kind": "parse",
+      "origin": "main.jhyy"
+    },
+    {
+      "text": "integer literal out of range",
+      "kind": "parse",
+      "example_file": "err_array_size_overflow.jhyy",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "invalid type annotation",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "is defined multiple times",
+      "kind": "corpus",
+      "example_file": "spec_dup_fn_name.jhyy"
+    },
+    {
+      "text": "ld returned",
+      "kind": "curated",
+      "meaning": "链接失败（`ld` 报错）。",
+      "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**（不是 `main`）—— 先检查这个。⚠️ 编译器**会把 gcc 的真实链接原因吞掉**（语言仓 W-226）⇒ 只看到「ld returned N exit status」是**正常的**。",
+      "spec_ref": "§ 3.1"
+    },
+    {
+      "text": "let a = make_p(1); a == b",
+      "kind": "spec",
+      "meaning": "`make_p(1) == make_p(2)` 编译期报错(`equality comparison of a function call result is not supported for aggregate types`)。聚合返回值在 ABI 下不统一是地址(>16B 走 sret 是地址;≤16B 走寄存器)⇒ 按地址比会读到寄存器里的头几个字节。形态差别:`let a = make_p(1); a == b` 里的 `a` 是变量(值在栈槽里)⇒ 安全 ⇒ 不报错",
+      "fix": "把结果先落进变量再比 —— `let a = make_p(1); a == b` 里的 `a` 是",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.1",
+      "w_status": "SUPERSEDED"
+    },
+    {
+      "text": "let mut f: f64 = 3.5;",
+      "kind": "spec",
+      "meaning": "`let mut f: f64 = 3.5;` 读到 0（初始化器被丢弃）；`let mut p: Point = ...` 读到垃圾（未定义读）。整数类型（含跨函数读写链）正确",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "let mut p: Point = ...",
+      "kind": "spec",
+      "meaning": "`let mut f: f64 = 3.5;` 读到 0（初始化器被丢弃）；`let mut p: Point = ...` 读到垃圾（未定义读）。整数类型（含跨函数读写链）正确",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "link_section name contains non-ASCII byte",
+      "kind": "sema",
+      "example_file": "spec_err_link_section_nonascii.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "link_section name contains non-printable byte",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "link_section name is empty",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "make_p(1) == make_p(2)",
+      "kind": "spec",
+      "meaning": "`make_p(1) == make_p(2)` 编译期报错(`equality comparison of a function call result is not supported for aggregate types`)。聚合返回值在 ABI 下不统一是地址(>16B 走 sret 是地址;≤16B 走寄存器)⇒ 按地址比会读到寄存器里的头几个字节。形态差别:`let a = make_p(1); a == b` 里的 `a` 是变量(值在栈槽里)⇒ 安全 ⇒ 不报错",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.1"
+    },
+    {
+      "text": "malformed string literal in asm!(...)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "match arm type mismatch",
+      "kind": "sema",
+      "example_file": "spec_err_match_arm_type.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "match 范围是闭区间",
+      "kind": "spec",
+      "meaning": "与 `for` 的半开区间语义相反，容易踩",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "module has no function",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "must define fn main()",
+      "kind": "corpus",
+      "example_file": "spec_err_no_std_no_main.jhyy"
+    },
+    {
+      "text": "naked function body may only contain asm!",
+      "kind": "corpus",
+      "example_file": "spec_err_naked_body.jhyy"
+    },
+    {
+      "text": "naked function body may only contain asm!(...) statements",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "naked function body must be a block { ... }",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "nested pattern is not supported",
+      "kind": "parse",
+      "meaning": "pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代（OR 包着的也算）⇒ 编译期报错 `nested pattern is not supported`。外层 tag 比较与内层 payload 提取都未实装",
+      "spec_ref": "附录 B",
+      "example_file": "spec_err_match_nested_pattern.jhyy",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "non-exhaustive match: missing variant",
+      "kind": "sema",
+      "meaning": "enum match 未覆盖全变体",
+      "spec_ref": "§ 18",
+      "example_file": "spec_err_nonexhaustive_match.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "not a module",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "ordering comparison is not supported",
+      "kind": "corpus",
+      "meaning": "编译期报错",
+      "fix": "需要排序语义时,显式写比较函数(按你想要的键逐字段比)。",
+      "w_ref": "W-133.2",
+      "w_status": "SUPERSEDED",
+      "example_file": "agg_order_error.jhyy"
+    },
+    {
+      "text": "ordering comparison is not supported for struct/enum/array/slice types",
+      "kind": "sema",
+      "meaning": "编译期报错",
+      "fix": "需要排序语义时,显式写比较函数(按你想要的键逐字段比)。",
+      "w_ref": "W-133.2",
+      "w_status": "SUPERSEDED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "qualified call function name must be identifier",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "qualified call left side must be a module name",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "qualified call missing function",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "qualified call missing module",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "range pattern endpoints must be literals",
+      "kind": "corpus",
+      "example_file": "err_match_range_ident.jhyy"
+    },
+    {
+      "text": "range pattern endpoints must be literals (identifier endpoints are not supported)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "requires a primitive type",
+      "kind": "corpus",
+      "example_file": "spec_err_volatile_aggregate.jhyy"
+    },
+    {
+      "text": "return type does not match function return type",
+      "kind": "sema",
+      "meaning": "任何 `import string;` 的程序**根本编不过**:",
+      "w_ref": "W-140",
+      "w_status": "RESOLVED",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "slice has no field",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "slice literal must wrap an array literal",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "slice literal needs array",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "source path too long (directory part over 1022 bytes)",
+      "kind": "parse",
+      "origin": "main.jhyy"
+    },
+    {
+      "text": "spec_err_enum_multi_payload.jhyy",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "std_io_print / std_io_print_err",
+      "kind": "spec",
+      "meaning": "依赖 libc 的 `stdout` / `stderr` 句柄获取",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "struct has no field",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "struct has no field (auto-deref)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "struct 字面量的字段值类型必须精确匹配字段类型",
+      "kind": "spec",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3"
+    },
+    {
+      "text": "struct 字面量省略的字段未初始化",
+      "kind": "spec",
+      "meaning": "编译器不报「缺字段」错误，但缺失字段的值是栈上的未初始化垃圾，不是 0（毒化栈后实测 y=0 / z=garbage，每次可能不同）",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "sub-range requires slice or array",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "the parameter name",
+      "kind": "corpus",
+      "example_file": "spec_dup_param.jhyy"
+    },
+    {
+      "text": "the type parameter name",
+      "kind": "corpus",
+      "example_file": "spec_dup_type_param.jhyy"
+    },
+    {
+      "text": "too many borrows in this function (borrow-check table overflow)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "type P = struct { c: u8 }",
+      "kind": "spec",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3"
+    },
+    {
+      "text": "type S = enum { R(i32, i32) }",
+      "kind": "spec",
+      "meaning": "`type S = enum { R(i32, i32) }` 编译期报错（`expected ), got ,`）—— 变体声明的括号里只能跟一个类型。要装多个字段，把 payload 换成 struct（`R(PRect)`；已由 `agg_eq_enum.jhyy` 覆盖）。门：`spec_err_enum_multi_payload.jhyy`",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "type mismatch in binary",
+      "kind": "sema",
+      "meaning": "`jhyy_stage0 compile compiler/src0/main.jhyy -o compiler/build/bin/jhyy_v1.exe` 报:",
+      "w_ref": "W-071",
+      "w_status": "RESOLVED",
+      "example_file": "agg_eq_array_len_mismatch.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "type mismatch in let",
+      "kind": "sema",
+      "meaning": "类型对不上。",
+      "fix": "⚠️ **整数 ↔ 浮点不能隐式转换** ⇒ 必须写 `as`（`3 as f64`）。类型注解也要和字面量一致：`let x: i32 = 5;`。⚠️ `as` 的优先级跟 `*` 一样 —— 必要时加括号。",
+      "spec_ref": "§ 4.2",
+      "w_ref": "W-129",
+      "w_status": "RESOLVED",
+      "example_file": "agg_eq_alias.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "unary operator requires primitive type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "undefined reference to 'main_jhyy'",
+      "kind": "curated",
+      "meaning": "链接失败：运行时要找 `main_jhyy`，但程序里没有。",
+      "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**（不是 `main`；`main` 只有 `#[no_std]` 才用）。⚠️ 这条错误**在链接期才报**，语法检查看不出来。",
+      "spec_ref": "§ 3.1"
+    },
+    {
+      "text": "undefined variable",
+      "kind": "sema",
+      "meaning": "用了没声明的标识符。",
+      "fix": "标识符必须**先声明或定义**。⚠️ **JHYY 没有 print 内建** —— 要输出得先声明 `extern fn printf(fmt: *u8, val: i32) -> i32;` 再调用；`import` 只写模块名本身（`import vec;`，不是 `import std::vec;`）。",
+      "spec_ref": "§ 2.3",
+      "w_ref": "W-189",
+      "w_status": "RESOLVED",
+      "example_file": "spec_err_len_on_cstr.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "unexpected end of file in closure body",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "unexpected end of file in closure parameters",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "unexpected end of file in expression",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "unexpected token",
+      "kind": "corpus",
+      "meaning": "`compile gdb_pretty_test.jhyy` 报:",
+      "w_ref": "W-020",
+      "w_status": "RESOLVED",
+      "example_file": "err_match_or_bad_pattern.jhyy"
+    },
+    {
+      "text": "unexpected token '",
+      "kind": "parse",
+      "meaning": "`compile gdb_pretty_test.jhyy` 报:",
+      "w_ref": "W-020",
+      "w_status": "RESOLVED",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "unexpected token ';' in expression",
+      "kind": "spec",
+      "meaning": "多了一个分号（表达式位置不该有 `;`）。",
+      "fix": "⚠️ **`type X = struct { ... }` / `enum` 结尾不能带 `;`** ⇒ 删掉它。",
+      "spec_ref": "§ 5.2",
+      "example_file": "spec_err_type_decl_semicolon.jhyy"
+    },
+    {
+      "text": "unexpected token 'const' in expression",
+      "kind": "corpus",
+      "example_file": "spec_err_const_in_fn.jhyy"
+    },
+    {
+      "text": "unexpected token 'fn' in expression",
+      "kind": "corpus",
+      "meaning": "表达式位置出现了 `fn`。",
+      "fix": "函数**要定义在顶层**；在表达式位置想调用函数 ⇒ 写调用（`f(x)`），不是 `fn`。",
+      "example_file": "spec_err_nested_fn.jhyy"
+    },
+    {
+      "text": "unexpected token 'let' in expression",
+      "kind": "corpus",
+      "example_file": "spec_err_closure_body_stmt.jhyy"
+    },
+    {
+      "text": "unexpected token '{' in expression",
+      "kind": "corpus",
+      "example_file": "spec_err_block_expr.jhyy"
+    },
+    {
+      "text": "unknown enum type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "unknown fence builtin (expected fence_seq_cst/fence_acquire/fence_release)",
+      "kind": "parse",
+      "origin": "parser.jhyy"
+    },
+    {
+      "text": "unknown import",
+      "kind": "curated",
+      "meaning": "import 的模块不存在。",
+      "fix": "⚠️ **import 只写模块名本身**（`import vec;`），**不带 `std::` 前缀**；模块名要跟标准库里的一致。"
+    },
+    {
+      "text": "unknown struct type",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "unknown type",
+      "kind": "sema",
+      "meaning": "两种写法都编译不过:",
+      "w_ref": "W-129",
+      "w_status": "RESOLVED",
+      "example_file": "generics_err_unsubst.jhyy",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "unknown type in sizeof/alignof",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "variant payload type mismatch",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "variant takes no payload",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "不可变性的写保护未实装",
+      "kind": "spec",
+      "meaning": "编译器不检查取地址对象是否可变；`&x` 对不可变绑定合法，`*p = v` 不报错也不生效",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "不相等。须写成",
+      "kind": "spec",
+      "meaning": "`type P = struct { c: u8 }` 写 `P { c: 7 }` 报 `field type mismatch` —— 整数字面量默认推断为 `i32`,与 `u8` 不相等。须写成 `let c: u8 = 7;` 再 `P { c: c }`",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.3"
+    },
+    {
+      "text": "二层以上的嵌套 pattern 不支持",
+      "kind": "spec",
+      "meaning": "pattern 树里不得有 enum pattern 是另一个 enum pattern 的后代（OR 包着的也算）⇒ 编译期报错 `nested pattern is not supported`。外层 tag 比较与内层 payload 提取都未实装",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "借用检查只覆盖「同作用域内双 &mut」",
+      "kind": "spec",
+      "meaning": "词法作用域会误报「借用提前结束」的情况尚未处理",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "函数实参类型不检查",
+      "kind": "spec",
+      "meaning": "`f(5)` 传给 struct 形参能编译，运行时按 struct 布局读寄存器 → 访问违例崩溃",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "参数被静默忽略（不报错、不警告）⇒",
+      "kind": "spec",
+      "meaning": "多余的 `.jhyy` 参数被静默忽略（不报错、不警告）⇒ `jhyy compile a.jhyy b.jhyy` 实际只编 `a.jhyy`。多文件须用 `import` 组合（见 [§ 1.2](#12-源文件与多文件)）",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "只 load 1 字节（IL",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "命令行只接受一个输入文件",
+      "kind": "spec",
+      "meaning": "多余的 `.jhyy` 参数被静默忽略（不报错、不警告）⇒ `jhyy compile a.jhyy b.jhyy` 实际只编 `a.jhyy`。多文件须用 `import` 组合（见 [§ 1.2](#12-源文件与多文件)）",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "对不可变绑定合法，",
+      "kind": "spec",
+      "meaning": "编译器不检查取地址对象是否可变；`&x` 对不可变绑定合法，`*p = v` 不报错也不生效",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "嵌套泛型 Vec<Vec<T>>",
+      "kind": "spec",
+      "meaning": "未被测试套件覆盖，行为不应依赖",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "指针的最低字节，不是指针本身 ⇒ 拿它跟",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "无交叉编译容器后端",
+      "kind": "spec",
+      "meaning": "`--target` 不切换 PE / ELF 产出",
+      "spec_ref": "附录 B"
+    },
+    {
+      "text": "是「指向指针数组的指针」，但类型写作",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读",
+      "kind": "spec",
+      "meaning": "入口签名里的 `argv` 是「指向指针数组的指针」，但类型写作 `*u8` ⇒ `*argv` 只 load 1 字节（IL `loadub`）—— 那是 `argv[0]` 指针的最低字节，不是指针本身 ⇒ 拿它跟 `0` 比等于断言「堆地址最低字节 ≠ 0」（跟堆布局绑定的假信号）。读 `argv[i]` 必须先 `argv as u8`（见 §1.1）",
+      "spec_ref": "附录 B",
+      "w_ref": "W-157"
+    },
+    {
+      "text": "聚合 == 不接受函数调用结果",
+      "kind": "spec",
+      "meaning": "`make_p(1) == make_p(2)` 编译期报错(`equality comparison of a function call result is not supported for aggregate types`)。聚合返回值在 ABI 下不统一是地址(>16B 走 sret 是地址;≤16B 走寄存器)⇒ 按地址比会读到寄存器里的头几个字节。形态差别:`let a = make_p(1); a == b` 里的 `a` 是变量(值在栈槽里)⇒ 安全 ⇒ 不报错",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.1"
+    },
+    {
+      "text": "聚合的大小比较未实装",
+      "kind": "spec",
+      "meaning": "`a < b` / `a >= b`(struct / enum / 数组 / 切片)编译期报错(`ordering comparison is not supported for struct/enum/array/slice types`)—— 聚合的大小比较无定义",
+      "spec_ref": "附录 B",
+      "w_ref": "W-133.2"
+    },
+    {
+      "text": "顶层全局变量只有整数类型初始化正确",
+      "kind": "spec",
+      "meaning": "`let mut f: f64 = 3.5;` 读到 0（初始化器被丢弃）；`let mut p: Point = ...` 读到垃圾（未定义读）。整数类型（含跨函数读写链）正确",
+      "spec_ref": "附录 B"
+    }
+  ]
+}

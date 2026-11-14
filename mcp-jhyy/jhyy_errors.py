@@ -283,6 +283,93 @@ def _load_ledger():
 _index = None
 
 
+# ── 人工校订的「怎么改」────────────────────────────────────────────
+#
+# ⚠️ **为什么要有这一层** —— 自动扫出来的条目**只有报错原文**，
+#   `fix` 只有 8/166、`meaning` 只有 68/166 ⇒ 模型拿到诊断**大概率还是
+#   不知道该改哪儿**。
+#
+#   而评测量出来的诊断面**极小**（29 道配对任务里只有 1 种结构化诊断
+#   + 1 种链接期失败）⇒ ⇒ **值得为最高频的那几条手写「怎么改」**。
+#
+# ⚠️ **这一层是补丁不是主体** —— 主体仍是那 166 条自动条目；
+#   这一层只覆盖**评测里真出现过的**那几条 + 速查表里的铁律。
+#
+# ⚠️ **同一个原文** ⇒ **人工写的赢**（覆盖自动条目）。
+
+CURATED_FIXES = {
+    "undefined variable": {
+        "meaning": "用了没声明的标识符。",
+        "fix": "标识符必须**先声明或定义**。⚠️ **JHYY 没有 print 内建** —— "
+               "要输出得先声明 `extern fn printf(fmt: *u8, val: i32) -> i32;` "
+               "再调用；`import` 只写模块名本身（`import vec;`，不是 `import std::vec;`）。",
+        "spec_ref": "§ 2.3",
+    },
+    "type mismatch in let": {
+        "meaning": "类型对不上。",
+        "fix": "⚠️ **整数 ↔ 浮点不能隐式转换** ⇒ 必须写 `as`（`3 as f64`）。"
+               "类型注解也要和字面量一致：`let x: i32 = 5;`。"
+               "⚠️ `as` 的优先级跟 `*` 一样 —— 必要时加括号。",
+        "spec_ref": "§ 4.2",
+    },
+    "unexpected token ';' in expression": {
+        "meaning": "多了一个分号（表达式位置不该有 `;`）。",
+        "fix": "⚠️ **`type X = struct { ... }` / `enum` 结尾不能带 `;`** ⇒ 删掉它。",
+        "spec_ref": "§ 5.2",
+    },
+    "unexpected token 'fn' in expression": {
+        "meaning": "表达式位置出现了 `fn`。",
+        "fix": "函数**要定义在顶层**；在表达式位置想调用函数 ⇒ 写调用（`f(x)`），"
+               "不是 `fn`。",
+    },
+    "cannot infer type": {
+        "meaning": "类型推不出来。",
+        "fix": "⚠️ **类型必须显式标注**：`let x: i32 = 5;`；"
+               "函数参数也要标：`fn f(a: i32) -> i32`。"
+               "⚠️ `null` 推不出类型 ⇒ 写成 `let p: *u8 = null;`。",
+        "spec_ref": "§ 2.2",
+    },
+    "assignment type mismatch": {
+        "meaning": "赋值两边类型不一致。",
+        "fix": "⚠️ **整数 ↔ 浮点不能隐式转换** ⇒ 写 `as`。"
+               "两边类型真不一样就改标注。",
+    },
+    "cannot assign to immutable variable": {
+        "meaning": "给不可变变量赋值。",
+        "fix": "改成 `let mut x: T = ...;`（⚠️ 不可变变量不能原地改）。",
+    },
+    "closure cannot capture outer variables": {
+        "meaning": "闭包捕获了外层的变量。",
+        "fix": "⚠️ **闭包不能捕获外层变量** ⇒ 把要用的值**当参数传进去**。",
+    },
+    "undefined reference to 'main_jhyy'": {
+        "meaning": "链接失败：运行时要找 `main_jhyy`，但程序里没有。",
+        "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
+               "（不是 `main`；`main` 只有 `#[no_std]` 才用）。"
+               "⚠️ 这条错误**在链接期才报**，语法检查看不出来。",
+        "spec_ref": "§ 3.1",
+    },
+    "ld returned": {
+        "meaning": "链接失败（`ld` 报错）。",
+        "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
+               "（不是 `main`）—— 先检查这个。"
+               "⚠️ 编译器**会把 gcc 的真实链接原因吞掉**（语言仓 W-226）"
+               "⇒ 只看到「ld returned N exit status」是**正常的**。",
+        "spec_ref": "§ 3.1",
+    },
+    "unknown import": {
+        "meaning": "import 的模块不存在。",
+        "fix": "⚠️ **import 只写模块名本身**（`import vec;`），"
+               "**不带 `std::` 前缀**；模块名要跟标准库里的一致。",
+    },
+    "cannot open import '": {
+        "meaning": "import 的模块找不到。",
+        "fix": "⚠️ **import 只写模块名本身**（`import vec;`），"
+               "**不带 `std::` 前缀**；模块名要跟标准库里的一致。",
+    },
+}
+
+
 def build_index():
     """建索引（模块级缓存）。"""
     global _index
@@ -340,6 +427,20 @@ def build_index():
             if not e.get("fix") and info.get("fix"):
                 e["fix"] = info.get("fix")
             break
+
+    # ⚠️ **人工校订层** —— **覆盖**自动条目（同一个原文时，人写的赢）
+    #   ⇒ 评测里最高频的那几条，终于有「怎么改」了。
+    for key, info in CURATED_FIXES.items():
+        k = normalize(key)
+        if not k:
+            continue
+        e = entries.get(k)
+        if e is None:
+            e = {"text": k, "kind": "curated"}
+            entries[k] = e
+        for f, v in info.items():
+            if v:
+                e[f] = v
 
     for i, e in enumerate(sorted(entries.values(), key=lambda x: x["text"]), 1):
         e["id"] = "E-%03d" % i
@@ -434,6 +535,70 @@ def search(query: str, limit: int = 5) -> dict:
         "indexed": len(index),
         "matches": matches,
     }
+
+
+def lookup(message: str):
+    """给**一条**编译器诊断找「什么意思 / 怎么改」⇒ 找不到返回 None。
+
+    ⚠️ **比 `search()` 严格**：诊断是「机器吐出来的确切一句话」，
+    不是用户的自然语言提问 ⇒ 判定标准更保守。
+
+    | 关系 | 分数 | 理由 |
+    |---|---|---|
+    | 完全相等 | 100 | 确定 |
+    | 索引条目 ⊂ 诊断 | 85 | 诊断带前后缀（如「expected ... but got ...」） |
+    | 诊断 ⊂ 索引条目 | 70 | 索引条目是通用说法 |
+    | 都不是 | —— | 退到普通打分，**且门槛更高**（≥45） |
+
+    ⚠️ **子串匹配要求条目够长**（≥ 12 字符）—— 否则 "unknown" 这种短条目
+    会在任何含它的诊断里蹭到 ⇒ 等于瞎猜。
+    """
+    index = build_index()
+    q = normalize(message).lower()
+    if not q:
+        return None
+
+    best = None
+    best_score = 0
+    for e in index.values():
+        t = e["text"].lower()
+        if q == t:
+            sc = 100
+        elif len(t) >= 12 and t in q:
+            sc = 85
+        elif len(q) >= 12 and q in t:
+            sc = 70
+        else:
+            continue
+        if sc > best_score:
+            best, best_score = e, sc
+        elif sc == best_score and best is not None:
+            # ⚠️ **同一个原文有多条条目**（自动条目 + 台账条目）⇒
+            #   **优先选带 `fix` 的** —— 实测踩过：台账那条的 `meaning`
+            #   是「两种写法都编译不过:」⇒ 对模型**毫无用处**。
+            if e.get("fix") and not best.get("fix"):
+                best = e
+
+    if best is None:
+        # 退一步用普通打分，但门槛更高（`search()` 的 MIN_SCORE 是 18，
+        # 那对自然语言提问合适，对确切诊断太松）
+        res = search(message, limit=1)
+        ms = res.get("matches") or []
+        if ms and ms[0].get("score", 0) >= 45:
+            return ms[0]
+        return None
+
+    out = {
+        "id": best["id"],
+        "text": best["text"],
+        "kind": best.get("kind", ""),
+        "score": best_score,
+    }
+    for k in ("meaning", "fix", "spec_ref", "w_ref", "w_status",
+              "example_file", "origin"):
+        if best.get(k):
+            out[k] = best[k]
+    return out
 
 
 if __name__ == "__main__":
