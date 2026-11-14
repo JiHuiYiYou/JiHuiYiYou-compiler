@@ -17,7 +17,7 @@
 //   std_vec_cap(v) -> i64
 //   std_vec_free(v) -> i32 (free data buffer, reset to 0/0/0)
 //
-// 测试:`compiler/tests/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)
+// 测试:`compiler/tests/examples/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)
 
 // ═══════════════════════════════════════════════════
 // FFI

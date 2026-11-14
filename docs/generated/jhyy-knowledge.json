@@ -891,7 +891,7 @@
         }
       ],
       "notes": [
-        "测试:`compiler/tests/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)"
+        "测试:`compiler/tests/examples/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)"
       ]
     }
   ],
