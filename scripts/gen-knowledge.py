@@ -1027,8 +1027,24 @@ def _compare(gen_dir: Path, repo_dir: Path) -> int:
             except Exception as e:
                 diffs.append("%s：JSON 解析失败（%s）" % (name, e))
                 continue
-        if ta != tb:
-            diffs.append("%s：仓里的产物**不是最新的**" % name)
+        # ⚠️ **行尾免疫** —— 产物是生成的 ⇒ 行尾不该算差异
+        na = ta.replace("\r\n", "\n")
+        nb = tb.replace("\r\n", "\n")
+        if na != nb:
+            # ⚠️ **说清楚「哪里不同」** —— 只说「不同」⇒ 排查只能靠猜
+            #   （实测踩过：CI 说 JSON 不同、本地逐字节相同 ⇒ 卡了半小时）
+            at = 0
+            for i in range(min(len(na), len(nb))):
+                if na[i] != nb[i]:
+                    at = i
+                    break
+            else:
+                at = min(len(na), len(nb))
+            diffs.append(
+                "%s：仓里的产物**不是最新的**（第一处不同 @%d）\n"
+                "      新：%r\n      旧：%r"
+                % (name, at, na[max(0, at - 90):at + 90], nb[max(0, at - 90):at + 90])
+            )
 
     if diffs:
         print("[gen-knowledge] FAIL —— %d 处漂移：" % len(diffs))
@@ -1094,7 +1110,13 @@ def main():
 
     payload = {
         "version": doc.get("version", ""),
-        "source": str(SPEC_PATH).replace("\\", "/"),
+        # ⚠️ **必须是「仓内相对路径」** —— 绝对路径**机器相关**
+        #   （本机是 `C:/Users/...`、CI 是 `D:\a\...`）⇒ ⇒ 产物每次都不一样
+        #   ⇒ ⇒ **「知识包是最新的」这道门在 CI 上永远红**（实测踩过，
+        #   而且因为 JSON 里只有这一处带路径 ⇒ **只有 JSON 变、.md 不变**
+        #   ⇒ ⇒ 排查时特别容易误判成「内容不同」）。
+        #   ⚠️ 顺带修了个错：原来的绝对路径**漏了 `docs/`** ⇒ 指向的文件不存在。
+        "source": SPEC_PATH.relative_to(JHYY_ROOT).as_posix(),
         "toc": toc,
         "pitfalls": pitfalls,
         "unimplemented": impl,
