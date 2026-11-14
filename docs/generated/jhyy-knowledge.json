@@ -966,7 +966,7 @@
       "why": "有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。\n⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。",
       "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
-      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: u32 = 3000000000;\n    print_i64(x as i64);\n    return 0;\n}\n",
+      "code_body": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
       "measured": "3000000000"
     },
     {
@@ -975,8 +975,38 @@
       "why": "i32/u32 的 `+ - *` 溢出 ⇒ **回绕**（像 C 的无符号 / Rust 的 debug 相反）。\n⚠️ 想要报错得自己检查 ⇒ 别指望编译器拦你。",
       "code": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
-      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);\n    return 0;\n}\n",
+      "code_body": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
       "measured": "-2147483648"
+    },
+    {
+      "kind": "trap",
+      "title": "**字面量超出声明类型范围 ⇒ 同一个值有两种解释**",
+      "why": "字面量**装不下**声明的类型时，编译器**不报错**（台账 W-228）⇒\n⇒ **字面量路径**保留原始宽度、**运行时路径**却截断/回绕\n⇒ ⇒ **同一个值，看的地方不同 ⇒ 答案不同** ⇒ ⇒ **别这么写**。\n⚠️ **绕法**：字面量别超范围；要算越界的值 ⇒ 用**表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致；\n要更大的值 ⇒ 换**更宽的类型**（u64 / i64）。",
+      "literal_code": "let a: i32 = 2147483648;\n    print_i64(a as i64);",
+      "runtime_code": "let a: i32 = 2147483647;\n    let b: i32 = a + 1i32;\n    print_i64(b as i64);",
+      "literal_body": "let a: i32 = 2147483648;\n    print_i64(a as i64);",
+      "literal_out": "2147483648",
+      "runtime_body": "let a: i32 = 2147483647;\n    let b: i32 = a + 1i32;\n    print_i64(b as i64);",
+      "runtime_out": "-2147483648"
+    },
+    {
+      "kind": "bite",
+      "title": "**`u32` 的移位，右操作数也要带 `u32` 后缀**",
+      "why": "`a >> 1` 里 `1` 是 **i32** ⇒ `u32 >> i32` ⇒ **type mismatch**。\n⚠️ 和「`u32` 加 `1`」是**同一个坑**（字面量后缀）。",
+      "wrong": "let a: u32 = 5;\n    let b: u32 = a >> 1;",
+      "expect": "type mismatch in binary",
+      "right": "let a: u32 = 5;\n    let b: u32 = a >> 1u32;",
+      "wrong_code": "fn main_jhyy() -> i32 {\n    let a: u32 = 5;\n    let b: u32 = a >> 1;\n    return 0;\n}\n",
+      "right_code": "fn main_jhyy() -> i32 {\n    let a: u32 = 5;\n    let b: u32 = a >> 1u32;\n    return 0;\n}\n"
+    },
+    {
+      "kind": "fact",
+      "title": "**各整数字面量后缀的取值范围**",
+      "why": "字面量**写超出范围的数** ⇒ 编译器**不报错**（W-228）但会有两种解释 ⇒\n⇒ ⇒ **别越界** ⇒ 下面是各后缀的**实测**上限。",
+      "code": "let a: u32 = 4294967295;\n    let b: i32 = 2147483647;\n    let c: i64 = 9223372036854775807;\n    print_i64(a as i64);\n    print_i64(b as i64);\n    print_i64(c);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**；`u64` 的上限 18446744073709551615 打印成 -1 是**正常**的 —— 它装不进 i64)",
+      "code_body": "let a: u32 = 4294967295;\n    let b: i32 = 2147483647;\n    let c: i64 = 9223372036854775807;\n    print_i64(a as i64);\n    print_i64(b as i64);\n    print_i64(c);",
+      "measured": "4294967295 / 2147483647 / 9223372036854775807"
     },
     {
       "kind": "fact",
@@ -984,7 +1014,7 @@
       "why": "宽化**不保符号** ⇒ `4294967295 as i64` 得 **4294967295**（不是 -1）。\n⚠️ C 里 `uint32_t` 宽化到 `int64_t` 是零扩展 ✓ 一致，但**别按「可能有符号」去猜**。",
       "code": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
-      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);\n    return 0;\n}\n",
+      "code_body": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
       "measured": "4294967295"
     }
   ],

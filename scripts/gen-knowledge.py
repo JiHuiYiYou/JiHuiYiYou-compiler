@@ -423,6 +423,41 @@ VERIFIED_RULES = [
         "note": "⇒ 实测输出见下（**由生成器实测填入**）",
     },
     {
+        "kind": "trap",
+        "title": "**字面量超出声明类型范围 ⇒ 同一个值有两种解释**",
+        "why": (
+            "字面量**装不下**声明的类型时，编译器**不报错**（台账 W-228）⇒\n"
+            "⇒ **字面量路径**保留原始宽度、**运行时路径**却截断/回绕\n"
+            "⇒ ⇒ **同一个值，看的地方不同 ⇒ 答案不同** ⇒ ⇒ **别这么写**。\n"
+            "⚠️ **绕法**：字面量别超范围；要算越界的值 ⇒ 用**表达式**"
+            "（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致；\n"
+            "要更大的值 ⇒ 换**更宽的类型**（u64 / i64）。"
+        ),
+        "literal_code": "let a: i32 = 2147483648;\n    print_i64(a as i64);",
+        "runtime_code": "let a: i32 = 2147483647;\n    let b: i32 = a + 1i32;\n    print_i64(b as i64);",
+    },
+    {
+        "kind": "bite",
+        "title": "**`u32` 的移位，右操作数也要带 `u32` 后缀**",
+        "why": (
+            "`a >> 1` 里 `1` 是 **i32** ⇒ `u32 >> i32` ⇒ **type mismatch**。\n"
+            "⚠️ 和「`u32` 加 `1`」是**同一个坑**（字面量后缀）。"
+        ),
+        "wrong": "let a: u32 = 5;\n    let b: u32 = a >> 1;",
+        "expect": "type mismatch in binary",
+        "right": "let a: u32 = 5;\n    let b: u32 = a >> 1u32;",
+    },
+    {
+        "kind": "fact",
+        "title": "**各整数字面量后缀的取值范围**",
+        "why": (
+            "字面量**写超出范围的数** ⇒ 编译器**不报错**（W-228）但会有两种解释 ⇒\n"
+            "⇒ ⇒ **别越界** ⇒ 下面是各后缀的**实测**上限。"
+        ),
+        "code": "let a: u32 = 4294967295;\n    let b: i32 = 2147483647;\n    let c: i64 = 9223372036854775807;\n    print_i64(a as i64);\n    print_i64(b as i64);\n    print_i64(c);",
+        "note": "⇒ 实测输出见下（**由生成器实测填入**；`u64` 的上限 18446744073709551615 打印成 -1 是**正常**的 —— 它装不进 i64)",
+    },
+    {
         "kind": "fact",
         "title": "**`u32` → `u64` / `i64` 都是零扩展**",
         "why": (
@@ -472,6 +507,13 @@ def _run(exe_path):
     return r.stdout.strip()
 
 
+def _fmt_body(body: str) -> str:
+    """把 body 的缩进统一（每行 4 空格）—— 规则表里手写的 body 第一行没缩进、
+    后面的行有 ⇒ 渲染出来参差不齐。"""
+    lines = [ln.strip() for ln in body.strip().splitlines()]
+    return "\n".join(("    " + ln) if ln else "" for ln in lines)
+
+
 def collect_verified_rules():
     """反直觉点 —— **每条都真编译（有的还真跑）一遍**。
 
@@ -517,6 +559,29 @@ def collect_verified_rules():
                 item["wrong_code"] = wrong
                 item["right_code"] = right
                 out.append(item)
+            elif rule["kind"] == "trap":
+                # 陷阱型：**两个程序同时跑** ⇒ 把两种解释都摆出来
+                #   ⇒ 门的效果：差异被如实写进包里（行为变了数字跟着变）
+                outs = []
+                for key, code in (("literal", rule["literal_code"]),
+                                  ("runtime", rule["runtime_code"])):
+                    src = PRINT_HELPER + ("fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n"
+                                           % code)
+                    ok, err, exe_path = _compile(exe, src, d, tag + key)
+                    if not ok:
+                        raise SystemExit(
+                            "✗ 反直觉点「%s」的**%s 路径编译不过** ⇒ 不许进知识包：\n%s"
+                            % (rule["title"], key, err.strip().splitlines()[-1][:160])
+                        )
+                    outs.append((key, src, _run(exe_path)))
+                item = dict(rule)
+                # ⚠️ **正文只放 body** —— 那个 15 行的 `print_i64` 辅助
+                #   重复两遍 ⇒ 噪音比信息多（实测包从 19k 涨到 26k）
+                item["literal_body"] = rule["literal_code"]
+                item["literal_out"] = outs[0][2].replace("\n", " / ")
+                item["runtime_body"] = rule["runtime_code"]
+                item["runtime_out"] = outs[1][2].replace("\n", " / ")
+                out.append(item)
             else:
                 # B 型：**必须编译通过 + 必须跑出输出**（输出由实测填进包里）
                 src = PRINT_HELPER + ("fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n"
@@ -534,7 +599,8 @@ def collect_verified_rules():
                         "⇒ 不许进知识包" % rule["title"]
                     )
                 item = dict(rule)
-                item["code_full"] = src
+                # ⚠️ **正文只放 body**（同 trap 型）
+                item["code_body"] = rule["code"]
                 item["measured"] = out_txt.replace("\n", " / ")
                 out.append(item)
     return out
@@ -810,12 +876,38 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
                 A("```jhyy")
                 A(r["right_code"].rstrip())
                 A("```")
+            elif r["kind"] == "trap":
+                A("（`print_i64` 的定义见上面『常用用法』一节）")
+                A("")
+                A("**① 字面量路径**（`let a: i32 = 2147483648;` 那样写）：")
+                A("")
+                A("```jhyy")
+                A(_fmt_body(r["literal_body"].rstrip()))
+                A("```")
+                A("")
+                A("⇒ 实测输出：`%s`" % r["literal_out"])
+                A("")
+                A("**② 运行时路径**（真算出来的那样写）：")
+                A("")
+                A("```jhyy")
+                A(_fmt_body(r["runtime_body"].rstrip()))
+                A("```")
+                A("")
+                A("⇒ 实测输出：`%s`" % r["runtime_out"])
+                A("")
+                if r["literal_out"] != r["runtime_out"]:
+                    A("⚠️ **这两个不一样** ⇒ 同一个值两种解释 ⇒ **别这么写**。")
+                else:
+                    A("✅ 这两个一样 ⇒ 行为一致。")
+                A("")
             else:
                 A(r.get("note", ""))
                 A("")
                 A("```jhyy")
-                A(r["code_full"].rstrip())
+                A(_fmt_body(r["code_body"].rstrip()))
                 A("```")
+                A("")
+                A("（`print_i64` 的定义见上面『常用用法』一节）")
                 A("")
                 A("**实测输出**：`%s`" % r["measured"])
             A("")
