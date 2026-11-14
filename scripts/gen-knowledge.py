@@ -330,6 +330,216 @@ def collect_usage_examples():
     return out
 
 
+# ── 反直觉点（**编译器逐条验证过的**）────────────────────────────────
+#
+# ⚠️ **为什么只放这几条** —— 翻译题的轨迹显示，模型查规范查的就是这些：
+#   整数字面量后缀 / 取值范围 / 运算符优先级 / 无符号除法 / 移位 /
+#   `as` 转换 / `if-else` 分支体 ⇒ ⇒ **只做模型真查过、真撞过的**，
+#   不塞无关内容。
+#
+# ⚠️ **两条硬保证**（都由生成器把关）：
+#   · **A 型（会咬人）**：❌ **必须编译失败**且报错**含**指定子串；
+#     ✅ **必须编译通过** ⇒ 规则过时了立刻发现。
+#   · **B 型（无害但会让人想查）**：代码**必须编译通过**且**必须跑出输出**，
+#     输出**由生成器实测填进包里** ⇒ **包里的数字是编译器实测的**。
+#
+# ⚠️ **B 型的数字是实测填的，不是手写的** ⇒ 编译器行为变了 ⇒ 数字自动跟着变
+#   ⇒ 而「形状」由「必须编译通过 + 必须跑出输出」保证 ⇒ 变了就红。
+
+VERIFIED_RULES = [
+    {
+        "kind": "bite",
+        "title": "**u32 的字面量要带 `u32` 后缀**",
+        "why": (
+            "无后缀整数字面量是 **i32** ⇒ `x + 1`（x 是 u32）⇒ **i64/i32 混算**\n"
+            "⇒ 报 `type mismatch in binary`。\n"
+            "⚠️ **从 C 过来的模型 100% 会踩**（C 里 `uint32_t + 1` 天经地义）。\n"
+            "⚠️ 后缀**必须是 `u32`** —— 写 `1i64` 一样报错。"
+        ),
+        "wrong": "let x: u32 = 5;\n    let y: u32 = x + 1;",
+        "expect": "type mismatch in binary",
+        "right": "let x: u32 = 5;\n    let y: u32 = x + 1u32;",
+    },
+    {
+        "kind": "bite",
+        "title": "**整数 ↔ 浮点不能隐式转换**",
+        "why": (
+            "`let x: f64 = 3;` ⇒ **类型对不上** ⇒ 要写 `3 as f64`。\n"
+            "⚠️ C 里 `double d = 3;` 是合法的 ⇒ 从 C 过来的模型会直接踩。"
+        ),
+        "wrong": "let x: f64 = 3;",
+        "expect": "type mismatch in let",
+        "right": "let x: f64 = 3 as f64;",
+    },
+    {
+        "kind": "bite",
+        "title": "**`type` 定义结尾不能带 `;`**",
+        "why": "`type X = struct { ... }` / `enum` **结尾不带分号** ⇒ 带了就在表达式位置报 `;`。",
+        "wrong": "type P = struct { a: i32 };",
+        "expect": "unexpected token ';'",
+        "right": "type P = struct { a: i32 }",
+        # ⚠️ `type` / `import` 是**顶层声明** ⇒ 必须在函数**外面**
+        "pre": True,
+    },
+    {
+        "kind": "bite",
+        "title": "**`import` 只写模块名本身（不带 `std::`）**",
+        "why": "`import vec;` ✓；`import std::vec;` ⇒ 解析器看到 `::` 直接报错。",
+        "wrong": "import std::vec;",
+        "expect": "got ::",
+        "right": "import vec;",
+        # ⚠️ `import` 也是**顶层声明**
+        "pre": True,
+    },
+    {
+        "kind": "bite",
+        "title": "**闭包不能捕获外层变量**",
+        "why": (
+            "闭包只能用**自己的参数和字面量** ⇒ 要用的外层值**当参数传进去**。\n"
+            "⚠️ C++/Rust 的 lambda 都能捕获 ⇒ 从那边过来的模型会直接踩。"
+        ),
+        "wrong": "let n: i32 = 5;\n    let f = |x: i32| { x + n };",
+        "expect": "closure cannot capture outer variables",
+        "right": "let f = |x: i32| { x + 5 };",
+    },
+    {
+        "kind": "fact",
+        "title": "**整数字面量：目标类型说了算（不用加后缀）**",
+        "why": (
+            "有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。\n"
+            "⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。"
+        ),
+        "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
+        "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+    },
+    {
+        "kind": "fact",
+        "title": "**整数溢出是回绕，不是报错**",
+        "why": (
+            "i32/u32 的 `+ - *` 溢出 ⇒ **回绕**（像 C 的无符号 / Rust 的 debug 相反）。\n"
+            "⚠️ 想要报错得自己检查 ⇒ 别指望编译器拦你。"
+        ),
+        "code": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
+        "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+    },
+    {
+        "kind": "fact",
+        "title": "**`u32` → `u64` / `i64` 都是零扩展**",
+        "why": (
+            "宽化**不保符号** ⇒ `4294967295 as i64` 得 **4294967295**（不是 -1）。\n"
+            "⚠️ C 里 `uint32_t` 宽化到 `int64_t` 是零扩展 ✓ 一致，"
+            "但**别按「可能有符号」去猜**。"
+        ),
+        "code": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
+        "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+    },
+]
+
+
+PRINT_HELPER = """import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+"""
+
+
+def _compile(exe, src, tmpdir, tag):
+    """编译一段源码 ⇒ 返回 (ok, stderr)。"""
+    import subprocess
+    path = Path(tmpdir) / ("%s.jhyy" % tag)
+    path.write_text(src, encoding="utf-8", newline="")
+    r = subprocess.run(
+        [str(exe), "compile", str(path), "-o", str(Path(tmpdir) / tag)],
+        capture_output=True, text=True, errors="replace", timeout=120,
+    )
+    return r.returncode == 0, (r.stderr or ""), str(Path(tmpdir) / (tag + ".exe"))
+
+
+def _run(exe_path):
+    import subprocess
+    r = subprocess.run([exe_path], capture_output=True, text=True,
+                       errors="replace", timeout=60)
+    return r.stdout.strip()
+
+
+def collect_verified_rules():
+    """反直觉点 —— **每条都真编译（有的还真跑）一遍**。
+
+    ⚠️ **规则过时了 ⇒ 生成器报错** ⇒ 知识包里**不会有过时的规则**。
+    """
+    exe = JHYY_ROOT / "compiler" / "build" / "bin" / "jhyy.exe"
+    if not exe.exists():
+        print("! 编译器不在 ⇒ 跳过「反直觉点」的编译把关")
+        return []
+    import tempfile
+    out = []
+    with tempfile.TemporaryDirectory() as d:
+        for i, rule in enumerate(VERIFIED_RULES):
+            tag = "vr%d" % i
+            if rule["kind"] == "bite":
+                # ⚠️ `pre` ⇒ 声明在**顶层**（`type` / `import` 必须在函数外面）
+                def wrap(code):
+                    if rule.get("pre"):
+                        return "%s\nfn main_jhyy() -> i32 {\n    return 0;\n}\n" % code
+                    return "fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n" % code
+
+                wrong = wrap(rule["wrong"])
+                ok, err, _ = _compile(exe, wrong, d, tag + "w")
+                if ok:
+                    raise SystemExit(
+                        "✗ 反直觉点「%s」的**错版居然编译过了** ⇒ 这条规则"
+                        "要么已过时、要么写错了 ⇒ 不许进知识包" % rule["title"]
+                    )
+                if rule["expect"] not in err:
+                    raise SystemExit(
+                        "✗ 反直觉点「%s」的错版**报错理由不对**（要 `%s`，实际 `%s`）"
+                        "⇒ 不许进知识包" % (rule["title"], rule["expect"],
+                                           err.strip().splitlines()[-1][:120])
+                    )
+                right = wrap(rule["right"])
+                ok, err, _ = _compile(exe, right, d, tag + "r")
+                if not ok:
+                    raise SystemExit(
+                        "✗ 反直觉点「%s」的**对版编译不过** ⇒ 不许进知识包：\n%s"
+                        % (rule["title"], err.strip().splitlines()[-1][:160])
+                    )
+                item = dict(rule)
+                item["wrong_code"] = wrong
+                item["right_code"] = right
+                out.append(item)
+            else:
+                # B 型：**必须编译通过 + 必须跑出输出**（输出由实测填进包里）
+                src = PRINT_HELPER + ("fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n"
+                                       % rule["code"])
+                ok, err, exe_path = _compile(exe, src, d, tag)
+                if not ok:
+                    raise SystemExit(
+                        "✗ 反直觉点「%s」的**代码编译不过** ⇒ 不许进知识包：\n%s"
+                        % (rule["title"], err.strip().splitlines()[-1][:160])
+                    )
+                out_txt = _run(exe_path)
+                if not out_txt:
+                    raise SystemExit(
+                        "✗ 反直觉点「%s」**跑不出任何输出** ⇒ 这条「事实」没测到东西"
+                        "⇒ 不许进知识包" % rule["title"]
+                    )
+                item = dict(rule)
+                item["code_full"] = src
+                item["measured"] = out_txt.replace("\n", " / ")
+                out.append(item)
+    return out
+
+
 def collect_stdlib():
     """标准库公开 API —— 从**源码的 `// API:` 块**抽。
 
@@ -491,7 +701,7 @@ def collect_error_lookup(doc):
 # ── 渲染 ────────────────────────────────────────────────────────
 
 def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
-                    error_lookup, usage_examples=None):
+                    error_lookup, usage_examples=None, verified_rules=None):
     L = []
     A = L.append
 
@@ -576,6 +786,40 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
             A("  > %s" % note)
         A("")
 
+    if verified_rules:
+        A("## 反直觉点（**编译器逐条验证过的**）")
+        A("")
+        A("> ⚠️ **每条都过编译器**：会咬人的 ⇒ 错版**必须编译不过**、"
+          "对版**必须编译过**；无害但让人想查的 ⇒ **输出由生成器实测填进来**。")
+        A("> ⇒ **规则过时了这里就会红** ⇒ 包里不会有过时的规则。")
+        A("")
+        for r in verified_rules:
+            A("### %s" % r["title"])
+            A("")
+            A(r.get("why", ""))
+            A("")
+            if r["kind"] == "bite":
+                A("❌ **这样写编译不过**：")
+                A("")
+                A("```jhyy")
+                A(r["wrong_code"].rstrip())
+                A("```")
+                A("")
+                A("✅ **这样写才对**：")
+                A("")
+                A("```jhyy")
+                A(r["right_code"].rstrip())
+                A("```")
+            else:
+                A(r.get("note", ""))
+                A("")
+                A("```jhyy")
+                A(r["code_full"].rstrip())
+                A("```")
+                A("")
+                A("**实测输出**：`%s`" % r["measured"])
+            A("")
+
     if usage_examples:
         A("## 常用用法（**下面每段都真编译过**）")
         A("")
@@ -632,6 +876,45 @@ def collect_error_fix():
     return entries
 
 
+def _compare(gen_dir: Path, repo_dir: Path) -> int:
+    """比对「刚生成的」与「仓里的」⇒ 不一致就 FAIL。
+
+    ⚠️ **JSON 要去掉 `builtAt`** —— 那是时间戳，每次生成都不同
+    ⇒ 直接比对永远「不一致」。
+    """
+    import json as _json
+
+    diffs = []
+    for name in ("jhyy-knowledge.md", "jhyy-knowledge.json", "jhyy-error-fix.json"):
+        a = gen_dir / name
+        b = repo_dir / name
+        if not a.exists() or not b.exists():
+            diffs.append("%s：%s" % (name, "生成物缺失" if not a.exists() else "仓里缺失"))
+            continue
+        ta, tb = a.read_text(encoding="utf-8"), b.read_text(encoding="utf-8")
+        if name.endswith(".json"):
+            try:
+                ja, jb = _json.loads(ta), _json.loads(tb)
+                ja.pop("builtAt", None)
+                jb.pop("builtAt", None)
+                ta = _json.dumps(ja, ensure_ascii=False, sort_keys=True, indent=2)
+                tb = _json.dumps(jb, ensure_ascii=False, sort_keys=True, indent=2)
+            except Exception as e:
+                diffs.append("%s：JSON 解析失败（%s）" % (name, e))
+                continue
+        if ta != tb:
+            diffs.append("%s：仓里的产物**不是最新的**" % name)
+
+    if diffs:
+        print("[gen-knowledge] FAIL —— %d 处漂移：" % len(diffs))
+        for d in diffs:
+            print("  x %s" % d)
+        print("  修法：跑 `python scripts/gen-knowledge.py`（规范/标准库改了就得重生成）")
+        return 1
+    print("[gen-knowledge] OK —— 知识包与源码树一致。")
+    return 0
+
+
 def main():
     # ⚠️ **`--no-usage-examples`** —— 复现「旧包」（没有「常用用法」那一节）
     #   ⇒ 用来 A/B「知识包加用法示例值多少轮」。
@@ -640,8 +923,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-usage-examples", action="store_true",
                     help="不生成「常用用法」那一节（复现旧包）")
+    ap.add_argument("--no-verified-rules", action="store_true",
+                    help="不生成「反直觉点（编译器验证过）」那一节（复现上一版包）")
     ap.add_argument("--out-dir", default=None,
                     help="输出目录（默认 docs/generated）")
+    ap.add_argument("--check", action="store_true",
+                    help="只核对「仓里的产物是不是最新的」⇒ 不一致就 FAIL")
     args = ap.parse_args()
 
     if not SPEC_PATH.exists():
@@ -657,7 +944,17 @@ def main():
     impl, limited = collect_appendix_b(doc)
     stdlib = collect_stdlib()
     usage_examples = [] if args.no_usage_examples else collect_usage_examples()
-    out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
+    verified_rules = [] if args.no_verified_rules else collect_verified_rules()
+    # ⚠️ **`--check` 模式**：生成到**临时目录**，比对目标是**仓里的**产物。
+    #   ⚠️ **不能生成到仓里再比对** —— 那会**先把仓里的产物覆盖掉**
+    #   ⇒ 比对永远「一致」⇒ **门形同虚设**（实测踩过：造了红灯却不亮）。
+    check_tmp = None
+    if args.check:
+        import tempfile as _tf
+        check_tmp = Path(_tf.mkdtemp(prefix="gen-knowledge-check-"))
+        out_dir = Path(args.out_dir) if args.out_dir else check_tmp
+    else:
+        out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
     out_md = out_dir / OUT_MD.name
     out_json = out_dir / OUT_JSON.name
     out_error_fix = out_dir / "jhyy-error-fix.json"
@@ -666,7 +963,7 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
     md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
-                        error_lookup, usage_examples)
+                        error_lookup, usage_examples, verified_rules)
     with open(out_md, "w", encoding="utf-8", newline="") as f:
         f.write(md)
 
@@ -679,6 +976,7 @@ def main():
         "limited": limited,
         "stdlib": stdlib,
         "usage_examples": usage_examples,
+        "verified_rules": verified_rules,
         "example": example,
         "error_lookup": error_lookup,
     }
@@ -703,10 +1001,19 @@ def main():
     print("  完整示例 %s" % ("有" if example else "无"))
     print("  常见报错速查 %d 条" % len(error_lookup))
     print("  常用用法 %d 段（**每个都编译过**）" % len(usage_examples))
+    print("  反直觉点（编译器验证过）%d 条" % len(verified_rules))
     print("→ %s" % out_md)
     print("→ %s" % out_json)
     print("  报错速查表 %d 条 → %s" % (len(error_fix), out_error_fix))
     print("  （markdown %d 字符）" % len(md))
+    if args.check:
+        rc = _compare(out_dir, OUT_DIR)
+        try:
+            import shutil
+            shutil.rmtree(check_tmp, ignore_errors=True)
+        except Exception:
+            pass
+        return rc
     return 0
 
 

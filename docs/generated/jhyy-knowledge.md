@@ -341,6 +341,224 @@
 
   > 测试:`compiler/tests/examples/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)
 
+## 反直觉点（**编译器逐条验证过的**）
+
+> ⚠️ **每条都过编译器**：会咬人的 ⇒ 错版**必须编译不过**、对版**必须编译过**；无害但让人想查的 ⇒ **输出由生成器实测填进来**。
+> ⇒ **规则过时了这里就会红** ⇒ 包里不会有过时的规则。
+
+### **u32 的字面量要带 `u32` 后缀**
+
+无后缀整数字面量是 **i32** ⇒ `x + 1`（x 是 u32）⇒ **i64/i32 混算**
+⇒ 报 `type mismatch in binary`。
+⚠️ **从 C 过来的模型 100% 会踩**（C 里 `uint32_t + 1` 天经地义）。
+⚠️ 后缀**必须是 `u32`** —— 写 `1i64` 一样报错。
+
+❌ **这样写编译不过**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let x: u32 = 5;
+    let y: u32 = x + 1;
+    return 0;
+}
+```
+
+✅ **这样写才对**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let x: u32 = 5;
+    let y: u32 = x + 1u32;
+    return 0;
+}
+```
+
+### **整数 ↔ 浮点不能隐式转换**
+
+`let x: f64 = 3;` ⇒ **类型对不上** ⇒ 要写 `3 as f64`。
+⚠️ C 里 `double d = 3;` 是合法的 ⇒ 从 C 过来的模型会直接踩。
+
+❌ **这样写编译不过**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let x: f64 = 3;
+    return 0;
+}
+```
+
+✅ **这样写才对**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let x: f64 = 3 as f64;
+    return 0;
+}
+```
+
+### **`type` 定义结尾不能带 `;`**
+
+`type X = struct { ... }` / `enum` **结尾不带分号** ⇒ 带了就在表达式位置报 `;`。
+
+❌ **这样写编译不过**：
+
+```jhyy
+type P = struct { a: i32 };
+fn main_jhyy() -> i32 {
+    return 0;
+}
+```
+
+✅ **这样写才对**：
+
+```jhyy
+type P = struct { a: i32 }
+fn main_jhyy() -> i32 {
+    return 0;
+}
+```
+
+### **`import` 只写模块名本身（不带 `std::`）**
+
+`import vec;` ✓；`import std::vec;` ⇒ 解析器看到 `::` 直接报错。
+
+❌ **这样写编译不过**：
+
+```jhyy
+import std::vec;
+fn main_jhyy() -> i32 {
+    return 0;
+}
+```
+
+✅ **这样写才对**：
+
+```jhyy
+import vec;
+fn main_jhyy() -> i32 {
+    return 0;
+}
+```
+
+### **闭包不能捕获外层变量**
+
+闭包只能用**自己的参数和字面量** ⇒ 要用的外层值**当参数传进去**。
+⚠️ C++/Rust 的 lambda 都能捕获 ⇒ 从那边过来的模型会直接踩。
+
+❌ **这样写编译不过**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let n: i32 = 5;
+    let f = |x: i32| { x + n };
+    return 0;
+}
+```
+
+✅ **这样写才对**：
+
+```jhyy
+fn main_jhyy() -> i32 {
+    let f = |x: i32| { x + 5 };
+    return 0;
+}
+```
+
+### **整数字面量：目标类型说了算（不用加后缀）**
+
+有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。
+⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。
+
+⇒ 实测输出见下（**由生成器实测填入**）
+
+```jhyy
+import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+fn main_jhyy() -> i32 {
+    let x: u32 = 3000000000;
+    print_i64(x as i64);
+    return 0;
+}
+```
+
+**实测输出**：`3000000000`
+
+### **整数溢出是回绕，不是报错**
+
+i32/u32 的 `+ - *` 溢出 ⇒ **回绕**（像 C 的无符号 / Rust 的 debug 相反）。
+⚠️ 想要报错得自己检查 ⇒ 别指望编译器拦你。
+
+⇒ 实测输出见下（**由生成器实测填入**）
+
+```jhyy
+import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+fn main_jhyy() -> i32 {
+    let x: i32 = 2147483647;
+    let y: i32 = x + 1;
+    print_i64(y as i64);
+    return 0;
+}
+```
+
+**实测输出**：`-2147483648`
+
+### **`u32` → `u64` / `i64` 都是零扩展**
+
+宽化**不保符号** ⇒ `4294967295 as i64` 得 **4294967295**（不是 -1）。
+⚠️ C 里 `uint32_t` 宽化到 `int64_t` 是零扩展 ✓ 一致，但**别按「可能有符号」去猜**。
+
+⇒ 实测输出见下（**由生成器实测填入**）
+
+```jhyy
+import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+fn main_jhyy() -> i32 {
+    let x: u32 = 4294967295;
+    let y: i64 = x as i64;
+    print_i64(y);
+    return 0;
+}
+```
+
+**实测输出**：`4294967295`
+
 ## 常用用法（**下面每段都真编译过**）
 
 > ⚠ **这些是模型最常踩、而规范没写全的地方** ⇒ 照抄即可，别自己试。

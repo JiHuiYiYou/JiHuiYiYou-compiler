@@ -753,6 +753,20 @@ jobs:
           # gate: arch-claims
           python scripts/dev/check_arch_claims.py
 
+      - name: Knowledge pack gate (IDE 的知识供给不能悄悄过期)
+        # 2026-11-14 新增:知识包(`docs/generated/jhyy-knowledge.md`)是 **IDE 内嵌
+        # Claude 会话的核心知识供给** ⇒ 它一旦过期,模型就在拿旧知识。
+        # ⚠️ **CI 里原本没有这道门** ⇒ 规范/标准库改了 ⇒ 知识包不会跟着变
+        # ⇒ **悄悄过期**。
+        # 本门盯的是:仓里的产物 == 刚生成的(重新生成到临时目录再逐字比对)。
+        # ⚠️ 「反直觉点(编译器验证过)」那一节**自带第二道门** —— 生成时每条都
+        # 真编译 ⇒ 规则过时了**生成这一步就会红** ⇒ 根本产不出过时的包。
+        if: always()
+        shell: msys2 {0}
+        run: |
+          # gate: gen-knowledge
+          python scripts/gen-knowledge.py --check
+
       - name: Language composition gate (our own language bar, vs the source tree)
         # 2026-11-10 新增:GitHub 侧栏那个语言条是 Linguist 算的 —— Linguist 没有
         # `.jhyy` 的映射 ⇒ **编译器真正的实现(377 个 .jhyy 文件)一行都不出现**,

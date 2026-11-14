@@ -907,6 +907,87 @@
       "code": "import io;\n\nfn main_jhyy() -> i32 {\n    std_io_print(\"hello\\n\" as *u8);\n    return 0;\n}"
     }
   ],
+  "verified_rules": [
+    {
+      "kind": "bite",
+      "title": "**u32 的字面量要带 `u32` 后缀**",
+      "why": "无后缀整数字面量是 **i32** ⇒ `x + 1`（x 是 u32）⇒ **i64/i32 混算**\n⇒ 报 `type mismatch in binary`。\n⚠️ **从 C 过来的模型 100% 会踩**（C 里 `uint32_t + 1` 天经地义）。\n⚠️ 后缀**必须是 `u32`** —— 写 `1i64` 一样报错。",
+      "wrong": "let x: u32 = 5;\n    let y: u32 = x + 1;",
+      "expect": "type mismatch in binary",
+      "right": "let x: u32 = 5;\n    let y: u32 = x + 1u32;",
+      "wrong_code": "fn main_jhyy() -> i32 {\n    let x: u32 = 5;\n    let y: u32 = x + 1;\n    return 0;\n}\n",
+      "right_code": "fn main_jhyy() -> i32 {\n    let x: u32 = 5;\n    let y: u32 = x + 1u32;\n    return 0;\n}\n"
+    },
+    {
+      "kind": "bite",
+      "title": "**整数 ↔ 浮点不能隐式转换**",
+      "why": "`let x: f64 = 3;` ⇒ **类型对不上** ⇒ 要写 `3 as f64`。\n⚠️ C 里 `double d = 3;` 是合法的 ⇒ 从 C 过来的模型会直接踩。",
+      "wrong": "let x: f64 = 3;",
+      "expect": "type mismatch in let",
+      "right": "let x: f64 = 3 as f64;",
+      "wrong_code": "fn main_jhyy() -> i32 {\n    let x: f64 = 3;\n    return 0;\n}\n",
+      "right_code": "fn main_jhyy() -> i32 {\n    let x: f64 = 3 as f64;\n    return 0;\n}\n"
+    },
+    {
+      "kind": "bite",
+      "title": "**`type` 定义结尾不能带 `;`**",
+      "why": "`type X = struct { ... }` / `enum` **结尾不带分号** ⇒ 带了就在表达式位置报 `;`。",
+      "wrong": "type P = struct { a: i32 };",
+      "expect": "unexpected token ';'",
+      "right": "type P = struct { a: i32 }",
+      "pre": true,
+      "wrong_code": "type P = struct { a: i32 };\nfn main_jhyy() -> i32 {\n    return 0;\n}\n",
+      "right_code": "type P = struct { a: i32 }\nfn main_jhyy() -> i32 {\n    return 0;\n}\n"
+    },
+    {
+      "kind": "bite",
+      "title": "**`import` 只写模块名本身（不带 `std::`）**",
+      "why": "`import vec;` ✓；`import std::vec;` ⇒ 解析器看到 `::` 直接报错。",
+      "wrong": "import std::vec;",
+      "expect": "got ::",
+      "right": "import vec;",
+      "pre": true,
+      "wrong_code": "import std::vec;\nfn main_jhyy() -> i32 {\n    return 0;\n}\n",
+      "right_code": "import vec;\nfn main_jhyy() -> i32 {\n    return 0;\n}\n"
+    },
+    {
+      "kind": "bite",
+      "title": "**闭包不能捕获外层变量**",
+      "why": "闭包只能用**自己的参数和字面量** ⇒ 要用的外层值**当参数传进去**。\n⚠️ C++/Rust 的 lambda 都能捕获 ⇒ 从那边过来的模型会直接踩。",
+      "wrong": "let n: i32 = 5;\n    let f = |x: i32| { x + n };",
+      "expect": "closure cannot capture outer variables",
+      "right": "let f = |x: i32| { x + 5 };",
+      "wrong_code": "fn main_jhyy() -> i32 {\n    let n: i32 = 5;\n    let f = |x: i32| { x + n };\n    return 0;\n}\n",
+      "right_code": "fn main_jhyy() -> i32 {\n    let f = |x: i32| { x + 5 };\n    return 0;\n}\n"
+    },
+    {
+      "kind": "fact",
+      "title": "**整数字面量：目标类型说了算（不用加后缀）**",
+      "why": "有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。\n⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。",
+      "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: u32 = 3000000000;\n    print_i64(x as i64);\n    return 0;\n}\n",
+      "measured": "3000000000"
+    },
+    {
+      "kind": "fact",
+      "title": "**整数溢出是回绕，不是报错**",
+      "why": "i32/u32 的 `+ - *` 溢出 ⇒ **回绕**（像 C 的无符号 / Rust 的 debug 相反）。\n⚠️ 想要报错得自己检查 ⇒ 别指望编译器拦你。",
+      "code": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);\n    return 0;\n}\n",
+      "measured": "-2147483648"
+    },
+    {
+      "kind": "fact",
+      "title": "**`u32` → `u64` / `i64` 都是零扩展**",
+      "why": "宽化**不保符号** ⇒ `4294967295 as i64` 得 **4294967295**（不是 -1）。\n⚠️ C 里 `uint32_t` 宽化到 `int64_t` 是零扩展 ✓ 一致，但**别按「可能有符号」去猜**。",
+      "code": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_full": "import fmt;\nimport io;\n\nfn print_i64(v: i64) {\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, v);\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n}\nfn main_jhyy() -> i32 {\n    let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);\n    return 0;\n}\n",
+      "measured": "4294967295"
+    }
+  ],
   "example": "// 完全可编译的一个程序：入口 + 泛型 + struct + enum + match + 闭包 + defer\nimport vec;\n\ntype Shape = enum {\n    Circle(i32),     // 半径\n    Rect(i32),       // 面积（变体只带一个 payload —— 见附录 B）\n    Empty,\n}\n\ntype Point = struct {\n    x: i32,\n    y: i32,\n}\n\nfn area(s: Shape) -> i32 {\n    match s {\n        Shape::Circle(r) => 3 * r * r,\n        Shape::Rect(a) => a,\n        Shape::Empty => 0,\n    }\n}\n\nfn max<T>(a: T, b: T) -> T {\n    if a > b { return a; }\n    return b;\n}\n\nfn cleanup() -> i32 {\n    return 0;\n}\n\nfn main_jhyy() -> i32 {\n    defer cleanup();\n\n    let p = Point { x: 3, y: 4 };\n    let s = Shape::Rect(p.x * p.y);\n    let a = area(s);\n\n    let f = |n: i32| { n * 2 };\n    let d = f(a);\n\n    let m: i32 = max::<i32>(d, 100);\n\n    return m;   // 100\n}",
   "error_lookup": [
     [
