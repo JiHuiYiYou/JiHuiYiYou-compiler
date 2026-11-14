@@ -52,6 +52,23 @@
 | 产物级门数 | `artifact-checks` —— **23 道**（`check_*` 函数数） |
 | 产物级门 KNOWN-FAIL | **0** 条（当前没有预期失败的门 —— 每道门都该自己绿） |
 
+> **回归的结果有四类,不是三类** —— PASS / failed / SKIP 之外还有 **FLAKY**
+> （「首次红、隔离重跑绿」）：它**既不是通过**（结果不可信）也**不是失败**
+> （重跑确实过了）⇒ 不进 PASS、不进 failed，**但在 total 里有它**。
+> ⇒ 对拍门（`regress-facts`）的不变式是 `passed + skipped + flaky == total`。
+> ⇒ 某一轮有 FLAKY 时，`passed` **不与本节对拍**（它少的那几个就是 flaky）——
+> 对拍了只会报「本节的数错了」，**方向是反的**（现实没变，是那一轮**不可信**）。
+> 门此时报的是「间歇性失败 = 真 bug」并点名是哪些测试。
+>
+> ⚠️ **2026-11-15 事故**:这道门此前**看不见 FLAKY 桶**（`regress.py --summary-json`
+> 的摘要里没有那个字段）⇒ 一次 FLAKY 会让它报「实测自相矛盾」并把矛头指向
+> **本节** ⇒ 修法指向错方向（真问题在那个间歇性失败的测试里）。
+> 真实病因：`w097_alloc_alias.jhyy` 把三次 store 写在 64 字节分配的**外面**
+> （堆越界 ⇒ 退出时堆清理踩雷 ⇒ 间歇性 SIGSEGV，另有挂死），
+> CI 上 12 轮里撞上 1 轮。已修（缓冲区 256 字节）。
+> 顺带发现：那个测试**只断言退出码** ⇒ W-097 真复发时 stdout 变了而退出码没变
+> ⇒ **它抓不住自己要抓的回归** ⇒ 已补 `EXPECT-OUT`。
+
 ### 2.2 CI 门（完整清单）
 
 > **本表是仓内「门」的完整清单** —— [`CONTRIBUTING.md`](../../CONTRIBUTING.md) 让读者来这里找。
@@ -69,7 +86,7 @@
 | 自举闭环（构建期） | `selfhost` | jhyy.exe 能把自己编成同一个东西（迭代到不动点）；产物与提交进仓的那份逐字节对照（发布者视角） | ci.yml · build-and-test · `make` |
 | 提交产物同步 | `artifact-fresh` | 提交进仓的那份 jhyy.exe 对当前源码的**行为** == 现编产物（比 `.s`，不比 `.exe`） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_fresh_check.sh` |
 | 全量回归 | `regress` | 每个用例的退出码 / stdout 断言 | ci.yml · build-and-test · `python regress.py --all` |
-| 回归事实对拍 | `regress-facts` | § 2.1 的数 == 本轮**实测**数（缺摘要即红） | ci.yml · build-and-test · `python scripts/dev/check_regress_facts.py tmp/regress-summary.json` |
+| 回归事实对拍 | `regress-facts` | § 2.1 的数 == 本轮**实测**数（缺摘要即红）；有 FLAKY 时报「间歇性失败 = 真 bug」并点名，**不**报「数错了」 | ci.yml · build-and-test · `python scripts/dev/check_regress_facts.py tmp/regress-summary.json` |
 | 断言强度 | `assert-strength` | 每个用例都有能失败的断言（零信号即红）**＋ 指令 ⇄ 读点对照**（测试里用到的每条指令都必须在 harness 里有读点；harness 里解析了却没登记的指令 ⇒ 死指令，红） | ci.yml · build-and-test · `python scripts/dev/audit_test_assertions.py --strict` |
 | 产物级门 | `artifact-checks` | **23 道**产物级断言（expected-FAIL 模型） | ci.yml · build-and-test · `bash compiler/tests/bootstrap/artifact_checks.sh` |
 | 交叉环境准备 | `sysv-emit` | 交叉环境那几份 `.s` 一份都不能少 | ci.yml · build-and-test · 内联 shell |
@@ -262,17 +279,17 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 | 语言 | 代码行 | 占比 | 文件数 |
 |---|---|---|---|
-| JHYY | 37045 | 67.3% | 377 |
-| Python | 11399 | 20.7% | 42 |
+| JHYY | 37045 | 67.2% | 377 |
+| Python | 11436 | 20.8% | 42 |
 | Shell | 2566 | 4.7% | 20 |
-| PowerShell | 1900 | 3.5% | 20 |
+| PowerShell | 1900 | 3.4% | 20 |
 | C | 1315 | 2.4% | 13 |
 | C# | 287 | 0.5% | 1 |
 | Assembly | 225 | 0.4% | 6 |
 | Batchfile | 137 | 0.2% | 4 |
 | JavaScript | 125 | 0.2% | 1 |
 | TypeScript | 65 | 0.1% | 1 |
-| **合计** | **55064** | **100%** | **485** |
+| **合计** | **55101** | **100%** | **485** |
 
 > 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
 > ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。
