@@ -270,20 +270,50 @@ def _extract_warnings(stderr: str) -> list:
     return warnings
 
 
+# ⚠️ **正则必须盘符感知** —— `[^:]+` 跨不过 Windows 盘符的冒号
+#    （`C:\path\x.jhyy:12:8: error: ...` 整条匹配失败 ⇒ 行号列号被静默丢成空）。
+#    ⇒ 用**贪婪**的 `(.*)`（跟 IDE 侧 `src/main/compiler/diagnostics.ts` 对齐）。
+_DIAG_RE = re.compile(r"^(.*):(\d+):(\d+):\s*(error|warning)\s*:\s*(.*)$", re.I)
+# 没有 `error:` / `warning:` 前缀的形态（自举日志里常见）
+_DIAG_PLAIN_RE = re.compile(r"^(.*):(\d+):(\d+):\s*(.*)$")
+
+
 def _parse_diagnostics(stderr: str) -> list:
-    """解析编译器错误信息，提取 file:line:col + 消息。"""
+    """解析编译器错误信息，提取 file:line:col + severity + 消息。"""
     diagnostics = []
     for line in stderr.splitlines():
-        m = re.match(r"^([^:]+):(\d+):(\d+):\s*(.+)$", line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+        m = _DIAG_RE.match(stripped)
         if m:
             diagnostics.append({
-                "file": m.group(1),
+                "file": m.group(1).strip(),
                 "line": int(m.group(2)),
                 "col": int(m.group(3)),
+                "severity": m.group(4).lower(),
+                "message": m.group(5).strip(),
+            })
+            continue
+        m = _DIAG_PLAIN_RE.match(stripped)
+        if m:
+            diagnostics.append({
+                "file": m.group(1).strip(),
+                "line": int(m.group(2)),
+                "col": int(m.group(3)),
+                "severity": "error",
                 "message": m.group(4).strip(),
             })
-        elif line.strip():
-            diagnostics.append({"file": "", "line": 0, "col": 0, "message": line.strip()})
+            continue
+        # ⚠️ **兜底**：不是诊断的行（编译器的进度噪声：`[1] imports start` …）
+        #   —— **保留**，但标明它**不是**诊断（否则模型会以为每行都是一条错误）。
+        diagnostics.append({
+            "file": "",
+            "line": 0,
+            "col": 0,
+            "severity": "note",
+            "message": stripped,
+        })
     return diagnostics
 
 

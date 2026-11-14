@@ -102,6 +102,28 @@ def test_lookup_accepts_a_full_diagnostic_line():
     assert hit.get("fix"), "整行诊断查到了但没有 fix"
 
 
+def test_parse_diagnostics_handles_windows_drive_letters():
+    r"""⚠️ **Windows 绝对路径必须能解析出行号列号**。
+
+    ⚠️ **实测踩过（2026-11-13）**：老版的 `^([^:]+):(\d+):(\d+):\s*(.+)$`
+       用 `[^:]+` 匹配文件名 ⇒ **`[^:]` 跨不过盘符的冒号**
+       ⇒ `C:\path\x.jhyy:12:8: error: ...` 整条匹配失败
+       ⇒ file/line/col 被静默丢成空 ⇒ **模型只拿到一坨原始文本**。
+       ⇒ IDE 侧早就是对的（`src/main/compiler/diagnostics.ts`），MCP 这份一直没修。
+    """
+    import jhyy_runner
+
+    line = "C:\\Users\\me\\main.jhyy:12:8: error: undefined variable"
+    diags = jhyy_runner._parse_diagnostics(line)
+    assert len(diags) == 1, diags
+    d = diags[0]
+    assert d["line"] == 12, d
+    assert d["col"] == 8, d
+    assert d["severity"] == "error", d
+    assert d["message"] == "undefined variable", d
+    assert d["file"].endswith("main.jhyy"), d
+
+
 def test_check_syntax_enriches_diagnostics():
     """`jhyy_check` 的诊断**要顺带带上修法**。
 

@@ -480,6 +480,29 @@ C（`emit_c`）和 JHYY（`emit_jhyy`）**两个实现**，再对两者施加**�
   ⇒ 补到 14 个
 - 每次调用重读 1 MB markdown ⇒ 加 **mtime 缓存**（实测 0.107s → 0.0006s）
 
+### 8.4b MCP 的诊断解析 —— **Windows 盘符会让行号列号全丢**
+
+`jhyy_check` 回来的诊断曾经长这样：
+
+```
+{"file":"","line":0,"col":0,"message":"C:\\Users\\...\\main.jhyy:5:11: error: undefined variable"}
+```
+
+⇒ **行号列号全没了** ⇒ 模型只拿到一坨原始文本 ⇒ 「定位到具体哪一行」这件事
+在 MCP 这条路上**从来没发生过**。
+
+**根因** —— 正则 `^([^:]+):(\d+):(\d+):\s*(.+)$` 用 `[^:]+` 匹配文件名
+⇒ **`[^:]` 跨不过 Windows 盘符的冒号** ⇒ 整条匹配失败 ⇒ 落进兜底分支。
+
+⚠️ **IDE 侧早就是对的**（`src/main/compiler/diagnostics.ts` 用**贪婪**的 `(.*)`）
+⇒ 而且那份文件的注释**点名道姓**说了 MCP 这份是错的 ⇒ **一直没修**。
+
+⇒ 现在跟 IDE 对齐：贪婪 `(.*)` + 剥掉 `error:` / `warning:` 前缀 + 补 `severity`
+（噪声行标成 `severity: "note"` ⇒ **不让模型以为每行都是一条错误**）。
+
+回归门：`mcp-jhyy/tests/test_error_lookup.py` 里那条
+`test_parse_diagnostics_handles_windows_drive_letters`。
+
 ### 8.5 检索改造（`jhyy_lang_ref`）
 
 | 项 | 值 |
