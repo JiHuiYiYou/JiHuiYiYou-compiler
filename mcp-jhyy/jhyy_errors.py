@@ -347,15 +347,25 @@ CURATED_FIXES = {
         "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
                "（不是 `main`；`main` 只有 `#[no_std]` 才用）。"
                "⚠️ 这条错误**在链接期才报**，语法检查看不出来。",
-        "spec_ref": "§ 3.1",
+        "spec_ref": "§ 1.1",
+    },
+    # 2026-11-14（W-226 修好之后）：编译器自己会点名缺哪个入口符号 ⇒
+    #   这条**新的**错误原文比「ld returned」有用得多 ⇒ 单独校订一条。
+    "link failed - no entry symbol main_jhyy in the generated assembly": {
+        "meaning": "链接失败：生成的汇编里**没有入口符号 `main_jhyy`**。",
+        "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
+               "（不是 `main`；`main` 只有 `#[no_std]` 才用）。"
+               "⚠️ 这条错误**在链接期才报**，语法检查看不出来。",
+        "spec_ref": "§ 1.1",
     },
     "collect2.exe: error: ld returned": {
         "meaning": "链接失败（`ld` 报错）。",
         "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
                "（不是 `main`）—— 先检查这个。"
-               "⚠️ 编译器**会把 gcc 的真实链接原因吞掉**（语言仓 W-226）"
-               "⇒ 只看到「ld returned N exit status」是**正常的**。",
-        "spec_ref": "§ 3.1",
+               "⚠️ 这一行**只有 `ld` 的汇总状态**（`ld` 的真实原因被 collect2 吞掉）"
+               "⇒ 若是入口符号缺失，编译器会**另外**给一行 "
+               "`no entry symbol main_jhyy` ⇒ **以那行为准**。",
+        "spec_ref": "§ 1.1",
     },
     "unknown import": {
         "meaning": "import 的模块不存在。",
