@@ -547,6 +547,28 @@ C（`emit_c`）和 JHYY（`emit_jhyy`）**两个实现**，再对两者施加**�
 「windres 失败 ⇒ 链接必挂」的假错误** ⇒ 现在会话带上了 `mergeShellEnv(...)`
 （终端那条路早就走了，见 `src/main/ptyNode.ts`）。
 
+⚠️⚠️ **2026-11-14 CI 抓到的第二个真 bug：hook 在 CI 上**一次编译都没跑过****
+
+CI 红了：hook 回来的 `additionalContext` 是**空串**。
+
+**根因** —— hook 硬依赖 `CLAUDE_CODE_GIT_BASH_PATH`（或 `C:\msys64\usr\bin\bash.exe`）：
+- CI 上 `CLAUDE_CODE_GIT_BASH_PATH` **不存在**（那是 Claude Code 自己设的）
+- CI 上 `msys2/setup-msys2` 把 MSYS2 装在 **`$RUNNER_TEMP\msys64`** ⇒ 也不是 `C:\msys64`
+
+⇒ **bash 找不到** ⇒ 编译压根没跑 ⇒ 没有任何诊断。
+
+⚠️⚠️ **老版为什么「绿」** —— 老版用「**有没有结构化诊断**」判断成功
+⇒ 没编译 ⇒ 没诊断 ⇒ 走「✓ 编译通过了」分支 ⇒ **测试看着是绿的，其实什么都没验**
+⇒ ⇒ 这正是改成**退出码**判据之后 CI 才红的原因 —— **门变诚实了**。
+
+⇒ **修法**：hook **自己找 bash**（`CLAUDE_CODE_GIT_BASH_PATH` → **PATH 里扫**
+→ 常见位置）⇒ 找不到就**直接 spawn 编译器**，但**自己把 env 修好**
+（照抄 `src/main/compiler/env.ts` 的配方：MSYS 风格 PATH 转 Windows 风格
++ 追加 ucrt64/usr 的 bin + 补 TMP/TEMP/SystemRoot）⇒ **不再依赖 bash**。
+
+⚠️ **两条路都要被测到** ⇒ 加 `JHY_HOOK_FORCE_DIRECT=1` ⇒ 单测**两条都跑**
+（**CI 走的是「直接 spawn」那条** ⇒ 只测 bash 那条 ⇒ CI 那条路上出问题没人抓）。
+
 ⚠️ **一个设计改动**：hook 在**编译成功时也注入一句**「✓ 现在编译通过了」——
 ① 「注入进了上下文」这件事**每次**都可观测（否则模型一次就改对时注入路径根本测不到）；
 ② **省一轮**（模型改完就知道过了 ⇒ 不用自己再编译一次确认）。
