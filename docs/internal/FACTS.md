@@ -567,10 +567,24 @@ CI 红了：hook 回来的 `additionalContext` 是**空串**。
 - **有 bash 但 `-lc` 的 PATH 不对** 的环境（CI 上 setup-msys2 的 bash 就是）
   ⇒ 编译跑了但**找不到 gcc**
 
-⇒ ⇒ **改成：直接 spawn 是默认**（env 照抄 `src/main/compiler/env.ts`：
-MSYS 风格 PATH 转 Windows 风格 + **ucrt64 的 bin 排最前** + 补 TMP/TEMP/SystemRoot
-+ **只追加不替换**继承来的 PATH）⇒ bash 只在「直接 spawn 看起来坏了」
-（退出码非 0 **且** stderr 什么都没有）时兜底重试一次。
+⇒ ⇒ **CI 连续三轮的结果**：
+
+| 轮次 | 结果 |
+|---|---|
+| ① 只有 bash | 红 —— 没有 bash ⇒ **一次编译都没跑过** |
+| ② bash 优先 + 直接 spawn 兜底 | 红 —— 红的是 bash 那条 ⇒ **直接 spawn 那条过了** |
+| ③ 直接 spawn 默认 + bash 兜底 | 红 —— 还是 bash 那条 ⇒ **直接 spawn 那条全过** |
+
+⇒ ⇒ **bash 兜底没有任何可证明的用处** ⇒ **砍掉** ⇒ hook **只有一条路**
+⇒ 行为可预测、门好写。
+
+⇒ **最终形态**：**直接 spawn** + env 照抄 `src/main/compiler/env.ts`
+（MSYS 风格 PATH 转 Windows 风格 + **ucrt64 的 bin 排最前**
++ 补 TMP/TEMP/SystemRoot + **只追加不替换**继承来的 PATH）。
+
+⚠️ **顺带的好处**：直接 spawn + 修好的 env ⇒ gcc 的**真实**链接错误
+（`undefined reference to 'main_jhyy'`）**透出来了** ⇒ 不再只有
+「ld returned N exit status」⇒ 模型不用猜入口名。
 
 ⚠️ **两条路都要被测到** ⇒ 加 `JHY_HOOK_FORCE_DIRECT=1` ⇒ 单测**两条都跑**
 （**CI 走的是「直接 spawn」那条** ⇒ 只测 bash 那条 ⇒ CI 那条路上出问题没人抓）。
