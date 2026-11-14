@@ -12,9 +12,27 @@
 //
 // EXPECT 语义 = 期望**退出码**(regress 走 expected & 0xFF == actual & 0xFF,
 // 见 mcp-jhyy/jhyy_regress.py run_test)。本 test return 0 → EXPECT:0。
-// stdout 正确性由下面 printf 的 "100 200 300" 人工核对,regress 不校验 stdout。
+//
+// ⚠️ 2026-11-15:EXPECT-OUT 是**后补的**,而且是补一个**假守卫** ——
+// 在此之前本测试只断言退出码,而 W-097 复发时 stdout 会变成 "200 200 300"
+// 但 main 照样 return 0 ⇒ 退出码仍是 0 ⇒ **这个测试抓不住它要抓的回归**
+// (守卫是空的)。现在 stdout 也断言,回归复发 ⇒ 本测试变红。
+//
+// ⚠️ 2026-11-15:缓冲区必须 **256** 字节,不能是 64 ——
+// `touch` 里写的是 `buf + w*8`(w = 8/16/24)⇒ 字节偏移 64/128/192。
+// 原来的 `malloc(64)` 让**三次 store 全部落在分配之外**(第一次正好在
+// buf+64 = 块尾,踩坏下一个 chunk 的头)⇒ 堆元数据被写坏 ⇒ 程序在**退出
+// 时**堆清理里踩雷。两种症状:①AV 崩溃(SIGSEGV);②**挂死**(在分配器的
+// 空闲链表里转圈,杀不掉)。
+// 症状组合很有迷惑性:stdout 照样打出 "100 200 300"(printf 的缓冲在退出
+// 刷新时已经刷出去了),但退出码是 SIGSEGV ⇒ 看起来像「输出对了却崩了」。
+// 实测频率(2026-11-15):本地 400 次跑 ⇒ 1 次 AV + 7 次挂死(约 2%);
+// CI 上 12 轮里撞上 1 轮 ⇒ 那一轮 CI 的 regress-facts 门红了
+// (见 docs/internal/FACTS.md § 2.1)。
+// ⇒ 缓冲区按「能装下元素下标 8/16/24 的 8 字节单元」算 = 25*8 = 200 → 取 256。
 //
 //EXPECT:0
+//EXPECT-OUT:"100 200 300"
 extern fn printf(fmt: *u8, a: i32, b: i32, c: i32) -> i32;
 extern fn malloc(size: i64) -> *u8;
 
@@ -26,7 +44,7 @@ fn touch(buf: *u8, w: i64, val: *u8) -> i32 {
 }
 
 fn main_jhyy() -> i32 {
-    let buf = malloc(64 as i64);
+    let buf = malloc(256 as i64);
     let mut a0: i64 = 100 as i64;
     let _t0 = touch(buf, 8 as i64, (1 as *u8));
     let mut a1: i64 = 200 as i64;
