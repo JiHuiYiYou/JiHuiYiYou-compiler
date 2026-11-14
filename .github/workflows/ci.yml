@@ -283,6 +283,10 @@ jobs:
       #
       # ⚠️ 摘要缺失 ⇒ 这道门**红**(不是跳过):「拿不到实测数」正是它要抓的
       # 那种状态(数字无从验证)。
+      # 2026-11-15:门现在**看得见 FLAKY 桶**(「首次红、隔离重跑绿」)——
+      #   摘要里带 `flaky` 字段,不变式是 passed+skipped+flaky==total。
+      #   有 FLAKY 时它报「间歇性失败 = 真 bug」并点名,**不**报「FACTS.md 的
+      #   数错了」——那一轮的数没错,是那一轮不可信 ⇒ 修法指向错方向会白忙。
       - name: Regression facts gate (FACTS.md == 实测计数)
         if: always()
         shell: msys2 {0}

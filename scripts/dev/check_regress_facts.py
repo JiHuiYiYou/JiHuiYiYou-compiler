@@ -25,6 +25,14 @@
 第 3/4 项之所以也算「真相」:它们是**测试文件的静态属性**(扫了多少个 `.jhyy`、
 多少个可跑、多少个有真断言)⇒ 与机器/环境无关 ⇒ 谁都能复现同一个数。
 
+**FLAKY 桶(2026-11-15 加)**:harness 有**第三类**结果 —— 「首次红、隔离重跑绿」。
+它**既不是通过**(结果不可信)也**不是失败**(重跑确实过了)⇒ 不进 `passed`、
+不进 `failed`,但在 `total` 里有它。
+⇒ 不变式是 `passed + skipped + flaky == total`,**不是** `passed + skipped == total`。
+⇒ 这一轮有 FLAKY 时,`passed` **不与 FACTS 对拍**(它少的那几个就是 flaky)——
+   对拍了只会报「FACTS.md 的数错了」,方向是反的:现实没变,是那轮**不可信**。
+   这道门此时报的是「间歇性失败 = 真 bug」并点名是哪些测试。
+
 ⚠️ **第 1/2 项的环境无关性**:`run_all` 统计的 skip 只有两类 ——
 文件里的 `// SKIP:` 指令 与 「library」(没有 `main_jhyy` 的辅助文件)⇒ 静态。
 `--cross=auto` 的 wsl/docker 探测只影响**额外**的跨环境复跑(那 6 个 sysv 用例),
@@ -84,6 +92,8 @@ def audit_json() -> dict | None:
 
 def main() -> int:
     print("[check_regress_facts] 对拍 FACTS.md 的回归数与实测……\n")
+    # 这一轮有没有 FLAKY —— 决定收尾时给哪条修法(见文件末尾的 footer)。
+    flaky_seen = False
 
     if len(sys.argv) != 2:
         print(f"用法: python {Path(sys.argv[0]).name} <regress-summary.json>",
@@ -126,22 +136,49 @@ def main() -> int:
         gated = summary.get("gated") or {}
         if not gated:
             fail(f"{summary_path} 里没有 `gated` 段 —— 摘要格式不对?")
+        elif "flaky" not in gated:
+            # 2026-11-15:摘要必须带 FLAKY 桶。缺它 ⇒ 这个摘要不是本仓
+            # regress.py 产的(或是很久以前的旧摘要)⇒ 它的 passed 计数
+            # 可能有「不可信」的成分却看不出来 ⇒ 不拿它对拍。
+            fail(f"{summary_path} 的 `gated` 段里没有 `flaky` 字段 —— "
+                 "这个摘要不是本仓 regress.py 产的?重跑一次 `regress.py --all "
+                 "--summary-json <path>`。")
         else:
-            compare("回归 passed", gated.get("passed"), declared.get("pass"))
-            compare("回归 skipped", gated.get("skipped"), declared.get("skip"))
+            flaky = gated.get("flaky") or 0
+            flaky_tests = gated.get("flaky_tests") or []
+            passed = gated.get("passed") or 0
+            skipped = gated.get("skipped") or 0
+            total = gated.get("total") or 0
+            # total / skipped / failed 不受 FLAKY 影响 ⇒ 照常对拍。
             compare("回归 total", gated.get("total"), declared.get("total"))
+            compare("回归 skipped", gated.get("skipped"), declared.get("skip"))
             # failed 恒为 0(FACTS 的基线行写死「0 failed」)
             compare("回归 failed", gated.get("failed"), 0)
-            if gated.get("passed", 0) + gated.get("skipped", 0) != gated.get("total", -1):
-                fail(f"实测自相矛盾: passed {gated.get('passed')} + skipped "
-                     f"{gated.get('skipped')} != total {gated.get('total')}")
+            if flaky:
+                # FLAKY = 「首次红、隔离重跑绿」—— harness 里的**第三类**结果:
+                # 不是通过(结果不可信),也不是失败(重跑确实过了)。
+                # ⇒ 这一轮里 passed 少的那几个就是它们 ⇒ **passed 不能跟
+                #   FACTS 对拍**:对拍了只会报「FACTS.md 的数错了」——
+                #   方向是反的(现实没变,是那一轮的回归结果**不可信**)。
+                # ⇒ 报「间歇性失败 = 真 bug」,并点名是哪些测试。
+                names = ", ".join(flaky_tests) or "(名字没带过来)"
+                flaky_seen = True
+                fail(f"回归里有 {flaky} 个 FLAKY(首次失败、隔离重跑绿 —— "
+                     f"间歇性问题): {names}。"
+                     "这不是 FACTS.md 的数错了,是那一轮的回归结果不可信;"
+                     "**别改 FACTS.md** —— 修那个测试(或它的根因)再跑。")
+            else:
+                compare("回归 passed", gated.get("passed"), declared.get("pass"))
+            if passed + skipped + flaky != total:
+                fail(f"实测自相矛盾: passed {passed} + skipped {skipped} + "
+                     f"flaky {flaky} != total {total}")
             mode = summary.get("mode")
             if mode != "all":
                 fail(f"摘要的 mode={mode!r} —— 对拍基线必须用 `--all` 跑(单 binary "
                      "模式的计数口径与基线不同)")
-            print(f"  实测(regress): passed={gated.get('passed')} "
-                  f"skipped={gated.get('skipped')} total={gated.get('total')} "
-                  f"failed={gated.get('failed')} (mode={mode}, "
+            print(f"  实测(regress): passed={passed} "
+                  f"skipped={skipped} total={total} "
+                  f"failed={gated.get('failed')} flaky={flaky} (mode={mode}, "
                   f"cross={summary.get('cross_mode')})")
 
     # ── 3. 断言审计的静态计数(与机器无关)──────────────────────────────
@@ -161,8 +198,14 @@ def main() -> int:
         print(f"\n[check_regress_facts] FAIL —— {len(problems)} 处与现实对不上:")
         for p in problems:
             print("  x", p)
-        print("\n  修法:数字只写在 docs/internal/FACTS.md;真实值变了就改 FACTS.md")
-        print("       (别改门 —— 门红了说明现实变了,不是门错了)。")
+        if flaky_seen:
+            # 有 FLAKY 时,「改 FACTS.md」是**错的方向**:现实没变,
+            # 是那一轮的回归结果不可信 ⇒ 该修的是那个间歇性失败的测试。
+            print("\n  修法:这是**间歇性失败**(真 bug)—— 修那个测试(或它的根因)再跑。")
+            print("       **别改 FACTS.md**(这一轮的数字没错,是那一轮不可信)。")
+        else:
+            print("\n  修法:数字只写在 docs/internal/FACTS.md;真实值变了就改 FACTS.md")
+            print("       (别改门 —— 门红了说明现实变了,不是门错了)。")
         return 1
     print("\n[check_regress_facts] OK —— FACTS.md 的数与实测一致。")
     return 0

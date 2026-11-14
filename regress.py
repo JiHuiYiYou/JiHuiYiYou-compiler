@@ -849,6 +849,12 @@ def main():
                 "failed": result["failed"],
                 "skipped": result["skipped"],
                 "total": result["total"],
+                # 2026-11-15:FLAKY 桶进摘要 —— 它是 harness 里**第三类**
+                # 结果(不是通过、也不是失败),但 `total` 里有它。
+                # 以前摘要不带它 ⇒ 对拍门看不到 ⇒ 只看到「passed 少了一个」
+                # ⇒ 只能报「实测自相矛盾」并让人去改 FACTS.md(错的方向)。
+                "flaky": len(result.get("flaky_tests") or []),
+                "flaky_tests": [ft["file"] for ft in (result.get("flaky_tests") or [])],
                 "ok": bool(result["ok"]),
             })
             if is_informational:
@@ -896,6 +902,9 @@ def main():
                     "failed": sum(r["failed"] for r in gated_rows),
                     "skipped": sum(r["skipped"] for r in gated_rows),
                     "total": sum(r["total"] for r in gated_rows),
+                    # FLAKY 桶:见上面 matrix_rows 里的同名字段。
+                    "flaky": sum(r["flaky"] for r in gated_rows),
+                    "flaky_tests": [name for r in gated_rows for name in r["flaky_tests"]],
                 },
                 "sysv_cross": {
                     "mode": cross_mode,
@@ -945,6 +954,8 @@ def main():
                     "failed": result["failed"],
                     "skipped": result["skipped"],
                     "total": result["total"],
+                    "flaky": len(result.get("flaky_tests") or []),
+                    "flaky_tests": [ft["file"] for ft in (result.get("flaky_tests") or [])],
                     "ok": bool(result["ok"]),
                 }],
                 "gated": {
@@ -952,6 +963,8 @@ def main():
                     "failed": result["failed"],
                     "skipped": result["skipped"],
                     "total": result["total"],
+                    "flaky": len(result.get("flaky_tests") or []),
+                    "flaky_tests": [ft["file"] for ft in (result.get("flaky_tests") or [])],
                 },
                 "sysv_cross": {
                     "mode": cross_mode,
