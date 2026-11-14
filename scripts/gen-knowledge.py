@@ -231,6 +231,105 @@ def collect_appendix_b(doc):
     return impl, limited
 
 
+# ── 常用用法（**每个都真编译过**）────────────────────────────────────
+#
+# ⚠ **为什么要有它** —— 「翻译」那道新题实测：模型**34 轮**才摸清
+#   「怎么打印一个数」⇒ 而这些细节**规范里没有一处写全**：
+#
+#   | 细节 | 说明 |
+#   |---|---|
+#   | **没有内建 print** | 得 `import fmt; import io;` |
+#   | `fmt_i64(buf, v)` | 写十进制、**返回字节数**、**不写换行也不写 `\0`** |
+#   | `std_io_print(s)` | 写一个 **cstr** ⇒ **自己保证结尾有 `\0`** |
+#   | **buffer ≥ 32 字节** | i64 最多 20 位 + sign + `\0` |
+#   | **数组字面量不能写 `[0u8; 32]`** | 只能逐个列 |
+#   | **`n + 1` 的 `1` 默认是 i32** | `i64 + i32` ⇒ **type mismatch** ⇒ 要写 `1i64` |
+#
+# ⇒ ⇒ **模型只能一轮一轮试出来** ⇒ 34 轮。
+#
+# ⚠ **每个配方都真编译一遍** —— 编译不过 ⇒ **生成器报错**
+#   ⇒ **知识包里不会出现编不过的代码** ⇒ 不会漂。
+
+USAGE_EXAMPLES = [
+    {
+        "title": "打印一个 i64（十进制）并换行",
+        "note": (
+            "JHYY **没有内建 print** —— 输出要走 stdlib：\n"
+            "`fmt_i64` 把十进制写进 buffer（**返回字节数**，**不写换行也不写 `\\0`**）；\n"
+            "`std_io_print` 写一个 **cstr** ⇒ **自己保证结尾有 `\\0`**。\n"
+            "⚠ buffer **≥ 32 字节**（i64 最多 20 位 + sign + `\\0`）；\n"
+            "⚠ 数组字面量**不能**写 `[0u8; 32]` ⇒ 只能逐个列；\n"
+            "⚠ `n + 1` 的 `1` 默认是 **i32** ⇒ `i64 + i32` 报 type mismatch ⇒ 要写 `1i64`。"
+        ),
+        "code": """import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+
+fn main_jhyy() -> i32 {
+    print_i64(42);
+    return 0;
+}""",
+    },
+    {
+        "title": "打印一个字符串",
+        "note": (
+            "字符串字面量要 **cast 成 `*u8`**（`\"...\" as *u8`）；\n"
+            "`std_io_print` 写的是 **cstr** ⇒ 字面量自带结尾 `\\0` ⇒ 直接写即可。"
+        ),
+        "code": """import io;
+
+fn main_jhyy() -> i32 {
+    std_io_print("hello\\n" as *u8);
+    return 0;
+}""",
+    },
+]
+
+
+def collect_usage_examples():
+    """常用用法 —— **每个都真编译一遍**（编译不过 ⇒ 生成器报错）。
+
+    ⚠ **为什么要有这道门**：知识包里的代码是**模型会照抄**的
+    ⇒ 一段编不过的示例比没有示例更糟（模型会照抄一个编不过的写法）。
+    ⇒ ⇒ **编译不过就不许进包**。
+    """
+    exe = JHYY_ROOT / "compiler" / "build" / "bin" / "jhyy.exe"
+    if not exe.exists():
+        print("! 编译器不在（%s）⇒ 跳过「用法示例」的编译把关" % exe)
+        return USAGE_EXAMPLES
+    import subprocess
+    import tempfile
+    out = []
+    for ex in USAGE_EXAMPLES:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "usage_example.jhyy"
+            src.write_text(ex["code"] + "\n", encoding="utf-8", newline="")
+            r = subprocess.run(
+                [str(exe), "compile", str(src), "-o", str(Path(d) / "out")],
+                capture_output=True, text=True, errors="replace", timeout=120,
+            )
+        if r.returncode != 0:
+            err = (r.stderr or "").strip().splitlines()
+            msg = "\n".join(err[-6:]) if err else "(无输出)"
+            raise SystemExit(
+                "✗ 用法示例「%s」**编译不过** ⇒ 不许进知识包：\n%s"
+                % (ex["title"], msg)
+            )
+        out.append(ex)
+    return out
+
+
 def collect_stdlib():
     """标准库公开 API —— 从**源码的 `// API:` 块**抽。
 
@@ -247,6 +346,7 @@ def collect_stdlib():
         text = path.read_text(encoding="utf-8", errors="ignore")
         lines = text.splitlines()
         api_lines = []
+        notes = []
         in_api = False
         for line in lines:
             if re.match(r"^//\s*API\s*:", line):
@@ -269,8 +369,14 @@ def collect_stdlib():
                             "ret": (m.group(3) or "").strip(),
                         }
                     )
+                else:
+                    # ⚠ **API 块里的散文也留** —— 那是**用法规则**
+                    #   （例：fmt 的「buffer 必须 ≥ 32 字节」、io 的
+                    #   「std_io_print 写的是 cstr」）⇒ 模型最需要的正是这些。
+                    notes.append(body)
         if api_lines:
-            modules.append({"module": path.stem, "functions": api_lines})
+            modules.append({"module": path.stem, "functions": api_lines,
+                            "notes": notes})
     return modules
 
 
@@ -384,7 +490,8 @@ def collect_error_lookup(doc):
 
 # ── 渲染 ────────────────────────────────────────────────────────
 
-def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_lookup):
+def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
+                    error_lookup, usage_examples=None):
     L = []
     A = L.append
 
@@ -464,7 +571,25 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_loo
         for f in m["functions"]:
             ret = (" -> %s" % f["ret"]) if f.get("ret") else ""
             A("- `%s(%s)`%s" % (f["name"], f["args"], ret))
+        for note in m.get("notes") or []:
+            A("")
+            A("  > %s" % note)
         A("")
+
+    if usage_examples:
+        A("## 常用用法（**下面每段都真编译过**）")
+        A("")
+        A("> ⚠ **这些是模型最常踩、而规范没写全的地方** ⇒ 照抄即可，别自己试。")
+        A("")
+        for ex in usage_examples:
+            A("### %s" % ex["title"])
+            A("")
+            A(ex["note"])
+            A("")
+            A("```jhyy")
+            A(ex["code"])
+            A("```")
+            A("")
 
     if example:
         A("## 一段完整的 JHYY 程序（规范附录 D）")
@@ -508,6 +633,17 @@ def collect_error_fix():
 
 
 def main():
+    # ⚠️ **`--no-usage-examples`** —— 复现「旧包」（没有「常用用法」那一节）
+    #   ⇒ 用来 A/B「知识包加用法示例值多少轮」。
+    # ⚠️ **`--out-dir`** —— 两份包共存（默认写 `docs/generated/`）。
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-usage-examples", action="store_true",
+                    help="不生成「常用用法」那一节（复现旧包）")
+    ap.add_argument("--out-dir", default=None,
+                    help="输出目录（默认 docs/generated）")
+    args = ap.parse_args()
+
     if not SPEC_PATH.exists():
         print("✗ 找不到规范：%s" % SPEC_PATH, file=sys.stderr)
         return 1
@@ -520,12 +656,18 @@ def main():
     pitfalls = collect_pitfalls(doc)
     impl, limited = collect_appendix_b(doc)
     stdlib = collect_stdlib()
+    usage_examples = [] if args.no_usage_examples else collect_usage_examples()
+    out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR
+    out_md = out_dir / OUT_MD.name
+    out_json = out_dir / OUT_JSON.name
+    out_error_fix = out_dir / "jhyy-error-fix.json"
     example = collect_example(doc)
     error_lookup = collect_error_lookup(doc)
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example, error_lookup)
-    with open(OUT_MD, "w", encoding="utf-8", newline="") as f:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
+                        error_lookup, usage_examples)
+    with open(out_md, "w", encoding="utf-8", newline="") as f:
         f.write(md)
 
     payload = {
@@ -536,10 +678,11 @@ def main():
         "unimplemented": impl,
         "limited": limited,
         "stdlib": stdlib,
+        "usage_examples": usage_examples,
         "example": example,
         "error_lookup": error_lookup,
     }
-    with open(OUT_JSON, "w", encoding="utf-8", newline="") as f:
+    with open(out_json, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
     error_fix = collect_error_fix()
@@ -547,7 +690,7 @@ def main():
         "version": doc.get("version", ""),
         "entries": error_fix,
     }
-    with open(OUT_ERROR_FIX, "w", encoding="utf-8", newline="") as f:
+    with open(out_error_fix, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(fix_payload, ensure_ascii=False, indent=2) + "\n")
 
     print("✓ %s（版本 %s）" % (SPEC_PATH.name, doc.get("version")))
@@ -559,9 +702,10 @@ def main():
           % (len(stdlib), sum(len(m["functions"]) for m in stdlib)))
     print("  完整示例 %s" % ("有" if example else "无"))
     print("  常见报错速查 %d 条" % len(error_lookup))
-    print("→ %s" % OUT_MD)
-    print("→ %s" % OUT_JSON)
-    print("  报错速查表 %d 条 → %s" % (len(error_fix), OUT_ERROR_FIX))
+    print("  常用用法 %d 段（**每个都编译过**）" % len(usage_examples))
+    print("→ %s" % out_md)
+    print("→ %s" % out_json)
+    print("  报错速查表 %d 条 → %s" % (len(error_fix), out_error_fix))
     print("  （markdown %d 字符）" % len(md))
     return 0
 

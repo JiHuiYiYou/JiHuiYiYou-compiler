@@ -528,6 +528,11 @@
       "spec_ref": "附录 B"
     },
     {
+      "text": "link failed - no entry symbol main_jhyy in the generated assembly",
+      "kind": "parse",
+      "origin": "main.jhyy"
+    },
+    {
       "text": "link_section name contains non-ASCII byte",
       "kind": "sema",
       "example_file": "spec_err_link_section_nonascii.jhyy",

@@ -184,12 +184,20 @@
 - `arena_reset(a)` -> 1 (重置 cur 到 start, 不释放 block)
 - `arena_free(a)` -> 1 (释放所有 block)
 
+  > std::Arena (struct)
+
+  > 注:Arena struct 不导出 blocks (linked list head);仅暴露 start/cur/end/def_size
+
+  > 4 字段给 user。blocks 走 `*u8` 占位 (跟 src0/arena.jhyy ArenaBlock 同款)。
+
 ### `fmt`
 
 - `fmt_i32(out_buf, val)` -> 写入 i32 十进制到 out_buf (null-terminated);返回写入字节数 (不含 \0)
 - `fmt_i64(out_buf, val)` -> 写入 i64 十进制;返回字节数
 - `fmt_str(out_buf, s)` -> 复制 cstr 到 out_buf;返回字节数
 - `fmt_hex_u32(out_buf, val, upper)` -> 写入 u32 十六进制;返回字节数
+
+  > 注:buffer 必须 ≥ 32 字节(i32/i64 最多 11/20 位 + sign + \0;hex u32 10 位 + \0)。
 
 ### `io`
 
@@ -200,12 +208,36 @@
 - `std_io_print(s)` -> stdout 写 cstr(真 impl,W-080 v3.2.3.1)
 - `std_io_print_err(s)` -> stderr 写 cstr(真 impl,W-080 v3.2.3.1)
 
+  > 注:
+
+  > - std_io_print / std_io_print_err 真 impl (W-080 v3.2.3.1 ship):走
+
+  > C-side jh_fputs_stdout / jh_fputs_stderr 现成桥 (jhyy_helpers.c L32/36,
+
+  > v1.5.6 W-049 UTF-8 mode preserved)。fputs → stdout/stderr 直接写,
+
+  > 无需 jhyy 拿 FILE* 地址 (bridge 帮做)。
+
+  > - OS kernel M11 launch 后换 syscall 实现 (写 com1 / serial port):
+
+  > 改 jhyy_helpers.c 的 jh_fputs_* 实现 (printf→write syscall),std/io.jhyy
+
+  > 不变。
+
+  > 测试:`compiler/tests/examples/std_io_basic.jhyy` (6 sub-test)
+
 ### `math`
 
 - `std_math_sin(x: f64)` -> f64 (sin(x), radian)
 - `std_math_cos(x: f64)` -> f64 (cos(x), radian)
 - `std_math_sqrt(x: f64)` -> f64 (sqrt(x) ≥ 0, NaN if x < 0)
 - `std_math_pow(base: f64, exp: f64)` -> f64 (base^exp)
+
+  > OS kernel M11 launch 后:不动 std/math.jhyy,libc FFI 路径不变;kernel
+
+  > 自带 sin/cos/sqrt/pow impl 替换 MSVCRT/libc 即可。
+
+  > 测试:`compiler/tests/examples/std_math_basic.jhyy` (6 sub-test)
 
 ### `mem`
 
@@ -215,6 +247,8 @@
 - `mem_find_byte(p, n, val)` -> 找第一个 == val 的字节;返回 index / -1
 - `mem_zero(dst, n)` -> n 字节清零;返回 dst
 
+  > 测试:`compiler/tests/examples/std_mem_*.jhyy` (5+ 测试)
+
 ### `os`
 
 - `std_os_open(path, flags, mode)` -> fd (i64) / -1 on fail
@@ -223,6 +257,50 @@
 - `std_os_write(fd, buf, n)` -> 实际写字节数 / -1 on fail
 - `std_os_exit(code)` -> 终止进程(never returns)
 - `std_os_getenv(name)` -> env value cstr / 0 on miss
+
+  > ════════════════════════════════════════════════════════════════════════════
+
+  > W-103 (2026-10-20 真修):std_os_* 现在是**真 I/O**,不再是 M0 mock
+
+  > ════════════════════════════════════════════════════════════════════════════
+
+  > 之前这五个函数全是 mock:open 恒返 fd=42、read/write 恒返 n(声称做了,
+
+  > 但 buf 一个字节都没动)、exit 只是 `let _ignore = code; return;`(进程不退出)。
+
+  > M0 的理由是 W-079「QBE amd64_win mixed (l,w,w) extern args bug」——
+
+  > QBE 随 v4.0.0 完全移除,self-backend(codegen_amd64_*)不再经过 QBE,
+
+  > 那个理由早已失效。W-079 在 2026-09-28 翻 RESOLVED 时只声明了 mixed-args
+
+  > 与 zero-extend 两件事由 W-080 解决,W-080 实际只动了 std/io.jhyy。
+
+  > **stdio 那半修了,std_os 这半没人动过,而 W-079 的 ✅ 把整个表面盖住了。**
+
+  > 现在走 jhyy_helpers.c 的 5 个 libc bridge(W-103 新增):
+
+  > jh_os_open / jh_os_close / jh_os_read / jh_os_write / jh_os_exit
+
+  > 签名跟下面的 std_os_* **1:1 对齐**,jhyy 侧零宽度转换。
+
+  > ⚠️ 方向张力(必记,见 docs/internal/workarounds.md W-103):
+
+  > 这 5 个 bridge 让 jhyy 程序**又依赖 C runtime**,与 M5「删 C runtime /
+
+  > 0-C 闭环」方向相反。取舍:std_os_* 是 POSIX 语义层,OS kernel M11 launch
+
+  > 之前由 host libc 兑现最省事。真要 0-C 时,换掉的是 bridge 的**实现**
+
+  > (改成 syscall / kernel call),本文件的 std_os_* 一行都不用动。
+
+  > ⚠️ flag 语义:下面的 O_* 常量是 **POSIX 值**(O_CREAT=0x40 …),
+
+  > 与 Windows 的 _O_* (O_CREAT=0x100)不同。平台差异由 bridge 翻译,
+
+  > jhyy 侧保持 POSIX 语义。
+
+  > ════════════════════════════════════════════════════════════════════════════
 
 ### `string`
 
@@ -235,6 +313,22 @@
 - `str_find(s, needle)` -> 找 substring (needle = cstr);index / -1
 - `str_equals(x, y)` -> 1 equal / 0
 
+  > StringHeader (struct): data (*u8), len (i64)
+
+  > Arena 内部 layout (40B):
+
+  > [0..8)   blocks_head (*ArenaBlock linked list head, *u8 占位)
+
+  > [8..16)  cur (*u8 = bump pointer)
+
+  > [16..24) end (*u8)
+
+  > [24..32) reserved
+
+  > [32..40) def_size (i64)
+
+  > 测试:`compiler/tests/examples/std_string_*.jhyy` (5+ 测试)
+
 ### `vec`
 
 - `std_vec_new(elem_size)` -> Vec<i32> (24B uninit struct, data=0/len=0/cap=0)
@@ -244,6 +338,57 @@
 - `std_vec_len(v)` -> i64
 - `std_vec_cap(v)` -> i64
 - `std_vec_free(v)` -> i32 (free data buffer, reset to 0/0/0)
+
+  > 测试:`compiler/tests/std_vec_basic.jhyy` (inline 副本, 5+ 测试 case)
+
+## 常用用法（**下面每段都真编译过**）
+
+> ⚠ **这些是模型最常踩、而规范没写全的地方** ⇒ 照抄即可，别自己试。
+
+### 打印一个 i64（十进制）并换行
+
+JHYY **没有内建 print** —— 输出要走 stdlib：
+`fmt_i64` 把十进制写进 buffer（**返回字节数**，**不写换行也不写 `\0`**）；
+`std_io_print` 写一个 **cstr** ⇒ **自己保证结尾有 `\0`**。
+⚠ buffer **≥ 32 字节**（i64 最多 20 位 + sign + `\0`）；
+⚠ 数组字面量**不能**写 `[0u8; 32]` ⇒ 只能逐个列；
+⚠ `n + 1` 的 `1` 默认是 **i32** ⇒ `i64 + i32` 报 type mismatch ⇒ 要写 `1i64`。
+
+```jhyy
+import fmt;
+import io;
+
+fn print_i64(v: i64) {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, v);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+}
+
+fn main_jhyy() -> i32 {
+    print_i64(42);
+    return 0;
+}
+```
+
+### 打印一个字符串
+
+字符串字面量要 **cast 成 `*u8`**（`"..." as *u8`）；
+`std_io_print` 写的是 **cstr** ⇒ 字面量自带结尾 `\0` ⇒ 直接写即可。
+
+```jhyy
+import io;
+
+fn main_jhyy() -> i32 {
+    std_io_print("hello\n" as *u8);
+    return 0;
+}
+```
 
 ## 一段完整的 JHYY 程序（规范附录 D）
 
