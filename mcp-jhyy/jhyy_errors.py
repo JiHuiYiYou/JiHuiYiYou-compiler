@@ -349,7 +349,7 @@ CURATED_FIXES = {
                "⚠️ 这条错误**在链接期才报**，语法检查看不出来。",
         "spec_ref": "§ 3.1",
     },
-    "ld returned": {
+    "collect2.exe: error: ld returned": {
         "meaning": "链接失败（`ld` 报错）。",
         "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**"
                "（不是 `main`）—— 先检查这个。"

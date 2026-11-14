@@ -311,6 +311,13 @@
       "spec_ref": "§ 18"
     },
     {
+      "text": "collect2.exe: error: ld returned",
+      "kind": "curated",
+      "meaning": "链接失败（`ld` 报错）。",
+      "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**（不是 `main`）—— 先检查这个。⚠️ 编译器**会把 gcc 的真实链接原因吞掉**（语言仓 W-226）⇒ 只看到「ld returned N exit status」是**正常的**。",
+      "spec_ref": "§ 3.1"
+    },
+    {
       "text": "const decl requires array type annotation",
       "kind": "sema",
       "origin": "sema.jhyy"
@@ -498,13 +505,6 @@
       "text": "is defined multiple times",
       "kind": "corpus",
       "example_file": "spec_dup_fn_name.jhyy"
-    },
-    {
-      "text": "ld returned",
-      "kind": "curated",
-      "meaning": "链接失败（`ld` 报错）。",
-      "fix": "⚠️ **hosted 模式的入口函数名必须是 `fn main_jhyy() -> i32`**（不是 `main`）—— 先检查这个。⚠️ 编译器**会把 gcc 的真实链接原因吞掉**（语言仓 W-226）⇒ 只看到「ld returned N exit status」是**正常的**。",
-      "spec_ref": "§ 3.1"
     },
     {
       "text": "let a = make_p(1); a == b",
