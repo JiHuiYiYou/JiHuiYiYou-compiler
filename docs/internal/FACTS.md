@@ -561,10 +561,16 @@ CI 红了：hook 回来的 `additionalContext` 是**空串**。
 ⇒ 没编译 ⇒ 没诊断 ⇒ 走「✓ 编译通过了」分支 ⇒ **测试看着是绿的，其实什么都没验**
 ⇒ ⇒ 这正是改成**退出码**判据之后 CI 才红的原因 —— **门变诚实了**。
 
-⇒ **修法**：hook **自己找 bash**（`CLAUDE_CODE_GIT_BASH_PATH` → **PATH 里扫**
-→ 常见位置）⇒ 找不到就**直接 spawn 编译器**，但**自己把 env 修好**
-（照抄 `src/main/compiler/env.ts` 的配方：MSYS 风格 PATH 转 Windows 风格
-+ 追加 ucrt64/usr 的 bin + 补 TMP/TEMP/SystemRoot）⇒ **不再依赖 bash**。
+⚠️⚠️ **第二轮 CI 又红 ⇒ 「bash 优先」这个设计本身是错的** —— 它在**两个环境里
+各坏一次**：
+- **没有 bash** 的环境 ⇒ 编译压根没跑
+- **有 bash 但 `-lc` 的 PATH 不对** 的环境（CI 上 setup-msys2 的 bash 就是）
+  ⇒ 编译跑了但**找不到 gcc**
+
+⇒ ⇒ **改成：直接 spawn 是默认**（env 照抄 `src/main/compiler/env.ts`：
+MSYS 风格 PATH 转 Windows 风格 + **ucrt64 的 bin 排最前** + 补 TMP/TEMP/SystemRoot
++ **只追加不替换**继承来的 PATH）⇒ bash 只在「直接 spawn 看起来坏了」
+（退出码非 0 **且** stderr 什么都没有）时兜底重试一次。
 
 ⚠️ **两条路都要被测到** ⇒ 加 `JHY_HOOK_FORCE_DIRECT=1` ⇒ 单测**两条都跑**
 （**CI 走的是「直接 spawn」那条** ⇒ 只测 bash 那条 ⇒ CI 那条路上出问题没人抓）。
