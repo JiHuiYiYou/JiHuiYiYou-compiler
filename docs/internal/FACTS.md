@@ -406,8 +406,8 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 | 项 | 值 |
 |---|---|
 | harness | IDE 仓 `JiHuiYiYou-IDE/scripts/eval/run-eval.ts`（`npm run eval`） |
-| 任务集 | IDE 仓 `JiHuiYiYou-IDE/eval/tasks.json` —— **32** 道 |
-| 变异种类 | **8** 种（其中速查表**没覆盖**的 3 种 + 1 种行为变异） |
+| 任务集 | IDE 仓 `JiHuiYiYou-IDE/eval/tasks.json` —— **40** 道 |
+| 变异种类 | **7** 种（其中速查表**没覆盖**的 3 种 + 1 种行为变异） |
 | 破坏方式 | **2** 种：`compile-break`（编译不过）/ `behavior-break`（能编但行为变了） |
 | 判据 | 编译通过 **且** 退出码一致 **且** stdout **逐字**一致 |
 | 基线臂 | `baseline` = IDE 现状（12 条速查 + jhyy MCP） |
