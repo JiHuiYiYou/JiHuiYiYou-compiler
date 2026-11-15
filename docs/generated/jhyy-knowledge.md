@@ -691,6 +691,42 @@ fn main_jhyy() -> i32 {
 }
 ```
 
+### 字符串模块（string）：先拿一个 arena
+
+`string` 模块的函数都要一个 **arena**（`str_from_cstr(a, s)` 的 `a`）——
+**arena 就是一个 40 字节的缓冲区**：`arena_init(a, size)` 把它变成 arena。
+⚠️ 知识包的 API 表只列了 `arena_init(a, default_size)`，**没说什么是 `a`**
+   ⇒ 这里补上（实测：不知道这个前置条件时，模型会自己手写一遍 strlen）。
+⚠️ `str_data(s)` 返回的**不是 cstr**（**没有结尾 `\0`**）⇒ 不能直接喂给
+   `std_io_print` ⇒ 要先复制进自己的 buffer 再补 `\0`。
+⚠️ 只想测长度/比较的话，**自己写二十行往往比绕 arena 省事** ——
+   先想清楚要什么，再决定用不用这个模块。
+
+```jhyy
+import arena;
+import string;
+import fmt;
+import io;
+
+fn main_jhyy() -> i32 {
+    // arena = 一个 40 字节的缓冲区（5 个 i64）
+    let mut abuf: [i64; 5] = [0i64, 0i64, 0i64, 0i64, 0i64];
+    let a = abuf as *u8;
+    arena_init(a, 4096 as i64);
+    let s = str_from_cstr(a, "hello" as *u8);
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, str_len(s));
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+    return 0;
+}
+```
+
 ## 一段完整的 JHYY 程序（规范附录 D）
 
 ```jhyy

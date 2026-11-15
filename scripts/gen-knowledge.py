@@ -294,6 +294,51 @@ fn main_jhyy() -> i32 {
     return 0;
 }""",
     },
+    {
+        # 2026-11-15 加 —— **唯一一条**有实测证据的补强。
+        #
+        # 证据（臂 H2，翻译题加 3 道手写题）：模型在 `mem` / `math` 上**直接用了**
+        # 知识包里的 API（`mem_copy` / `std_math_sqrt` / `fmt_i32` 都一次写对）⇒
+        # **知识包的 stdlib API 表是有效的**。
+        # 但在 `string` 上它**自己手写了 strlen/strcmp/strstr**（40 行）⇒ 为什么？
+        # ⇒ `string` 的每个函数都要一个 **arena**（`str_from_cstr(a, s)` 的 `a`），
+        #   而知识包只列了 `arena_init(a, default_size)`、**没说什么是 `a`** ⇒
+        #   模型面对一个「不知道从哪来」的前置参数 ⇒ **理性地绕开它自己写**。
+        # ⇒ 这就是「该补什么」的答案：**补前置条件/用法，不是补更多 API**。
+        "title": "字符串模块（string）：先拿一个 arena",
+        "note": (
+            "`string` 模块的函数都要一个 **arena**（`str_from_cstr(a, s)` 的 `a`）——\n"
+            "**arena 就是一个 40 字节的缓冲区**：`arena_init(a, size)` 把它变成 arena。\n"
+            "⚠️ 知识包的 API 表只列了 `arena_init(a, default_size)`，**没说什么是 `a`**\n"
+            "   ⇒ 这里补上（实测：不知道这个前置条件时，模型会自己手写一遍 strlen）。\n"
+            "⚠️ `str_data(s)` 返回的**不是 cstr**（**没有结尾 `\\0`**）⇒ 不能直接喂给\n"
+            "   `std_io_print` ⇒ 要先复制进自己的 buffer 再补 `\\0`。\n"
+            "⚠️ 只想测长度/比较的话，**自己写二十行往往比绕 arena 省事** ——\n"
+            "   先想清楚要什么，再决定用不用这个模块。"
+        ),
+        "code": """import arena;
+import string;
+import fmt;
+import io;
+
+fn main_jhyy() -> i32 {
+    // arena = 一个 40 字节的缓冲区（5 个 i64）
+    let mut abuf: [i64; 5] = [0i64, 0i64, 0i64, 0i64, 0i64];
+    let a = abuf as *u8;
+    arena_init(a, 4096 as i64);
+    let s = str_from_cstr(a, "hello" as *u8);
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i64(p, str_len(s));
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+    return 0;
+}""",
+    },
 ]
 
 

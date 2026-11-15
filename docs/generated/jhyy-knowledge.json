@@ -905,6 +905,11 @@
       "title": "打印一个字符串",
       "note": "字符串字面量要 **cast 成 `*u8`**（`\"...\" as *u8`）；\n`std_io_print` 写的是 **cstr** ⇒ 字面量自带结尾 `\\0` ⇒ 直接写即可。",
       "code": "import io;\n\nfn main_jhyy() -> i32 {\n    std_io_print(\"hello\\n\" as *u8);\n    return 0;\n}"
+    },
+    {
+      "title": "字符串模块（string）：先拿一个 arena",
+      "note": "`string` 模块的函数都要一个 **arena**（`str_from_cstr(a, s)` 的 `a`）——\n**arena 就是一个 40 字节的缓冲区**：`arena_init(a, size)` 把它变成 arena。\n⚠️ 知识包的 API 表只列了 `arena_init(a, default_size)`，**没说什么是 `a`**\n   ⇒ 这里补上（实测：不知道这个前置条件时，模型会自己手写一遍 strlen）。\n⚠️ `str_data(s)` 返回的**不是 cstr**（**没有结尾 `\\0`**）⇒ 不能直接喂给\n   `std_io_print` ⇒ 要先复制进自己的 buffer 再补 `\\0`。\n⚠️ 只想测长度/比较的话，**自己写二十行往往比绕 arena 省事** ——\n   先想清楚要什么，再决定用不用这个模块。",
+      "code": "import arena;\nimport string;\nimport fmt;\nimport io;\n\nfn main_jhyy() -> i32 {\n    // arena = 一个 40 字节的缓冲区（5 个 i64）\n    let mut abuf: [i64; 5] = [0i64, 0i64, 0i64, 0i64, 0i64];\n    let a = abuf as *u8;\n    arena_init(a, 4096 as i64);\n    let s = str_from_cstr(a, \"hello\" as *u8);\n    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,\n                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];\n    let p: *u8 = &buf[0];\n    let n = fmt_i64(p, str_len(s));\n    buf[n] = 10u8;\n    buf[n + 1i64] = 0u8;\n    std_io_print(p);\n    return 0;\n}"
     }
   ],
   "verified_rules": [
