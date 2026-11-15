@@ -780,7 +780,94 @@ VERIFIED_RULES = [
             "⇒ ⇒ 记不住就**两边各写一个小程序跑一下**（像这里这样）。"
         ),
     },
+    {
+        "kind": "bite",
+        "title": "**struct 字面量的字段值要显式带类型**",
+        "why": (
+            "字段类型**必须精确匹配** ⇒ 整数字面量默认是 **i32** ⇒\n"
+            "`P { c: 7 }`（`c: u8`）⇒ 报 **`field type mismatch`**。\n"
+            "⚠️ **从 C 过来的模型 100% 会踩**（C 里 `struct P p = {7};` 天经地义）。"
+        ),
+        "wrong": "let p: P = P { c: 7 };",
+        "expect": "field type mismatch",
+        "right": "let p: P = P { c: 7 as u8 };",
+        "pre_code": "type P = struct { c: u8 }\n",
+    },
+    {
+        "kind": "bite",
+        "title": "**match 的 arm body 只能是单个表达式**",
+        "why": (
+            "`0 => { let y: i32 = 1; y }` ⇒ **解析错误**\n"
+            "（`unexpected token '{' in expression` / `unexpected token 'let' in expression`）——\n"
+            "arm 后面**只能直接写一个表达式** ⇒ 不能写语句块、也不能写 `return`。\n"
+            "⚠️ 要多步就 `let r = match ... ;` 再 `return r;`。"
+        ),
+        "wrong": "let x: i32 = 1;\n    let r: i32 = match x {\n    0 => { let y: i32 = 1; y },\n    _ => 0,\n};",
+        "expect": "unexpected token '{' in expression",
+        "right": "let x: i32 = 1;\n    let r: i32 = match x {\n    0 => 1,\n    _ => 0,\n};",
+    },
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ⏱ **高频速查** —— 放在包的最**前面**（2026-11-15 实测逼出来的）
+#
+# 为什么要有（实测证据，不是猜的）：
+#   包长到 **31k 字** ⇒ 模型**找不到那一条** —— 实测：知识包臂在
+#   `slice-view` 那题**仍然查了 3 次规范**，尽管包里**就有**那条规则
+#   ⇒ ⇒ 「有」≠「看得到」⇒ ⇒ 得把最常踩的**提到第一屏**。
+#
+# 每条只给**一行「该怎么写」** ⇒ 模型不用读完整个包就能改对。
+#
+# ⚠️ **不许漂移**：每条的标题都必须**对得上** VERIFIED_RULES 里的一条
+#   （对不上 ⇒ 生成器报错）⇒ ⇒ 改规则时这里会红 ⇒ 两处不会各说各话。
+# ⚠️ 排序 = **实测撞出来的频率**（评测里两臂的真实编译错误统计）。
+QUICK_FIRE = [
+    ("**u32 的字面量要带 `u32` 后缀**",
+     "u32 参与运算 / 移位 ⇒ 字面量带 `u32` 后缀：`x + 1u32`、`a >> 1u32`"),
+    ("**要改的绑定必须 `let mut`** —— 不写 `mut` **不报错、只是不生效**",
+     "要改的绑定写 `let mut`（否则**写进去也不生效**）"),
+    ("**struct 字面量的字段值要显式带类型**",
+     "字段类型**必须精确匹配** ⇒ `P { c: 7 as u8 }`（整数字面量默认 i32）"),
+    ("**整数 ↔ 浮点不能隐式转换**",
+     "要 f64 就写 `3 as f64`（**没有**隐式转换）"),
+    ("**`type` 定义结尾不能带 `;`**",
+     "`type X = struct { ... }` / `enum { ... }` **结尾不带分号**"),
+    ("**`import` 只写模块名本身（不带 `std::`）**",
+     "`import vec;`（**不带 `std::`**）"),
+    ("**`as` 与 `*` `/` `%` 同级（左结合）** —— 不是最低",
+     "`a * b as u64` 是 **`(a * b) as u64`** ⇒ 想「各自转」写 `(a as u64) * (b as u64)`"),
+    ("**`match` 的区间是闭区间、`for` 的是半开** —— 方向相反",
+     "`match` 的 `0..10` **含 10**；`for` 的 `0..10` **不含 10**"),
+    ("**闭包不能捕获外层变量**",
+     "闭包只能用**自己的参数** ⇒ 外层要用的值**当参数传进去**"),
+    ("**match 的 arm body 只能是单个表达式**",
+     "arm 后面**直接写表达式** ⇒ 不能写 `{ ... }`、也不能写 `return`"),
+    ("**`u32` → `u64` / `i64` 都是零扩展**",
+     "`4294967295 as i64` 得 **4294967295**（**不是** -1）"),
+    ("**整数溢出是回绕，不是报错**",
+     "溢出**回绕不报错** ⇒ 想要报错得**自己查**"),
+]
+
+
+def _check_quick_fire(verified_rules):
+    """⏱ 高频速查的每一条都必须**对得上** VERIFIED_RULES 里的一条。
+
+    ⚠️ **为什么要有这道检查**：速查表是**手写**的、正文是**另一份手写**
+    ⇒ 两处迟早会各说各话（那就是「知识包自相矛盾」⇒ 最坏的一类 bug）
+    ⇒ ⇒ 对不上就**不许生成**。
+    """
+    if not verified_rules:
+        return
+    titles = {r["title"] for r in verified_rules}
+    for title, _fix in QUICK_FIRE:
+        if title not in titles:
+            raise SystemExit(
+                "✗ 高频速查里的「%s」**在 VERIFIED_RULES 里没有对应的一条**\n"
+                "  ⇒ 两处会各说各话 ⇒ 不许生成。\n"
+                "  修法：改标题跟正文一致，或在 VERIFIED_RULES 里补这一条。"
+                % title
+            )
 
 
 PRINT_HELPER = """import fmt;
@@ -842,10 +929,14 @@ def collect_verified_rules():
             tag = "vr%d" % i
             if rule["kind"] == "bite":
                 # ⚠️ `pre` ⇒ 声明在**顶层**（`type` / `import` 必须在函数外面）
+                # ⚠️ `pre_code` ⇒ **顶层**的那段（`type X = struct {...}` 之类）
+                #    —— 有了它，函数体里就能用那个类型了（`pre` 做不到这件事：
+                #    `pre` 会把代码整个搬到顶层，而 `let` 在顶层不合法）
                 def wrap(code):
+                    pre = rule.get("pre_code") or ""
                     if rule.get("pre"):
-                        return "%s\nfn main_jhyy() -> i32 {\n    return 0;\n}\n" % code
-                    return "fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n" % code
+                        return "%s%s\nfn main_jhyy() -> i32 {\n    return 0;\n}\n" % (pre, code)
+                    return "%sfn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n" % (pre, code)
 
                 wrong = wrap(rule["wrong"])
                 ok, err, _ = _compile(exe, wrong, d, tag + "w")
@@ -1133,6 +1224,19 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
     A("| `jhyy_abi_info` | 查 ABI（结构体布局 / 调用约定 / FFI） | 涉及 struct 传参 / FFI ⇒ 查 |")
     A("| `jhyy_get_il` | 看编译出来的 IL | 调试 codegen ⇒ 才用 |")
     A("")
+    # ── **⏱ 高频速查 —— 放在第一屏** ────────────────────────────
+    #   实测：包 31k 字 ⇒ 模型**找不到**中间某一条（明明有，还是去查了规范）
+    #   ⇒ ⇒ 把「最常踩的」提到最前面，每条只给**一行「该怎么写」**。
+    if QUICK_FIRE:
+        A("## ⏱ 最常踩的 %d 条 —— **每条一行「该怎么写」**" % len(QUICK_FIRE))
+        A("")
+        A("> 写 JHYY 时**先扫这一段** ⇒ 对不上的，**照右边那行改**。")
+        A("> 每条都有编译器验证过的细节 ⇒ 要看为什么，")
+        A("> 翻到后面「反直觉点（**编译器逐条验证过的**）」那一节。")
+        A("")
+        for i, (title, fix) in enumerate(QUICK_FIRE, 1):
+            A("%d. %s ⇒ %s" % (i, title, fix))
+        A("")
     A("## 规范章节目录")
     A("")
     A("查某一节用 `jhyy_lang_ref`，参数传章节号（如 `\"5.6\"` / `\"附录 B\"`）。")
@@ -1416,6 +1520,8 @@ def main():
     stdlib = collect_stdlib()
     usage_examples = [] if args.no_usage_examples else collect_usage_examples()
     verified_rules = [] if args.no_verified_rules else collect_verified_rules()
+    # ⚠️ **高频速查必须跟正文对得上** —— 对不上就**不许生成**
+    _check_quick_fire(verified_rules)
     # ⚠️ **`--check` 模式**：生成到**临时目录**，比对目标是**仓里的**产物。
     #   ⚠️ **不能生成到仓里再比对** —— 那会**先把仓里的产物覆盖掉**
     #   ⇒ 比对永远「一致」⇒ **门形同虚设**（实测踩过：造了红灯却不亮）。
