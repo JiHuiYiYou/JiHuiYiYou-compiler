@@ -295,6 +295,55 @@ fn main_jhyy() -> i32 {
 }""",
     },
     {
+        # 2026-11-15 加 —— 第二条有实测证据的补强。
+        #
+        # 证据（臂 J，翻译题加了 1 道 struct 题）：模型写 `Point { x: 10, y: 20 }`
+        # ⇒ **field type mismatch** ⇒ 知识包**附录 B 里登记过**这条规则，
+        # 但那是**「受限清单」**（陈述事实），**不是「该怎么写」** ⇒ 模型照着
+        # 写还是会踩 ⇒ ⇒ **要的是「能编译的用法」**，不是又一条规则。
+        "title": "struct 字面量：字段值要**显式带类型**",
+        "note": (
+            "**struct 字面量的字段值类型必须精确匹配字段类型** ——\n"
+            "`type P = struct { x: i32 }` 写 `P { x: 10 }` ⇒ 报 `field type mismatch`\n"
+            "（**整数字面量默认推断为 i32**；而 `x` 声明成 i32 —— 看着一样，\n"
+            "其实**推断不出那个类型**）⇒ **要写 `P { x: 10 as i32 }`**。\n"
+            "⚠️ **省略的字段编译器不报错**，但它的值是**栈上的未初始化垃圾**\n"
+            "   （不是 0）⇒ 别省字段。\n"
+            "⚠️ **struct 按值传参/返回**是支持的（递归复制）；但**数组**按值传参\n"
+            "   实际是**按引用**（跟 C 不一样）⇒ 要副本得自己拷。"
+        ),
+        "code": """import fmt;
+import io;
+
+type Point = struct {
+    x: i32,
+    y: i32,
+}
+
+fn dist2(a: Point, b: Point) -> i32 {
+    let dx: i32 = a.x - b.x;
+    let dy: i32 = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+fn main_jhyy() -> i32 {
+    // ⚠️ 字段值要**显式带类型** —— 整数字面量默认是 i32
+    let p: Point = Point { x: 10 as i32, y: 20 as i32 };
+    let q: Point = Point { x: 1 as i32, y: 2 as i32 };
+    let d: i32 = dist2(p, q);
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let out: *u8 = &buf[0];
+    let n = fmt_i32(out, d);
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(out);
+    return 0;
+}""",
+    },
+    {
         # 2026-11-15 加 —— **唯一一条**有实测证据的补强。
         #
         # 证据（臂 H2，翻译题加 3 道手写题）：模型在 `mem` / `math` 上**直接用了**
