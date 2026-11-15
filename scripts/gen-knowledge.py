@@ -409,6 +409,55 @@ fn main_jhyy() -> i32 {
     return 0;
 }""",
     },
+    {
+        # 2026-11-15 加 —— **enum + match 的「该怎么写」**。
+        #
+        # 为什么要（评测逼出来的）：`enum` 在知识包里**只以「坑」的形式出现**
+        # （变体只能带一个 payload / alignof 恒为 4 / 嵌套 pattern 不支持），
+        # **没有一段能照抄的写法** ⇒ 而评测里那道 enum 题模型是**查规范拼出来的**
+        # ⇒ ⇒ 坑登记了、用法没有 ⇒ 跟 § 8.12 的结论一模一样。
+        "title": "枚举 + match：该怎么写",
+        "note": (
+            "`type X = enum { ... }` —— **结尾不带分号**（跟 `struct` 一样）。\n"
+            "⚠️ **match 的 arm body 只能是单个表达式** —— 不能写 `return`、\n"
+            "   也不能写成语句块 `{ ... }` ⇒ 要多步就 `let r = match ... ;` 再 `return r`。\n"
+            "⚠️ match 作用在 enum 上时**要穷尽**（每个变体都覆盖，或有 `_` 兜底）\n"
+            "   ⇒ 否则编译期报 `non-exhaustive match: missing variant`。\n"
+            "⚠️ **变体最多带一个 payload**：`Rect(i32, i32)` 是解析错误\n"
+            "   ⇒ 要带多个字段就把 payload 换成 struct。"
+        ),
+        "code": """import fmt;
+import io;
+
+type Shape = enum {
+    Circle,
+    Square,
+    Triangle,
+}
+
+fn sides(s: Shape) -> i32 {
+    // ⚠️ arm body 只能是单个表达式 ⇒ 先 let 再 return
+    let r: i32 = match s {
+        Shape::Circle => 0,
+        Shape::Square => 4,
+        Shape::Triangle => 3,
+    };
+    return r;
+}
+
+fn main_jhyy() -> i32 {
+    let mut buf: [u8; 32] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+                              0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &buf[0];
+    let n = fmt_i32(p, sides(Shape::Square));
+    buf[n] = 10u8;
+    buf[n + 1i64] = 0u8;
+    std_io_print(p);
+    return 0;
+}""",
+    },
 ]
 
 
@@ -669,6 +718,66 @@ VERIFIED_RULES = [
             "    s = s + i;\n"
             "    }\n"
             "    print_i64(s as i64);"
+        ),
+    },
+    {
+        "kind": "contrast",
+        "title": "**要改的绑定必须 `let mut`** —— 不写 `mut` **不报错、只是不生效**",
+        "why": (
+            "不可变绑定**编译成 SSA 临时量** ⇒ `x = 1;` 编译期报\n"
+            "`cannot assign to immutable variable (use let mut)`。\n"
+            "⚠️ **但经指针写就不一样了**：`&x` 对不可变绑定**合法**（编译器不检查），\n"
+            "   而 `*p = v` **不报错也**「**不生效**」（`x` 保持原值）⇒\n"
+            "   ⇒ **静默**（没有诊断、没有警告）⇒ 程序照跑、结果照错。\n"
+            "⚠️ **从 C 过来的模型 100% 会踩**：C 的 `int x = 5;` 天生可变。"
+        ),
+        "left_label": "不可变绑定（`let x`）—— 写进去了，**但没生效**",
+        "left_code": (
+            "let x: i32 = 5;\n"
+            "    let p: *i32 = &x;\n"
+            "    *p = 7;\n"
+            "    print_i64(x as i64);"
+        ),
+        "right_label": "可变绑定（`let mut x`）—— 写进去了，**生效了**",
+        "right_code": (
+            "let mut x: i32 = 5;\n"
+            "    let p: *i32 = &x;\n"
+            "    *p = 7;\n"
+            "    print_i64(x as i64);"
+        ),
+        "conclusion": (
+            "⇒ ⇒ **要改的绑定就得写 `let mut`** ⇒ 不写 **不报错、只是不生效** ⇒\n"
+            "⇒ ⇒ 这是**静默**错误 ⇒ 从 C 翻译过来的代码**必查**。"
+        ),
+    },
+    {
+        "kind": "contrast",
+        "title": "**切片的区间是半开** —— 跟 `match` 的闭区间**相反**",
+        "why": (
+            "同一个 `..`：**match 里闭、切片里半开**。\n"
+            "· `s[1..3]` ⇒ 取到 **2** 个元素（`1`、`2`）—— 半开；\n"
+            "· `match 3 { 1..3 => ... }` ⇒ **命中**（3 在闭区间里）。\n"
+            "⚠️ 切片**下标不做边界检查** ⇒ 区间写错一个端点，**读到的是邻居**\n"
+            "   （不报错、不 panic）⇒ ⇒ **更要把端点数对**。"
+        ),
+        "left_label": "切片 `s[1..3]` —— **半开** ⇒ 长度 2",
+        "left_code": (
+            "let arr: [i32; 4] = [10 as i32, 20 as i32, 30 as i32, 40 as i32];\n"
+            "    let s: [*]i32 = arr as [*]i32;\n"
+            "    let sub: [*]i32 = s[1..3];\n"
+            "    print_i64(len(sub) as i64);"
+        ),
+        "right_label": "match `1..3` —— **闭区间** ⇒ 命中 3",
+        "right_code": (
+            "let r: i32 = match 3 {\n"
+            "    1..3 => 1,\n"
+            "    _ => 0,\n"
+            "    };\n"
+            "    print_i64(r as i64);"
+        ),
+        "conclusion": (
+            "⇒ ⇒ **同一个 `..`，两处语义相反**（match 闭 / 切片半开）⇒\n"
+            "⇒ ⇒ 记不住就**两边各写一个小程序跑一下**（像这里这样）。"
         ),
     },
 ]
@@ -1147,7 +1256,9 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
                 A("")
                 A("⇒ 实测输出：`%s`" % r["right_out"])
                 A("")
-                if r["left_out"] != r["right_out"]:
+                if r.get("conclusion"):
+                    A(r["conclusion"])
+                elif r["left_out"] != r["right_out"]:
                     A("⚠️ **这两个不一样** ⇒ 写法选错 ⇒ **结果就不同**。")
                 else:
                     A("✅ 这两个一样 ⇒ 行为一致。")
