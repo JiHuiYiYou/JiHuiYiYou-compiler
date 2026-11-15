@@ -1,0 +1,33 @@
+#!/bin/sh
+# pre-commit —— **刷派生产物**（语言构成 / 知识包）。
+#
+# 为什么有这个：这两样产物是**从源码算出来的、但要进仓**的文件 ⇒
+# 改了源码就得跟着刷 ⇒ 忘了 ⇒ CI 的 `langstat` / `gen-knowledge` 门红
+# ⇒ 而那是**推送之后**才发现 ⇒ 白等一轮 + 返工一次。
+#
+# ⚠️ **怎么装**（一次性，仓内）：
+#     git config core.hooksPath .githooks
+# ⇒ 钩子本体**进仓** ⇒ 新克隆只要跑这一行就有 ⇒ 不用每人手工抄。
+#
+# ⚠️ **它会改暂存区**：刷完把产物 `git add` 进去 ⇒ 提交里就带着刷好的产物
+# ⇒ 不想要就 `git reset HEAD -- <文件>`。
+#
+# ⚠️ **刷不出来 = 提交中止**（生成器坏了 ⇒ 本来也过不了 CI ⇒ 早失败早好）。
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+PY=""
+for c in python python3 py; do
+    if command -v "$c" >/dev/null 2>&1; then
+        PY="$c"
+        break
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "⚠️ 找不到 python ⇒ 跳过派生产物刷新（CI 会红：langstat / gen-knowledge）" >&2
+    exit 0
+fi
+
+"$PY" scripts/dev/refresh-artifacts.py --amend-index

@@ -110,6 +110,33 @@ don't restate those numbers anywhere else.
 > directory. `python scripts/dev/bump_version.py check` from a subdirectory reports every
 > file as missing, which reads like a version drift but isn't one.
 
+### Derived artifacts refresh themselves before every commit
+
+Two things in this repository are **computed from the source tree** yet are also
+**tracked in git**: the language-composition snapshot (`docs/internal/langstat.json`,
+the two SVGs, `FACTS.md` § 7 and the one line in each README) and the knowledge
+pack (`docs/generated/jhyy-knowledge.md`, `jhyy-knowledge.json`,
+`jhyy-error-fix.json`). Touch the source and they go stale — and the
+`langstat` / `gen-knowledge` CI gates go red, which you only find out **after**
+pushing.
+
+To stop forgetting, enable the hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook (`.githooks/pre-commit`, tracked in the repo) refreshes whatever is
+stale and stages the result, so the commit carries the refreshed artifacts.
+The same thing by hand:
+
+```bash
+python scripts/dev/refresh-artifacts.py --all
+```
+
+The hook **aborts the commit** when a generator fails — a broken generator would
+fail CI anyway, and failing here is cheaper.
+
 ## Pull request process
 
 1. One PR does one thing.
