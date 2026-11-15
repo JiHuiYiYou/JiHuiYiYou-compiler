@@ -932,7 +932,7 @@ JHYY 侧只说「undefined variable」⇒ **多 5~8 轮**。
 （2026-11-15，按 § 8.12 的规矩「题先考出坑 → 坑变成示例 → 再量」，
 这一轮**尺子和知识包两头都动了**）
 
-**① 尺子**：手写翻译题 **4 → 7** 道（IDE 仓 `scripts/eval/gen-paired-tasks.py`
+**① 尺子**：手写翻译题 **4 → 7** 道（IDE 仓 `JiHuiYiYou-IDE/scripts/eval/gen-paired-tasks.py`
 的 `HANDWRITTEN_TRANSLATE`）⇒ 配对任务集 **41 → 44 组 / 70 → 73 道**
 （translate 组 **12 → 15**）：
 
