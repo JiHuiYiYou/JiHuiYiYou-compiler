@@ -161,10 +161,18 @@ def collect_pitfalls(doc):
     """规范里带 ⚠ 的行 —— 规范自己标好的「反直觉点」。
 
     规范第 10 行原文：「凡带 ⚠️ 的行是『与直觉/与旧规范不同』」。
+
+    ⚠️ **组标题后面跟的列表项也要收进来**（2026-11-15 实测踩过）：
+       规范 § 4.1 写的是「⚠️ 三处与直觉/旧规范不同：」**加三个 bullet**
+       ⇒ 原实现**只收了标题那一行** ⇒ 知识包里就只剩
+       「三处与直觉不同」**却没说是哪三处** ⇒ 比没有还糟
+       （模型看到「有三处不同」但看不到内容 ⇒ 既学不到、又以为漏了）。
+       ⇒ 现在：**以冒号结尾的 ⚠ 行** ⇒ 把紧跟其后的列表项并进同一条。
     """
     out = []
     for sec in doc["sections"]:
-        for line in sec.get("body", "").splitlines():
+        lines = sec.get("body", "").splitlines()
+        for i, line in enumerate(lines):
             if "⚠" not in line:
                 continue
             text = line.strip()
@@ -175,6 +183,19 @@ def collect_pitfalls(doc):
             text = re.sub(r"^\d+\.\s*", "", text)
             if len(text) < 8:
                 continue
+            # ⚠ **组标题** ⇒ 后面的列表项是**这条坑的内容**，不是别的坑
+            if text.rstrip().endswith(("：", ":")):
+                for follow in lines[i + 1:]:
+                    ft = follow.strip()
+                    if not ft:
+                        continue
+                    if not re.match(r"^([-*+]|\d+\.)\s+", ft):
+                        break  # 出了列表 ⇒ 组标题结束
+                    if "⚠" in ft:
+                        continue  # 别的 ⚠ 单独收（别重复）
+                    text += " " + re.sub(r"^[-*+]\s*", "", ft)
+                    if len(text) > 600:
+                        break
             out.append(
                 {
                     "text": rewrite_links(text),
@@ -498,10 +519,13 @@ VERIFIED_RULES = [
     },
     {
         "kind": "fact",
-        "title": "**整数字面量：目标类型说了算（不用加后缀）**",
+        "title": "**整数字面量：装得下目标类型时，目标类型说了算（不用加后缀）**",
         "why": (
-            "有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。\n"
-            "⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。"
+            "有类型标注时，**字面量按目标类型解释**（`let x: u32 = 3000000000;`\n"
+            "⇒ 3000000000，不是 i32 的 -1294967296）⇒ **不需要**为了「怕溢出」加后缀。\n"
+            "⚠️ 这条**只管「装得下」** —— 字面量**装不下**目标类型时（台账 W-228）\n"
+            "   ⇒ 编译器**不报错**、同一个值**有两种解释** ⇒ 见下面那条。\n"
+            "⚠️ 另外：**二元运算里的字面量**按 i32 算 ⇒ `u32 + 1` 得写 `1u32`。"
         ),
         "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
         "note": "⇒ 实测输出见下（**由生成器实测填入**）",
@@ -594,6 +618,58 @@ VERIFIED_RULES = [
         ),
         "code": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
         "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+    },
+    {
+        "kind": "contrast",
+        "title": "**`as` 与 `*` `/` `%` 同级（左结合）** —— 不是最低",
+        "why": (
+            "`as` 跟 `*` **同级** ⇒ `a * b as u64` ⇒ **`(a * b) as u64`**\n"
+            "（**不是** `a * (b as u64)`）⇒ 转型落在**整条乘法链的外面**。\n"
+            "⚠️ **C++/Rust 的转型比 `*` 紧** ⇒ 从那边过来的模型会顺手写\n"
+            "   `a * (b as u64)` ⇒ **值不一样**（下面 ① ② 就是差在这儿）。\n"
+            "⚠️ 想让**每个操作数各自转** ⇒ **必须自己写括号**。"
+        ),
+        "left_label": "`a * b as u64` —— JHYY **实际**这么解析（先乘后转）",
+        "left_code": (
+            "let a: u32 = 3000000000u32;\n"
+            "    let b: u32 = 2u32;\n"
+            "    let v: u64 = a * b as u64;\n"
+            "    print_i64(v as i64);"
+        ),
+        "right_label": "`(a as u64) * (b as u64)` —— 想「各自转」就得这么写",
+        "right_code": (
+            "let a: u32 = 3000000000u32;\n"
+            "    let b: u32 = 2u32;\n"
+            "    let v: u64 = (a as u64) * (b as u64);\n"
+            "    print_i64(v as i64);"
+        ),
+    },
+    {
+        "kind": "contrast",
+        "title": "**`match` 的区间是闭区间、`for` 的是半开** —— 方向相反",
+        "why": (
+            "同一个语言里两个区间构造**方向相反**：\n"
+            "· `match` 的 `0..10` ⇒ **含 10**（闭区间）；\n"
+            "· `for` 的 `0..10` ⇒ **不含 10**（半开区间）。\n"
+            "⚠️ **按同一条规则理解两个构造** ⇒ 必错一边\n"
+            "（Rust 的 `..` 是半开 ⇒ 直觉套过来就错）。"
+        ),
+        "left_label": "`match` 里的 `0..10` —— **含 10**（闭区间）",
+        "left_code": (
+            "let r: i32 = match 10 {\n"
+            "    0..10 => 1,\n"
+            "    _ => 0,\n"
+            "    };\n"
+            "    print_i64(r as i64);"
+        ),
+        "right_label": "`for` 里的 `0..10` —— **不含 10**（半开区间）",
+        "right_code": (
+            "let mut s: i32 = 0;\n"
+            "    for i in 0..10 {\n"
+            "    s = s + i;\n"
+            "    }\n"
+            "    print_i64(s as i64);"
+        ),
     },
 ]
 
@@ -710,6 +786,31 @@ def collect_verified_rules():
                 item["runtime_out"] = outs[1][2].replace("\n", " / ")
                 out.append(item)
             else:
+                # C 型：**两种解释对照** —— 同一件事的两种写法，
+                #   **都编译、都跑**，把两种结果**并排**摆出来。
+                #   ⚠️ 不能复用 trap 型（它的标签写死成「字面量路径 / 运行时路径」，
+                #   换个含义就变成**假标签** ⇒ 反而误导）。
+                if rule["kind"] == "contrast":
+                    outs = []
+                    for key in ("left", "right"):
+                        src = PRINT_HELPER + (
+                            "fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n"
+                            % rule[key + "_code"]
+                        )
+                        ok, err, exe_path = _compile(exe, src, d, tag + key)
+                        if not ok:
+                            raise SystemExit(
+                                "✗ 反直觉点「%s」的**%s 版编译不过** ⇒ 不许进知识包：\n%s"
+                                % (rule["title"], key, err.strip().splitlines()[-1][:160])
+                            )
+                        outs.append(_run(exe_path))
+                    item = dict(rule)
+                    item["left_body"] = rule["left_code"]
+                    item["left_out"] = outs[0].replace("\n", " / ")
+                    item["right_body"] = rule["right_code"]
+                    item["right_out"] = outs[1].replace("\n", " / ")
+                    out.append(item)
+                    continue
                 # B 型：**必须编译通过 + 必须跑出输出**（输出由实测填进包里）
                 src = PRINT_HELPER + ("fn main_jhyy() -> i32 {\n    %s\n    return 0;\n}\n"
                                        % rule["code"])
@@ -1024,6 +1125,30 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
                 A("")
                 if r["literal_out"] != r["runtime_out"]:
                     A("⚠️ **这两个不一样** ⇒ 同一个值两种解释 ⇒ **别这么写**。")
+                else:
+                    A("✅ 这两个一样 ⇒ 行为一致。")
+                A("")
+            elif r["kind"] == "contrast":
+                A("（`print_i64` 的定义见上面『常用用法』一节）")
+                A("")
+                A("**① %s**：" % r["left_label"])
+                A("")
+                A("```jhyy")
+                A(_fmt_body(r["left_body"].rstrip()))
+                A("```")
+                A("")
+                A("⇒ 实测输出：`%s`" % r["left_out"])
+                A("")
+                A("**② %s**：" % r["right_label"])
+                A("")
+                A("```jhyy")
+                A(_fmt_body(r["right_body"].rstrip()))
+                A("```")
+                A("")
+                A("⇒ 实测输出：`%s`" % r["right_out"])
+                A("")
+                if r["left_out"] != r["right_out"]:
+                    A("⚠️ **这两个不一样** ⇒ 写法选错 ⇒ **结果就不同**。")
                 else:
                     A("✅ 这两个一样 ⇒ 行为一致。")
                 A("")

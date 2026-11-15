@@ -235,7 +235,7 @@
       "kind": "trap"
     },
     {
-      "text": "⚠️ 三处与直觉/旧规范不同：",
+      "text": "⚠️ 三处与直觉/旧规范不同： **`||` 比 `&&` 松**（两者不同级，`&&` 更紧）。 **复合赋值与 `=` 同级**（都是 `PREC_ASSIGN`）。 **`as` 与 `*` `/` `%` 同级**，不是最低。",
       "section": "语言规范 § 4.1 优先级（低 → 高）",
       "kind": "trap"
     },
@@ -250,7 +250,7 @@
       "kind": "trap"
     },
     {
-      "text": "⚠️ **分支块的类型 = 该块里最后一条语句的类型**：",
+      "text": "⚠️ **分支块的类型 = 该块里最后一条语句的类型**： 赋值语句（`x = v;`）→ 类型 `()` 调用语句（`f();`）→ 类型的调用返回类型 其它表达式语句 → 该表达式的类型",
       "section": "语言规范 § 5.1 if / else",
       "kind": "trap"
     },
@@ -310,7 +310,7 @@
       "kind": "trap"
     },
     {
-      "text": "⚠️ **索引（`p[i]`）与解引用（`*p`）不是一回事** —— `p` 是引用时：",
+      "text": "⚠️ **索引（`p[i]`）与解引用（`*p`）不是一回事** —— `p` 是引用时： `p[i]` 索引的是**引用所指向的那个东西**（自动解引用一次）：",
       "section": "语言规范 § 7.2 借用 `&T` / `&mut T`",
       "kind": "trap"
     },
@@ -405,7 +405,7 @@
       "kind": "trap"
     },
     {
-      "text": "⚠️ **要得到纯 freestanding 产物，源文件还必须带 `#[no_std]`** —— 链接行是按 `#[no_std]` 属性分支的，**不是按 `--target`**：",
+      "text": "⚠️ **要得到纯 freestanding 产物，源文件还必须带 `#[no_std]`** —— 链接行是按 `#[no_std]` 属性分支的，**不是按 `--target`**： 带 `#[no_std]` → 不链 C 运行时（runtime.o / helpers.o），加 `-nostartfiles -nodefaultlibs -Wl,--entry=main -lgcc` 不带 → 照常链 runtime + helpers + Windows 系统库 freestanding 模式下 `extern fn` 必须显式声明，并按该目标的调用约定调用。",
       "section": "语言规范 § 17.6 freestanding 目标与 entry 符号",
       "kind": "trap"
     },
@@ -972,8 +972,8 @@
     },
     {
       "kind": "fact",
-      "title": "**整数字面量：目标类型说了算（不用加后缀）**",
-      "why": "有类型标注时，**超范围的大字面量也按目标类型解释**（不是截断）。\n⚠️ 没有标注时也能推出来 ⇒ **不需要**为了「怕溢出」去加后缀。",
+      "title": "**整数字面量：装得下目标类型时，目标类型说了算（不用加后缀）**",
+      "why": "有类型标注时，**字面量按目标类型解释**（`let x: u32 = 3000000000;`\n⇒ 3000000000，不是 i32 的 -1294967296）⇒ **不需要**为了「怕溢出」加后缀。\n⚠️ 这条**只管「装得下」** —— 字面量**装不下**目标类型时（台账 W-228）\n   ⇒ 编译器**不报错**、同一个值**有两种解释** ⇒ 见下面那条。\n⚠️ 另外：**二元运算里的字面量**按 i32 算 ⇒ `u32 + 1` 得写 `1u32`。",
       "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
@@ -1053,6 +1053,32 @@
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
       "measured": "4294967295"
+    },
+    {
+      "kind": "contrast",
+      "title": "**`as` 与 `*` `/` `%` 同级（左结合）** —— 不是最低",
+      "why": "`as` 跟 `*` **同级** ⇒ `a * b as u64` ⇒ **`(a * b) as u64`**\n（**不是** `a * (b as u64)`）⇒ 转型落在**整条乘法链的外面**。\n⚠️ **C++/Rust 的转型比 `*` 紧** ⇒ 从那边过来的模型会顺手写\n   `a * (b as u64)` ⇒ **值不一样**（下面 ① ② 就是差在这儿）。\n⚠️ 想让**每个操作数各自转** ⇒ **必须自己写括号**。",
+      "left_label": "`a * b as u64` —— JHYY **实际**这么解析（先乘后转）",
+      "left_code": "let a: u32 = 3000000000u32;\n    let b: u32 = 2u32;\n    let v: u64 = a * b as u64;\n    print_i64(v as i64);",
+      "right_label": "`(a as u64) * (b as u64)` —— 想「各自转」就得这么写",
+      "right_code": "let a: u32 = 3000000000u32;\n    let b: u32 = 2u32;\n    let v: u64 = (a as u64) * (b as u64);\n    print_i64(v as i64);",
+      "left_body": "let a: u32 = 3000000000u32;\n    let b: u32 = 2u32;\n    let v: u64 = a * b as u64;\n    print_i64(v as i64);",
+      "left_out": "1705032704",
+      "right_body": "let a: u32 = 3000000000u32;\n    let b: u32 = 2u32;\n    let v: u64 = (a as u64) * (b as u64);\n    print_i64(v as i64);",
+      "right_out": "6000000000"
+    },
+    {
+      "kind": "contrast",
+      "title": "**`match` 的区间是闭区间、`for` 的是半开** —— 方向相反",
+      "why": "同一个语言里两个区间构造**方向相反**：\n· `match` 的 `0..10` ⇒ **含 10**（闭区间）；\n· `for` 的 `0..10` ⇒ **不含 10**（半开区间）。\n⚠️ **按同一条规则理解两个构造** ⇒ 必错一边\n（Rust 的 `..` 是半开 ⇒ 直觉套过来就错）。",
+      "left_label": "`match` 里的 `0..10` —— **含 10**（闭区间）",
+      "left_code": "let r: i32 = match 10 {\n    0..10 => 1,\n    _ => 0,\n    };\n    print_i64(r as i64);",
+      "right_label": "`for` 里的 `0..10` —— **不含 10**（半开区间）",
+      "right_code": "let mut s: i32 = 0;\n    for i in 0..10 {\n    s = s + i;\n    }\n    print_i64(s as i64);",
+      "left_body": "let r: i32 = match 10 {\n    0..10 => 1,\n    _ => 0,\n    };\n    print_i64(r as i64);",
+      "left_out": "1",
+      "right_body": "let mut s: i32 = 0;\n    for i in 0..10 {\n    s = s + i;\n    }\n    print_i64(s as i64);",
+      "right_out": "45"
     }
   ],
   "example": "// 完全可编译的一个程序：入口 + 泛型 + struct + enum + match + 闭包 + defer\nimport vec;\n\ntype Shape = enum {\n    Circle(i32),     // 半径\n    Rect(i32),       // 面积（变体只带一个 payload —— 见附录 B）\n    Empty,\n}\n\ntype Point = struct {\n    x: i32,\n    y: i32,\n}\n\nfn area(s: Shape) -> i32 {\n    match s {\n        Shape::Circle(r) => 3 * r * r,\n        Shape::Rect(a) => a,\n        Shape::Empty => 0,\n    }\n}\n\nfn max<T>(a: T, b: T) -> T {\n    if a > b { return a; }\n    return b;\n}\n\nfn cleanup() -> i32 {\n    return 0;\n}\n\nfn main_jhyy() -> i32 {\n    defer cleanup();\n\n    let p = Point { x: 3, y: 4 };\n    let s = Shape::Rect(p.x * p.y);\n    let a = area(s);\n\n    let f = |n: i32| { n * 2 };\n    let d = f(a);\n\n    let m: i32 = max::<i32>(d, 100);\n\n    return m;   // 100\n}",
