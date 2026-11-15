@@ -112,6 +112,25 @@ def _safe_remove(path: str, retries: int = 3, delay_ms: int = 500) -> bool:
     return False
 
 
+def _unique_stem(src: str, suffix: str) -> str:
+    """产物名 = **文件名 + 源文件绝对路径的短哈希** + 后缀。
+
+    ⚠️ **为什么要有那个哈希**（2026-11-15 实测踩过）：
+      原来产物名只取 **basename** ⇒ 两个**同名**源文件（最常见：`main.jhyy`）
+      —— 不同项目 / 不同临时目录 ⇒ **撞名** ⇒
+        · 两个会话同时编译 ⇒ Windows 上「正在运行的 exe 不能被覆写」⇒
+          **编译直接失败**（模型看到莫名报错 ⇒ 白烧轮数）；
+        · 评测里两个臂并发跑 ⇒ 互相踩对方的产物 ⇒ **判分拿到对方的程序**
+          ⇒ 测量**静默**失真。
+      ⇒ 哈希取**绝对路径** ⇒ 同一个文件永远同一个名字（可复算），
+        不同路径 ⇒ 不同名字 ⇒ 不再撞。
+    """
+    import hashlib
+    stem = os.path.splitext(os.path.basename(src))[0]
+    h = hashlib.sha1(os.path.abspath(src).encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{stem}_{h}{suffix}"
+
+
 def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = None,
                 extra_env: Optional[dict] = None) -> dict: # type: ignore
     """编译 .jhyy 文件为可执行程序。
@@ -127,7 +146,7 @@ def compile_file(file: str, output: Optional[str] = None, extra_inputs: list = N
             "stderr": f"Source file not found: {src}",
         }
     if output is None:
-        output = os.path.splitext(os.path.basename(src))[0] + "_mcp_run"
+        output = _unique_stem(src, "_mcp_run")
     output = _resolve_path(output)
     # Make output relative to cwd (jhyy.exe writes output relative to its own cwd)
     # We pass absolute path so it works regardless of cwd.
@@ -167,7 +186,7 @@ def compile_and_run(file: str, extra_inputs: list = None, timeout: int = 10) -> 
             "stdout": "",
             "stderr": f"Source file not found: {src}",
         }
-    output_base = os.path.splitext(os.path.basename(src))[0] + "_mcp_run"
+    output_base = _unique_stem(src, "_mcp_run")
     output = str(JHYY_ROOT / "compiler/build/bin" / output_base)
     cresult = compile_file(file, output, extra_inputs)
     if not cresult["ok"]:
@@ -207,7 +226,7 @@ def check_syntax(file: str) -> dict:
             "errors": [f"Source file not found: {src}"],
         }
     # 用 compile 命令跑一次，看 stderr 是否有错
-    tmp_basename = "_mcp_check_" + os.path.basename(src).replace(".jhyy", "")
+    tmp_basename = _unique_stem(src, "_mcp_check_")
     tmp_output = str(JHYY_ROOT / "compiler/build/bin" / tmp_basename)
     cmd = [str(JHYY_EXE), "compile", src, "-o", tmp_output]
     r = _run_cmd(cmd, timeout=30)
@@ -326,7 +345,7 @@ def get_il(file: str) -> dict:
             "exit_code": -1,
             "stderr": f"Source file not found: {src}",
         }
-    output_base = os.path.splitext(os.path.basename(src))[0] + "_mcp_il"
+    output_base = _unique_stem(src, "_mcp_il")
     output = str(JHYY_ROOT / "compiler/build/bin" / output_base)
     # ⚠ 2026-10-27 (W-155):编译器**默认不落 .il**(`JHY_WRITE_IL` 未设 ⇒ 只写
     #   .s / .exe)⇒ 不带这个 env 就永远找不到 .il ⇒ 本工具**从来没成功过**。
