@@ -66,6 +66,12 @@ REFRESHERS = [
         #   ⇒ 只在**它的输入**变了时跑。
         "triggers": [
             "docs/abis/*",
+            # ⚠️ 2026-11-15 补:台账也是知识包的输入 ——
+            #   `jhyy-error-fix.json` 由 `mcp-jhyy/jhyy_errors.py` 的**五个只读来源**
+            #   合出来,其中一个就是**台账**(workarounds.md)⇒ 台账里新增/修改条目
+            #   会改报错索引 ⇒ 不刷 ⇒ CI 的 gen-knowledge 门当场红。
+            #   (踩坑实录:W-232 登记那天,钩子只刷了 langstat,知识包没刷 ⇒ CI 红。)
+            "docs/internal/workarounds.md",
             "compiler/src0/*",
             "mcp-jhyy/*",
             "scripts/gen-knowledge.py",

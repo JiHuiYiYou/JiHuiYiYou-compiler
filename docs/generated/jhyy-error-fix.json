@@ -1026,7 +1026,10 @@
       "text": "顶层全局变量只有整数类型初始化正确",
       "kind": "spec",
       "meaning": "`let mut f: f64 = 3.5;` 读到 0（初始化器被丢弃）；`let mut p: Point = ...` 读到垃圾（未定义读）。整数类型（含跨函数读写链）正确",
-      "spec_ref": "附录 B"
+      "fix": "标量常量用**顶层 `let`**：",
+      "spec_ref": "附录 B",
+      "w_ref": "W-232",
+      "w_status": "ACTIVE"
     }
   ]
 }
