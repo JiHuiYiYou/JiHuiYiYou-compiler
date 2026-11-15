@@ -145,10 +145,18 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **224** |
-| ACTIVE | **0** |
+| 条目总数 | **228** |
+| ACTIVE | **4** |
 | DEFERRED | 2 |
 | RESOLVED / SUPERSEDED / INVALID | 200 / 19 / 3 |
+
+> ⚠️ **2026-11-15**：ACTIVE 从 0 变成 4 —— 新登记的 4 条真实缺陷
+> （W-229 函数名当值用会崩编译器 / W-230 栈位置实参传 `null` 字面量 ⇒ 指针带残渣 /
+> W-231 struct 字面量里的 `null` 字段误报 field type mismatch /
+> W-232 顶层 `const` 标量的诊断文案误导）。
+> ⇒ 它们**不在回归套件里**（仓内「XFAIL 计数恒为 0」是硬约束：
+> `docs_facts_check.py:105` 的正则把 XFAIL 写死成 0、`check_regress_facts.py:192`
+> 要求审计的 xfail 桶为 0）⇒ 复现件放在 `compiler/tests/known-bugs/`。
 
 ---
 
@@ -279,7 +287,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 | 语言 | 代码行 | 占比 | 文件数 |
 |---|---|---|---|
-| JHYY | 37045 | 67.0% | 377 |
+| JHYY | 37089 | 67.0% | 381 |
 | Python | 11657 | 21.1% | 43 |
 | Shell | 2566 | 4.6% | 20 |
 | PowerShell | 1900 | 3.4% | 20 |
@@ -289,7 +297,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 | Batchfile | 137 | 0.2% | 4 |
 | JavaScript | 125 | 0.2% | 1 |
 | TypeScript | 65 | 0.1% | 1 |
-| **合计** | **55322** | **100%** | **486** |
+| **合计** | **55366** | **100%** | **490** |
 
 > 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
 > ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。

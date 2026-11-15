@@ -357,7 +357,11 @@
 | [W-225](#w-225) | RESOLVED | 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到** |
 | [W-226](#w-226) | RESOLVED | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit... |
 | [W-227](#w-227) | RESOLVED | AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`\` ⇒... |
-| [W-228](#w-228) | DEFERRED | 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠保留原始宽度、运行时路径却截断** ⇒ 同一个值**两种解释** |
+| [W-228](#w-228) | DEFERRED | 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致** |
+| [W-229](#w-229) | ACTIVE | 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 +... |
+| [W-230](#w-230) | ACTIVE | 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee... |
+| [W-231](#w-231) | ACTIVE | struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch` |
+| [W-232](#w-232) | ACTIVE | 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15997,3 +16001,315 @@ $ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）
 - 实测复现：`printf 'fn main_jhyy() -> i32 { let a: i32 = 2147483648; let b: u32 = 4294967296; return 0; }' > ovf.jhyy`
   ⇒ `jhyy compile ovf.jhyy`（**通过**）⇒ `JHY_WRITE_IL=1` 看 `=l copy 2147483648`
 - 相关（**不是**同一个根因，但**同一个方向**）：W-185（`u32` 宽化）
+
+<a id="w-229"></a>
+## W-229: 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 + 产物爆栈**
+
+**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 函数名当值用（`let p = f` / `g(f)`）过了 sema，但 IR 里实参槽是空的 ⇒ 编译器崩
+**Filed-by:** 2026-11-15（写 Win32 GUI 的探路：为了接 Win32 回调而撞出来的）
+**日期:** 2026-11-15
+
+**触发面:**
+- `compiler/src0/sema.jhyy:1167-1179` —— 表达式位置的标识符解析到 `SYM_FN` 时，
+  **直接拿函数的 `type_ptr` 当作表达式的类型放行**（没有任何「函数值未实装」的拦截）
+- `compiler/src0/codegen_amd64_lexer.jhyy` —— 自举后端的 IL lexer：读到坏掉的 call 行
+  ⇒ 报 `unknown QBE IL mnemonic` 并中止
+
+**症状:** 最小复现（三个字面量级）：
+
+```jhyy
+fn handler(x: i32) -> i32 { return x + 1; }
+fn take(p: *u8) -> i64 { return p as i64; }
+fn main_jhyy() -> i32 { print_i64(take(handler)); return 0; }
+```
+
+⇒ **编译器崩**：
+
+```
+codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059
+```
+
+⇒ 产物二进制还**运行时爆栈**（`0xC00000FD` / STACK_OVERFLOW）。
+
+三种写法、三种表现：
+
+| 写法 | 表现 |
+|---|---|
+| `let p = handler;`（只赋值） | sema **放行**，但 IR 里 `handler` 从头到尾**没被物化** |
+| `take(p)` / `take(handler)`（指针形参） | **codegen 崩** + 产物爆栈 |
+| 之后通过 `p(...)` 调用 | 链接期 `undefined reference to 'p'` |
+
+**IL 证据**（`jhyy_get_il`）⇒ call 的**实参槽是空的**，还引用了一个根本不存在的 temp：
+
+```
+%t5 =w call $use_it( %t0)
+                     ↑ 实参槽空着，%t0 这个 temp 在整个 IL 里不存在
+```
+
+**根因:** 两块拼起来：
+1. **sema 放行了不该存在的语义** —— 规范附录 B 明写「`fn(...)` 函数指针类型未实装」
+   ⇒ **正确行为应该是一条干净的编译错误**（像闭包捕获那样报 "not supported yet"），
+   而不是放行到 codegen 崩。
+2. **IR 里没有「函数值」这个概念** —— 既没有「取函数地址」的操作，也没有报错
+   ⇒ 生成 call 时实参槽被写成空串 + 一个不存在的 temp ⇒ 自举后端的 IL lexer
+   读到这个坏 token ⇒ `unknown QBE IL mnemonic` ⇒ 中止编译；
+   QBE/gcc 那条路上则是链接期 `undefined reference`。
+
+**workaround:** **不要把函数名当值用。** 需要回调地址时，从 DLL 里取：
+`GetProcAddress(GetModuleHandleA("user32.dll"), "DefWindowProcA")` ⇒ 实测可用
+（`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。
+
+**影响范围:** 任何「把函数名当值」的写法 —— `let p = f;` / `g(f)` / 传给 `extern fn` 当回调。
+⚠️ **写 GUI 的自然做法（自己写 WndProc 处理 WM_PAINT / 按钮点击）正好踩这条**
+⇒ 这也是 JHYY 现在只能挂 `DefWindowProcA`（系统默认绘制）的直接原因。
+
+**失效条件:** sema 加一条「表达式位置出现函数标识符 ⇒ 函数值未实装」的干净报错，
+且 IR 生成器不再产出空实参槽 ⇒ 本条关闭。
+
+**引用:**
+- `compiler/src0/sema.jhyy:1167-1179`（函数标识符在表达式位置被放行）
+- `compiler/src0/codegen_amd64_lexer.jhyy`（`next_token` —— 坏 call 行 ⇒ unknown QBE IL mnemonic）
+- 规范附录 B「未实装 / 已实装但受限」：`fn(...)` 函数指针类型语法
+- 复现件：`compiler/tests/known-bugs/w229_fn_value_crash.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 相关：W-109 / W-110 / W-145（同一句报错文案，根因不同 —— 别混为一谈）
+
+<a id="w-230"></a>
+## W-230: 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee 收到高 4 字节是残渣的指针**
+
+**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 第 5+ 个实参传 null 字面量时 IR 发成 32 位，caller 只写 4 字节、callee 按 8 字节读 ⇒ 指针带残渣
+**Filed-by:** 2026-11-15（写 Win32 GUI 的探路：`CreateWindowExA` 传 null 就返回 NULL + errno 1400）
+**日期:** 2026-11-15
+
+**触发面:**
+- `compiler/src0/sema.jhyy:1045-1049` —— `NODE_NULL` 的类型是哨兵 0，
+  注释写着「type 由 caller 上下文填充」；但**填充点只有 5 处**
+  （`:1233` / `:1240` / `:1363` / `:2314` / `:2431`：比较 / `as` / let 初始化 / 赋值），
+  **调用实参这条路径没有** ⇒ null 在调用点始终没有类型
+- `compiler/src0/codegen_amd64_xmm_argalloc.jhyy:279-287` —— `emit_stack_arg_push` 的
+  32 位分支只用 `movl` **写 4 字节**，而 MS x64 的栈参数槽宽是 8 字节
+
+**症状:** 跨 FFI 的确定性表现（Win32 `CreateWindowExA`，第 9/10/12 个实参是空指针）：
+
+```
+CreateWindowExA(..., null, null, hinst, null)   → 返回 NULL，GetLastError() = 1400
+CreateWindowExA(..., z,    z,    hinst, z)       → 正常建窗（IsWindow = 1）
+```
+
+⇒ `1400` = ERROR_INVALID_WINDOW_HANDLE ⇒ **hWndParent 拿到的是垃圾指针**。
+（同一段代码只改「字面量 null → 带类型的局部变量」就恢复正常。）
+
+**IL 证据** ⇒ 同一个调用，两个版本的差别只在 `w` / `l`：
+
+```
+%t10 =w copy 0        ← null 字面量：32 位（w）
+%t13 =l call $CreateWindowExA(w %t4, l %t1, l %t3, w %t5, ..., w %t10, w %t11, l %t2, w %t12)
+```
+
+对照（把 null 换成 `let z: *u8 = null;`）：
+
+```
+%t16 =l copy 0        ← 局部变量：64 位（l）⇒ 实参也是 l ⇒ 8 字节槽写满
+```
+
+**根因:** 三块拼起来：
+1. **sema**：`null` 的类型靠「caller 上下文」填充，而调用实参路径没有实现
+   ⇒ null 在调用点的类型是空的 ⇒ IR 按默认整型宽度发成 `w`（32 位）。
+   （JHYY 本来就不检查实参类型 —— 见附录 B「函数实参类型不做检查」——
+   ⇒ 也正因为不检查，调用点**没有**「按形参类型填 null」的机会。）
+2. **codegen**：`emit_stack_arg_push` 对 32 位栈参数 `movl` 只写 4 字节，
+   槽宽却是 8 字节 ⇒ **高 4 字节是上次写这个槽的内容**。
+3. **那个槽在 caller 帧的底部** —— 实测 `.s`（`main_jhyy` 帧 640 字节）：
+
+   ```
+   main_jhyy:
+   	subq $640, %rsp
+   	...
+   	movl %r10d, 32(%rsp)     ← null 字面量：只写 4 字节
+   	call probe5
+   	movq %r10, 32(%rsp)      ← 带类型的局部变量：写 8 字节
+   	call probe5
+   ```
+
+   槽位 = `[rsp+32]`（shadow space 之上、所有局部变量之下的一条「缝」）
+   ⇒ 它的内容来自**上一次写这个槽的调用**：
+   - 同一函数里**上一次带 ≥5 个实参的调用**（它会 `movq` 写满 8 字节 ⇒ 留下高 4 字节）；
+   - 或者进程启动的残渣（**Windows 的栈是零填充的** ⇒ 干净进程里通常恰好是 0）。
+
+⇒ ⇒ **「干净进程」里可能完全看不出来**（残渣恰好是 0），
+一旦之前有过一次带 ≥5 参的调用，就会拿到垃圾指针
+⇒ 典型的「昨天能跑、今天崩」。
+
+**实测（纯 JHYY，不需要任何 Win32）:**
+
+```jhyy
+fn probe5(a: i64, b: i64, c: i64, d: i64, e: *u8) -> i64 { return e as i64; }
+// ...
+print_i64(probe5(1, 2, 3, 4, null));      // 第 5 个实参 = 栈位置
+```
+
+IL ⇒ **caller 写 4 字节、callee 读 8 字节**：
+
+```
+%t638 =w copy 0                                  ← caller 写 4 字节
+%t639 =l call $probe5(l %t631, l %t633, l %t635, l %t637, w %t638)
+export function l $probe5(l %a, l %b, l %c, l %d, l %e)
+    %t597 =l copy %e                              ← callee 按 8 字节读 ⇒ 高 4 字节是残渣
+```
+
+⇒ **不是「跨 FFI 才炸」** —— JHYY 内部调用一样中招，只是读到的残渣
+有时恰好是 0。
+
+**确定性复现**（不依赖启动残渣 —— 残渣在不同环境下可能恰好是 0）：
+**先用非零指针调一次带 ≥5 个实参的函数把槽写满，再调 `probe5(..., null)`**
+⇒ 高 4 字节必然是上一次写的值：
+
+```jhyy
+let p: *u8 = &local[0];
+let _poisoned = poison(1, 2, 3, 4, p);    // movq 写满 8 字节
+let v = probe5(1, 2, 3, 4, null);         // movl 只写低 4 字节 ⇒ 高 4 字节是残留
+```
+
+⇒ `v` 必然非零（除非 `p` 的高 4 字节恰好是 0）。
+复现件（`compiler/tests/known-bugs/w230_null_stack_arg.jhyy`）用的就是这条复现路径。
+
+**workaround:** 要传空指针时**先落到一个带类型的局部变量**：
+
+```jhyy
+let z: *u8 = null;
+CreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满
+```
+
+**影响范围:** 任何「≥5 个实参且第 5+ 个实参是 `null` 字面量」的调用
+（JHYY 内部调用与 `extern fn` 都中招）。
+⚠️ 隐蔽性极强：**读到的残渣取决于调用历史与进程环境** ⇒
+(a) 同一份代码在不同调用序列下结果不同；
+(b) 干净进程里残渣恰好是 0 ⇒ **完全看不出来** ⇒
+一旦中间多了一次带 ≥5 参的调用（或换了环境），就变成垃圾指针。
+
+**失效条件:** sema 给调用实参里的 `null` 填上形参类型（⇒ IR 发成 `l`），
+或 codegen 按 8 字节槽写零扩展值 ⇒ 本条关闭。
+
+**引用:**
+- `compiler/src0/sema.jhyy:1045-1049`（`NODE_NULL` 的哨兵类型）、`:1233` / `:1363` / `:2314` / `:2431`（仅有的几处填充点）
+- `compiler/src0/codegen_amd64_xmm_argalloc.jhyy:226-292`（`emit_stack_arg_push`；`:279-287` 是 32 位分支）
+- 复现件：`compiler/tests/known-bugs/w230_null_stack_arg.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 相关：W-231（同一个根因的另一条路径 —— null 在 struct 字面量字段里也没有类型）
+
+<a id="w-231"></a>
+## W-231: struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch`
+
+**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 同一个 null 在 let 初始化里合法、在 struct 字面量字段里却报类型不匹配
+**Filed-by:** 2026-11-15（写 Win32 GUI 的探路：WNDCLASSEX 字面量一次撞上 5 个字段）
+**日期:** 2026-11-15
+
+**触发面:**
+- `compiler/src0/sema.jhyy:2632` —— struct 字面量字段的类型检查：拿不到 `null` 的类型
+  ⇒ 报 `field type mismatch`
+- `compiler/src0/sema.jhyy:2312-2325` —— **let** 路径有 null 自动转换
+  （「null auto-coerces to declared pointer type」）⇒ 两个上下文的行为不一致
+
+**症状:**
+
+```jhyy
+type W = struct { a: *u8, b: *u8 }
+let w = W { a: null, b: null };    // → field type mismatch ×2
+```
+
+⇒ 而**同一个 `null` 字面量**写进 let 初始化是**合法**的：
+
+```jhyy
+let z: *u8 = null;                // ✅ 编译通过
+```
+
+⇒ ⇒ **同一个字面量在两个上下文里一个通一个不通**，而且报错措辞
+（`field type mismatch`）完全指不到真因（null 没类型）⇒ 很容易误判成
+「字段类型写错了」。
+
+**根因:** 与 W-230 同源 —— `NODE_NULL` 的类型靠「caller 上下文」填充，
+而 **struct 字面量字段这条路径没有实现** ⇒ 字段类型检查拿不到 null 的类型
+⇒ 落成「类型对不上」。
+
+**workaround:** 先声明带类型的局部变量，再放进字面量：
+
+```jhyy
+let z: *u8 = null;
+let w = W { a: z, b: z };         // ✅
+```
+
+**影响范围:** 任何 struct 字面量里的空指针字段 —— Win32 的 `WNDCLASSEX` 之类
+（一次就撞上 5 个字段：`hIcon` / `hCursor` / `hbrBackground` / `lpszMenuName` / `hIconSm`）。
+
+**失效条件:** struct 字面量字段路径也填 `null` 的类型 ⇒ 本条关闭。
+
+**引用:**
+- `compiler/src0/sema.jhyy:2312-2325`（let 路径的 null 自动转换 —— 有实现）
+- `compiler/src0/sema.jhyy:2632`（struct 字段路径 —— 缺同款）
+- 复现件：`compiler/tests/known-bugs/w231_struct_lit_null_field.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 相关：W-230（同一个根因：null 的类型填充点不全）
+
+<a id="w-232"></a>
+## W-232: 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」
+
+**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 顶层 const 只支持数组（行为本身正确），但诊断文案没把这事说出来
+**Filed-by:** 2026-11-15（写 Win32 GUI 的探路：想用顶层常量存窗口样式常量）
+**日期:** 2026-11-15
+
+**触发面:** `compiler/src0/parser.jhyy:4144` —— `parse_const_decl`（顶层 const 数组声明）
+在类型之后直接 `parser_expect(TOKEN_LBRACKET, "[ for const array init")` ⇒ 遇到标量初值时
+给出的是**语法层面**的报错。
+
+**症状:**
+
+```jhyy
+const X: u32 = 5;
+// → error: expected [ for const array init, got int
+```
+
+⇒ 规范 § 12 的事实是「**仅支持顶层** `const` 数组」⇒ **行为本身是对的**
+（编译器明确拒绝了，没有静默接受）⇒ 这是**诊断文案**的问题：
+报错在讲「const array init 的语法」，却没说「顶层 const 只支持数组，
+标量请用顶层 let」⇒ 用户看不出该怎么改。
+
+**根因:** 顶层 const 的解析分支只按数组语法解析；缺少一条解释性诊断
+（「顶层 const 只支持数组」）⇒ 报错只剩语法层的「expected [」。
+
+**workaround:** 标量常量用**顶层 `let`**：
+
+```jhyy
+let X: u32 = 5;      // ✅
+```
+
+⚠️ 顶层 `let` 落 `.data` 段 ⇒ 初始化器只认**整型常量表达式**
+（字面量 / 一元 / 二元算术 / 整型之间的 `as`）⇒ `let X: f64 = 3.5;` 读回是 0
+（见附录 B「顶层全局变量只有整数类型初始化正确」）。
+
+**影响范围:** 任何想用顶层 `const` 写标量常量的人 ⇒ 报错指不到真因 ⇒ 容易
+误以为是语法细节、改了又改。
+
+**失效条件:** 顶层 const 的诊断改成明确的「顶层 const 只支持数组」⇒ 本条关闭。
+
+**引用:**
+- `compiler/src0/parser.jhyy:4120`（`parse_const_decl` —— 顶层 const 数组声明）、`:4144`（报错点）
+- 规范 § 12「顶层 const 数组」（仅支持顶层 const；函数体内不允许）
+- 复现件：`compiler/tests/known-bugs/w232_topconst_scalar_msg.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 相关：附录 B「顶层全局变量只有整数类型初始化正确」

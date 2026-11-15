@@ -1,0 +1,29 @@
+// 复现件 —— 对应台账 W-229（**故意不在回归套件里**，见本目录 README.md）
+//
+// 现状（2026-11-15 实测）：编译器**崩** ——
+//   codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059
+//   ⇒ 产物二进制还会在运行时爆栈（0xC00000FD）
+// 修好后：编译期报一条干净的「函数值未实装」错误（不要崩）
+//
+// 断言（搬进 examples/ 时生效）：
+//   EXPECT-ERROR: "not supported"
+//
+// 背景：规范附录 B 明写「`fn(...)` 函数指针类型未实装」⇒ 正确行为应该是一条
+// 干净的编译错误；现在却是 sema 放行（sema.jhyy:1167-1179 把函数的 type_ptr
+// 当作表达式类型）→ IR 里 call 的实参槽是空的、还引用一个不存在的 temp
+// → 自举后端的 IL lexer 读到这个坏 token ⇒ 编译中止。
+fn handler(x: i32) -> i32 {
+    return x + 1;
+}
+
+fn take(p: *u8) -> i64 {
+    return p as i64;
+}
+
+fn main_jhyy() -> i32 {
+    // 函数名当值赋给局部变量
+    let p = handler;
+    // 再把它当实参传出去（这一句就是崩编译器的那句）
+    let v = take(p);
+    return v as i32;
+}
