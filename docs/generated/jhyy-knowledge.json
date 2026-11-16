@@ -1115,6 +1115,17 @@
     },
     {
       "kind": "bite",
+      "title": "**入口是 `fn main_jhyy()` —— 不是 `main`**",
+      "why": "托管程序（`#[no_std]` 才用 `main`）的入口是 **`fn main_jhyy() -> i32`**。\n写成 `fn main()` ⇒ **链接期**才报\n`link failed - no entry symbol `main_jhyy` in the generated assembly`。\n⚠️ **实测：知识包里问「入口点叫什么」的次数是所有查规范里的第一**\n   ⇒ 写 JHYY 之前**先看一眼入口名**。",
+      "whole": true,
+      "wrong": "fn main() -> i32 {\n    return 0;\n}",
+      "expect": "no entry symbol",
+      "right": "fn main_jhyy() -> i32 {\n    return 0;\n}",
+      "wrong_code": "fn main() -> i32 {\n    return 0;\n}\n",
+      "right_code": "fn main_jhyy() -> i32 {\n    return 0;\n}\n"
+    },
+    {
+      "kind": "bite",
       "title": "**struct 字面量的字段值要显式带类型**",
       "why": "字段类型**必须精确匹配** ⇒ 整数字面量默认是 **i32** ⇒\n`P { c: 7 }`（`c: u8`）⇒ 报 **`field type mismatch`**。\n⚠️ **从 C 过来的模型 100% 会踩**（C 里 `struct P p = {7};` 天经地义）。",
       "wrong": "let p: P = P { c: 7 };",

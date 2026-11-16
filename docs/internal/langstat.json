@@ -1,7 +1,7 @@
 {
   "metric": "code lines (non-blank, non-comment-only)",
   "source": "git ls-files",
-  "total_lines": 55669,
+  "total_lines": 55731,
   "total_files": 490,
   "languages": [
     {
@@ -13,9 +13,9 @@
     },
     {
       "lang": "Python",
-      "lines": 11960,
+      "lines": 12022,
       "files": 43,
-      "pct": 21.5,
+      "pct": 21.6,
       "color": "#4c8fbd"
     },
     {
