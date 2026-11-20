@@ -23,6 +23,7 @@
 | `w231_struct_lit_null_field.jhyy` | W-231 | 编译期报 `field type mismatch` | 编译通过 |
 | `w232_topconst_scalar_msg.jhyy` | W-232 | 编译期报 `expected [ for const array init, got int` | 编译期报「顶层 const 只支持数组」 |
 | `w233_string_literal_slice_len.jhyy` | W-233 | **编译过了，但切片的 len=0** ⇒ `len(s)` 得 0、`s[0]` **访问违例** | 转换带上长度（或明确拒绝这个转换） |
+| `w234_const_array_as_elem.jhyy` | W-234 | **编译过了、不报错**，但带 `as` 的元素**读出 0** | 带 `as` 的元素也求值（或给诊断） |
 
 ## 怎么跑
 

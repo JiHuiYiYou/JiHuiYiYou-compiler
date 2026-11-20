@@ -363,6 +363,7 @@
 | [W-231](#w-231) | ACTIVE | struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch` |
 | [W-232](#w-232) | ACTIVE | 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」 |
 | [W-233](#w-233) | ACTIVE | 字符串字面量 `as [*]u8` ⇒ **切片的 len 没填**（=0）⇒ 读元素**越界访问违例** |
+| [W-234](#w-234) | ACTIVE | 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0**（不报错） |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -16378,3 +16379,58 @@ let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
   ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
   正常的 EXPECT 用例，同时把本条翻成 RESOLVED）
 - 相关：附录 B「未实装 / 已实装但受限」
+
+<a id="w-234"></a>
+## W-234: 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0**
+
+**状态:** ACTIVE since 2026-11-20 (v4.1.5) — 不报错，值是错的（**静默**）
+**Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：给一道「顶层 const 数组」⇒ 真编译真跑才发现）
+**日期:** 2026-11-20
+
+**触发面:** `compiler/src0/parser.jhyy` 的顶层 `const` 数组声明
+（`parse_const_decl`）＋ `compiler/src0/codegen.jhyy` 的顶层常量发射
+⇒ **元素初值只认「纯字面量」**；写成 `1 as i32` 这种**带转型**的形式时
+⇒ 元素被**当成 0**发射 ⇒ 读出来就是 0。
+
+**症状:**
+
+```jhyy
+const A: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];
+print_i64(A[1] as i64);        // ⇒ 0（该是 2）—— **不报错**
+
+const B: [i32; 3] = [1, 2, 3];
+print_i64(B[1] as i64);        // ⇒ 2  ✅
+```
+
+⇒ ⇒ **同样的语义（i32 数组）、只差一个 `as`** ⇒ 一个对、一个**静默给 0**。
+
+**根因:** 顶层 const 数组的初值**没有走常量表达式求值**那条路
+（顶层 `let` 的初始化器是有的）⇒ ⇒ 带 `as` 的元素**求不出值** ⇒
+落成 0 ⇒ 而且**没有任何诊断**。
+
+**workaround:** 顶层 `const` 数组的元素**只写裸字面量**（不带 `as`）：
+
+```jhyy
+const B: [i32; 3] = [1, 2, 3];   // ✅
+```
+
+⚠️ 规范 § 12 也这么说：「元素**应当是字面量**（编译器不做 const 检查）」⇒
+⇒ **行为本身在规范允许的范围内**，但**静默给错值**仍然危险
+⇒ ⇒ 至少该给一条**诊断**（或干脆把 `as` 形式也求值出来）。
+
+**影响范围:** 任何在顶层 const 数组里写带转型初值的人 ⇒ ⇒ 症状是
+**运行时的错值**（不是编译错误）⇒ ⇒ 很难定位。
+
+**失效条件:** 顶层 const 数组的初值**也走常量表达式求值**（或对非字面量形式
+给一条诊断）⇒ 本条关闭。
+
+**引用:**
+- 规范 § 12「顶层 const 数组」（`docs/abis/jhyy-lang-spec-v4.0.0.md:784`）
+- `compiler/src0/parser.jhyy`（`parse_const_decl` —— 顶层 const 数组声明）
+- 复现件：`compiler/tests/known-bugs/w234_const_array_as_elem.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT 用例，同时把本条翻成 RESOLVED）
+- 相关：W-228（字面量越界也被静默接受）、W-233（字符串字面量转切片丢长度）
