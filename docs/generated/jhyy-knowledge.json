@@ -982,6 +982,7 @@
       "code": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let x: u32 = 3000000000;\n    print_i64(x as i64);",
+      "pre_body": "",
       "measured": "3000000000"
     },
     {
@@ -991,6 +992,7 @@
       "code": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let x: i32 = 2147483647;\n    let y: i32 = x + 1;\n    print_i64(y as i64);",
+      "pre_body": "",
       "measured": "-2147483648"
     },
     {
@@ -1000,6 +1002,7 @@
       "code": "let a: i32 = -1;\n    print_i64(a >> 1);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let a: i32 = -1;\n    print_i64(a >> 1);",
+      "pre_body": "",
       "measured": "-1"
     },
     {
@@ -1009,6 +1012,7 @@
       "code": "let a: i32 = 1;\n    print_i64(a << 31);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let a: i32 = 1;\n    print_i64(a << 31);",
+      "pre_body": "",
       "measured": "-2147483648"
     },
     {
@@ -1018,6 +1022,7 @@
       "code": "let a: i32 = 0;\n    print_i64(~a);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let a: i32 = 0;\n    print_i64(~a);",
+      "pre_body": "",
       "measured": "-1"
     },
     {
@@ -1048,6 +1053,7 @@
       "code": "let a: u32 = 4294967295;\n    let b: i32 = 2147483647;\n    let c: i64 = 9223372036854775807;\n    print_i64(a as i64);\n    print_i64(b as i64);\n    print_i64(c);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**；`u64` 的上限 18446744073709551615 打印成 -1 是**正常**的 —— 它装不进 i64)",
       "code_body": "let a: u32 = 4294967295;\n    let b: i32 = 2147483647;\n    let c: i64 = 9223372036854775807;\n    print_i64(a as i64);\n    print_i64(b as i64);\n    print_i64(c);",
+      "pre_body": "",
       "measured": "4294967295 / 2147483647 / 9223372036854775807"
     },
     {
@@ -1057,6 +1063,7 @@
       "code": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let x: u32 = 4294967295;\n    let y: i64 = x as i64;\n    print_i64(y);",
+      "pre_body": "",
       "measured": "4294967295"
     },
     {
@@ -1131,6 +1138,7 @@
       "code": "let s: [*]u8 = \"hello\" as [*]u8;\n    print_i64(len(s) as i64);",
       "note": "⇒ 实测输出见下（**由生成器实测填入**）",
       "code_body": "let s: [*]u8 = \"hello\" as [*]u8;\n    print_i64(len(s) as i64);",
+      "pre_body": "",
       "measured": "0"
     },
     {
@@ -1153,6 +1161,79 @@
       "right": "let x: i32 = 1;\n    let r: i32 = match x {\n    0 => 1,\n    _ => 0,\n};",
       "wrong_code": "fn main_jhyy() -> i32 {\n    let x: i32 = 1;\n    let r: i32 = match x {\n    0 => { let y: i32 = 1; y },\n    _ => 0,\n};\n    return 0;\n}\n",
       "right_code": "fn main_jhyy() -> i32 {\n    let x: i32 = 1;\n    let r: i32 = match x {\n    0 => 1,\n    _ => 0,\n};\n    return 0;\n}\n"
+    },
+    {
+      "kind": "fact",
+      "title": "**指针算术是有的** —— `p + n` **按元素大小缩放**",
+      "why": "`p + n` / `p - n` **能写** ⇒ 按**元素大小**缩放：\n`*i32` 上 `p + 1` 前进 **4 字节**、`*u8` 上 `p + 1` 前进 **1 字节**；\n`p - q` 的结果是**元素个数**（`i64`）。\n⚠️ **别答「JHYY 没有指针算术」** —— 那是老账本（W-055，v1.7.0 已修）。",
+      "code": "let arr: [i32; 3] = [10 as i32, 20 as i32, 30 as i32];\n    let p: *i32 = &arr[0];\n    let q: *i32 = p + 1;\n    print_i64(*q as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "let arr: [i32; 3] = [10 as i32, 20 as i32, 30 as i32];\n    let p: *i32 = &arr[0];\n    let q: *i32 = p + 1;\n    print_i64(*q as i64);",
+      "pre_body": "",
+      "measured": "20"
+    },
+    {
+      "kind": "fact",
+      "title": "**顶层 `let` / `let mut` 是运行时全局变量**",
+      "why": "函数**外面**写 `let G: i64 = 9;` ⇒ 是**真正的全局变量**\n（落在 `.data` 段，**跨函数可见**：在 `bump()` 里改它、`main` 里读到改后的值）。\n⚠️ 初始化器**必须是整数常量表达式**（编译期折叠）⇒\n   非整数类型（`f64` / 指针 / struct）⇒ 初始化器**被丢弃** ⇒ 读到 **0 / 垃圾**。\n⚠️ **别答「JHYY 没有全局变量」** —— **有**。",
+      "pre_code": "let G: i64 = 9;\n",
+      "code": "print_i64(G);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "print_i64(G);",
+      "pre_body": "let G: i64 = 9;",
+      "measured": "9"
+    },
+    {
+      "kind": "fact",
+      "title": "**顶层 `const` 数组是允许的**（元素用裸字面量就正常）",
+      "why": "`const DIGITS: [i32; 3] = [7, 8, 9];` ⇒ **能写**，\n`DIGITS[2]` 读出 **9** ✓。\n⚠️ 但元素**写成 `1 as i32` 那种带 `as` 的** ⇒ 读到 **0**（台账 W-234）。\n⚠️ **只支持数组行**：标量 `const X: i32 = 1;` **不支持**（台账 W-232）。",
+      "pre_code": "const DIGITS: [i32; 3] = [7, 8, 9];\n",
+      "code": "print_i64(DIGITS[2] as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "print_i64(DIGITS[2] as i64);",
+      "pre_body": "const DIGITS: [i32; 3] = [7, 8, 9];",
+      "measured": "9"
+    },
+    {
+      "kind": "fact",
+      "title": "**窄类型（`i8`/`u8`/`i16`/`u16`）的局部变量**不截断、不回绕",
+      "why": "⚠️ **已知缺陷**：窄类型的**局部变量**实际按 **32 位**算 ⇒\n   `200u8 + 100u8` 得 **300**（**不回绕**）、`200i32 as i8` 得 **200**（**不截断**）——\n   与规范 § 4.2（溢出回绕）/ § 4.3（`as` 截断）**冲突** ⇒ 台账 W-235。\n⚠️ **但内存里是真的窄**：`struct` 字段 / 数组元素**会真截断**\n   （`u8` 字段存 300 ⇒ 读出 **44**）⇒ ⇒ **别用局部变量做位宽截断**。\n⇒ 绕法：位宽敏感就**自己 `& 0xFF`**，或者一律用 `i32`/`u32`。",
+      "pre_code": "type S = struct { b: u8 }\n",
+      "code": "let loc: u8 = 200u8 + 100u8;\n    print_i64(loc as i64);\n    let s: S = S { b: 300 as u8 };\n    print_i64(s.b as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "let loc: u8 = 200u8 + 100u8;\n    print_i64(loc as i64);\n    let s: S = S { b: 300 as u8 };\n    print_i64(s.b as i64);",
+      "pre_body": "type S = struct { b: u8 }",
+      "measured": "300 / 44"
+    },
+    {
+      "kind": "fact",
+      "title": "**`!` 作用在 `bool` 上是逻辑非**（`!true` ⇒ `false`）",
+      "why": "`!` 是**逻辑非**（按位取反是 `~`）⇒ `!true` 得 `false`。\n⚠️ `!` 作用在**整数**上 ⇒ 结果是 `bool`（`!0` 得 `true`）⇒ **别拿它当 `~` 用**。",
+      "code": "let b: bool = true;\n    let c: bool = !b;\n    if c {\n        print_i64(1i64);\n    } else {\n        print_i64(0i64);\n    }",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "let b: bool = true;\n    let c: bool = !b;\n    if c {\n        print_i64(1i64);\n    } else {\n        print_i64(0i64);\n    }",
+      "pre_body": "",
+      "measured": "0"
+    },
+    {
+      "kind": "fact",
+      "title": "**前导零的字面量按八进制**（`077` ⇒ 63）",
+      "why": "`077` ⇒ **八进制** ⇒ **63**（**不是 77**）；`0b1010` ⇒ **10**；`0x1F` ⇒ **31**。\n⚠️ C 里 `077` 也是八进制 ⇒ 但**从 Python / Rust 过来的模型**会当十进制 ⇒\n   ⇒ ⇒ **别写前导零的整数字面量**。",
+      "code": "let o: i32 = 077;\n    print_i64(o as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "let o: i32 = 077;\n    print_i64(o as i64);",
+      "pre_body": "",
+      "measured": "63"
+    },
+    {
+      "kind": "fact",
+      "title": "**`defer` 是逆序（LIFO）执行** —— 且**只在显式 `return` 路径**触发",
+      "why": "多个 `defer` ⇒ **后写的先执行**（栈语义，跟 Go / Rust 一样）。\n⚠️ **函数体最后一个表达式的隐式返回不触发 `defer`** ——\n   要触发就得写**显式 `return`**。",
+      "code": "print_i64(1i64);\n    defer print_i64(2i64);\n    defer print_i64(3i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "print_i64(1i64);\n    defer print_i64(2i64);\n    defer print_i64(3i64);",
+      "pre_body": "",
+      "measured": "1 / 3 / 2"
     }
   ],
   "active_workarounds": [
@@ -1160,57 +1241,64 @@
       "id": "W-184",
       "title": "peephole 对 > 4096 字节的 `.s` **整段跳过** —— 真实产物上 peephole 从来没跑过",
       "status": "DEFERRED",
-      "symptom": "⇒ peephole 只在 hello-world 级输入上跑过 ⇒ **任何「`.s` 级 pass」的验证都缺一个可信的 `.s` 级工具**\n(v4.4.5-plan 把这条列为「非性能但必须先修」的原因)。\n\n**根因(⚠️ 至今未定位):** 源码注释自陈(v2.13.0 埋 workaround 时写下的):\n`peephole_concat_loop` 在大输入上**静默崩** —— trace 停在 \"concat start\",\n到不了 \"concat end\" / `jh_write_file` ⇒ peephole 返回 **inconsistent fold**,\n触发后续 self-backend **静默 skip `.s` 写盘**。\n注释原文:「RCA pending(jhyy codegen 对 1.5K+ line concat loop 有 silent exit,\n**具体 root cause 待 Phase 2+ 真修**)」⇒ **根因至今没有定位**。",
+      "symptom": "自举产物的 `.s` 规模是 MB 级 ⇒ **真实程序永远走跳过分支**\n\n⇒ peephole 只在 hello-world 级输入上跑过 ⇒ **任何「`.s` 级 pass」的验证都缺一个可信的 `.s` 级工具**\n(v4.4.5-plan 把这条列为「非性能但必须先修」的原因)。\n\n**根因(⚠️ 至今未定位):** 源码注释自陈(v2.13.0 埋 workaround 时写下的):\n`peephole_concat_loop` 在大输入上**静默崩** —— trace 停在 \"concat start\",\n到不了 \"concat end\" / `jh_write_file` ⇒ peephole 返回 **inconsistent fold**,\n触发后续 self-backend **静默 skip `.s` 写盘**。\n注释原文:「RCA pending(jhyy codegen 对 1.5K+ line concat loop 有 silent exit,\n**具体 root cause 待 Phase 2+ 真修**)」⇒ **根因至今没有定位**。\n\n**绕法(现在生效的):** `len > 4096` ⇒ 整段跳过 fold。",
       "fix": ""
     },
     {
       "id": "W-228",
       "title": "整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致**",
       "status": "DEFERRED",
-      "symptom": "```\n$ cat ovf.jhyy\nfn main_jhyy() -> i32 {\n    let a: i32 = 2147483648;      // ← 装不下 i32（最大 2147483647）\n    let b: u32 = 4294967296;      // ← 装不下 u32（最大 4294967295）\n    return 0;\n}\n$ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）",
-      "fix": "u32 `[0, 4294967295]`、i64 / u64 同理。\n- 要算一个越界的值 ⇒ **用表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致 ✓。\n- 要更大的值 ⇒ **换个更宽的类型**（u64 / i64）。\n\n**怎么修的（还没修 —— 修法方向）:** 两条路，**推荐报错**：\n- **(A) 报错**：字面量超出声明类型范围 ⇒ 编译期拒绝（像 Rust；C 只是警告，\n  但 C 至少只有**一种**解释）。\n- **(B) 窄化**：按声明类型窄化（像 C 的截断）⇒ 但**必须保证窄化后只有\n  一种解释** ⇒ 也就是说常量折叠和运行时**必须走同一条窄化路径**。"
+      "symptom": "字面量**装不下**声明的类型时，编译器**不报错**，而是让**同一个值有两种解释**：\n\n```\n$ cat ovf.jhyy\nfn main_jhyy() -> i32 {\n    let a: i32 = 2147483648;      // ← 装不下 i32（最大 2147483647）\n    let b: u32 = 4294967296;      // ← 装不下 u32（最大 4294967295）\n    return 0;\n}\n$ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）\n```\n\n⇒ **字面量路径**（`a` 直接是那个字面量）：\n\n| 表达式 | 结果 |",
+      "fix": "- **字面量别超出声明类型的范围** —— i32 `[−2147483648, 2147483647]`、\n\n  u32 `[0, 4294967295]`、i64 / u64 同理。\n- 要算一个越界的值 ⇒ **用表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致 ✓。\n- 要更大的值 ⇒ **换个更宽的类型**（u64 / i64）。\n\n**怎么修的（还没修 —— 修法方向）:** 两条路，**推荐报错**：\n- **(A) 报错**：字面量超出声明类型范围 ⇒ 编译期拒绝（像 Rust；C 只是警告，\n  但 C 至少只有**一种**解释）。\n- **(B) 窄化**：按声明类型窄化（像 C 的截断）⇒ 但**必须保证窄化后只有\n  一种解释** ⇒ 也就是说常量折叠和运行时**必须走同一条窄化路径**。\n\n⚠️ **(B) 单独做不够** —— 只改 codegen 而不改 sema（或反过来）⇒ 两种解释\n还会并存 ⇒ ⇒ **窄化必须发生在 sema 定类型那一步**，让常量**和运行时\n用同一个值**。"
     },
     {
       "id": "W-229",
       "title": "把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 + 产物爆栈**",
       "status": "ACTIVE",
-      "symptom": "```jhyy\nfn handler(x: i32) -> i32 { return x + 1; }\nfn take(p: *u8) -> i64 { return p as i64; }\nfn main_jhyy() -> i32 { print_i64(take(handler)); return 0; }\n```\n\n⇒ **编译器崩**：\n\n```\ncodegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059",
-      "fix": "`GetProcAddress(GetModuleHandleA(\"user32.dll\"), \"DefWindowProcA\")` ⇒ 实测可用\n（`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。"
+      "symptom": "最小复现（三个字面量级）：\n\n```jhyy\nfn handler(x: i32) -> i32 { return x + 1; }\nfn take(p: *u8) -> i64 { return p as i64; }\nfn main_jhyy() -> i32 { print_i64(take(handler)); return 0; }\n```\n\n⇒ **编译器崩**：\n\n```\ncodegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059\n```\n\n⇒ 产物二进制还**运行时爆栈**（`0xC00000FD` / STACK_OVERFLOW）。\n\n三种写法、三种表现：",
+      "fix": "**不要把函数名当值用。** 需要回调地址时，从 DLL 里取：\n\n`GetProcAddress(GetModuleHandleA(\"user32.dll\"), \"DefWindowProcA\")` ⇒ 实测可用\n（`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。"
     },
     {
       "id": "W-230",
       "title": "栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee 收到高 4 字节是残渣的指针**",
       "status": "ACTIVE",
-      "symptom": "```\nCreateWindowExA(..., null, null, hinst, null)   → 返回 NULL，GetLastError() = 1400\nCreateWindowExA(..., z,    z,    hinst, z)       → 正常建窗（IsWindow = 1）\n```\n\n⇒ `1400` = ERROR_INVALID_WINDOW_HANDLE ⇒ **hWndParent 拿到的是垃圾指针**。\n（同一段代码只改「字面量 null → 带类型的局部变量」就恢复正常。）\n\n**IL 证据** ⇒ 同一个调用，两个版本的差别只在 `w` / `l`：\n\n```",
-      "fix": "```jhyy\nlet z: *u8 = null;\nCreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满\n```"
+      "symptom": "跨 FFI 的确定性表现（Win32 `CreateWindowExA`，第 9/10/12 个实参是空指针）：\n\n```\nCreateWindowExA(..., null, null, hinst, null)   → 返回 NULL，GetLastError() = 1400\nCreateWindowExA(..., z,    z,    hinst, z)       → 正常建窗（IsWindow = 1）\n```\n\n⇒ `1400` = ERROR_INVALID_WINDOW_HANDLE ⇒ **hWndParent 拿到的是垃圾指针**。\n（同一段代码只改「字面量 null → 带类型的局部变量」就恢复正常。）\n\n**IL 证据** ⇒ 同一个调用，两个版本的差别只在 `w` / `l`：\n\n```\n%t10 =w copy 0        ← null 字面量：32 位（w）\n%t13 =l call $CreateWindowExA(w %t4, l %t1, l %t3, w %t5, ..., w %t10, w %t11, l %t2, w %t12)\n```",
+      "fix": "要传空指针时**先落到一个带类型的局部变量**：\n\n```jhyy\nlet z: *u8 = null;\nCreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满\n```"
     },
     {
       "id": "W-231",
       "title": "struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch`",
       "status": "ACTIVE",
-      "symptom": "type W = struct { a: *u8, b: *u8 }\nlet w = W { a: null, b: null };    // → field type mismatch ×2\n```\n\n⇒ 而**同一个 `null` 字面量**写进 let 初始化是**合法**的：\n\n```jhyy\nlet z: *u8 = null;                // ✅ 编译通过\n```\n\n⇒ ⇒ **同一个字面量在两个上下文里一个通一个不通**，而且报错措辞",
-      "fix": "```jhyy\nlet z: *u8 = null;\nlet w = W { a: z, b: z };         // ✅\n```"
+      "symptom": "```jhyy\n\ntype W = struct { a: *u8, b: *u8 }\nlet w = W { a: null, b: null };    // → field type mismatch ×2\n```\n\n⇒ 而**同一个 `null` 字面量**写进 let 初始化是**合法**的：\n\n```jhyy\nlet z: *u8 = null;                // ✅ 编译通过\n```\n\n⇒ ⇒ **同一个字面量在两个上下文里一个通一个不通**，而且报错措辞\n（`field type mismatch`）完全指不到真因（null 没类型）⇒ 很容易误判成\n「字段类型写错了」。",
+      "fix": "先声明带类型的局部变量，再放进字面量：\n\n```jhyy\nlet z: *u8 = null;\nlet w = W { a: z, b: z };         // ✅\n```"
     },
     {
       "id": "W-232",
       "title": "顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」",
       "status": "ACTIVE",
-      "symptom": "const X: u32 = 5;\n// → error: expected [ for const array init, got int\n```\n\n⇒ 规范 § 12 的事实是「**仅支持顶层** `const` 数组」⇒ **行为本身是对的**\n（编译器明确拒绝了，没有静默接受）⇒ 这是**诊断文案**的问题：\n报错在讲「const array init 的语法」，却没说「顶层 const 只支持数组，\n标量请用顶层 let」⇒ 用户看不出该怎么改。",
-      "fix": "```jhyy\nlet X: u32 = 5;      // ✅\n```\n\n⚠️ 顶层 `let` 落 `.data` 段 ⇒ 初始化器只认**整型常量表达式**\n（字面量 / 一元 / 二元算术 / 整型之间的 `as`）⇒ `let X: f64 = 3.5;` 读回是 0\n（见附录 B「顶层全局变量只有整数类型初始化正确」）。"
+      "symptom": "```jhyy\n\nconst X: u32 = 5;\n// → error: expected [ for const array init, got int\n```\n\n⇒ 规范 § 12 的事实是「**仅支持顶层** `const` 数组」⇒ **行为本身是对的**\n（编译器明确拒绝了，没有静默接受）⇒ 这是**诊断文案**的问题：\n报错在讲「const array init 的语法」，却没说「顶层 const 只支持数组，\n标量请用顶层 let」⇒ 用户看不出该怎么改。",
+      "fix": "标量常量用**顶层 `let`**：\n\n```jhyy\nlet X: u32 = 5;      // ✅\n```\n\n⚠️ 顶层 `let` 落 `.data` 段 ⇒ 初始化器只认**整型常量表达式**\n（字面量 / 一元 / 二元算术 / 整型之间的 `as`）⇒ `let X: f64 = 3.5;` 读回是 0\n（见附录 B「顶层全局变量只有整数类型初始化正确」）。"
     },
     {
       "id": "W-233",
       "title": "字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒ 访问违例",
       "status": "ACTIVE",
-      "symptom": "let s: [*]u8 = \"hello\" as [*]u8;\nlet n: i64 = len(s);     // ⇒ 0（该是 5）\nlet c: i64 = s[0] as i64; // ⇒ **访问违例**（0xC0000005 / EXITCODE 3221225477）\n```\n\n⇒ 对照：`arr as [*]i32`（数组→切片）**是好的** ⇒ len=5 ✓ ⇒ ⇒\n**问题只出在「字面量 → 切片」这一条路上**。",
-      "fix": "```jhyy\nlet s: *u8 = \"hello\";        // ✅ 类型是 *u8（规范 § 2.5）\nlet n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）\n```\n\n⇒ **不要**写 `\"hello\" as [*]u8` ⇒ ⇒ 它会给你一个 len=0 的切片，\n下标一读就**访问违例**。"
+      "symptom": "```jhyy\n\nlet s: [*]u8 = \"hello\" as [*]u8;\nlet n: i64 = len(s);     // ⇒ 0（该是 5）\nlet c: i64 = s[0] as i64; // ⇒ **访问违例**（0xC0000005 / EXITCODE 3221225477）\n```\n\n⇒ 对照：`arr as [*]i32`（数组→切片）**是好的** ⇒ len=5 ✓ ⇒ ⇒\n**问题只出在「字面量 → 切片」这一条路上**。",
+      "fix": "字符串字面量**就用 `*u8`**（它本来就是 NUL 结尾的 `*u8`）：\n\n```jhyy\nlet s: *u8 = \"hello\";        // ✅ 类型是 *u8（规范 § 2.5）\nlet n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）\n```\n\n⇒ **不要**写 `\"hello\" as [*]u8` ⇒ ⇒ 它会给你一个 len=0 的切片，\n下标一读就**访问违例**。"
     },
     {
       "id": "W-234",
       "title": "顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0**",
       "status": "ACTIVE",
-      "symptom": "const A: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];\nprint_i64(A[1] as i64);        // ⇒ 0（该是 2）—— **不报错**\n\nconst B: [i32; 3] = [1, 2, 3];\nprint_i64(B[1] as i64);        // ⇒ 2  ✅\n```\n\n⇒ ⇒ **同样的语义（i32 数组）、只差一个 `as`** ⇒ 一个对、一个**静默给 0**。",
-      "fix": "```jhyy\nconst B: [i32; 3] = [1, 2, 3];   // ✅\n```\n\n⚠️ 规范 § 12 也这么说：「元素**应当是字面量**（编译器不做 const 检查）」⇒\n⇒ **行为本身在规范允许的范围内**，但**静默给错值**仍然危险\n⇒ ⇒ 至少该给一条**诊断**（或干脆把 `as` 形式也求值出来）。"
+      "symptom": "```jhyy\n\nconst A: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];\nprint_i64(A[1] as i64);        // ⇒ 0（该是 2）—— **不报错**\n\nconst B: [i32; 3] = [1, 2, 3];\nprint_i64(B[1] as i64);        // ⇒ 2  ✅\n```\n\n⇒ ⇒ **同样的语义（i32 数组）、只差一个 `as`** ⇒ 一个对、一个**静默给 0**。",
+      "fix": "顶层 `const` 数组的元素**只写裸字面量**（不带 `as`）：\n\n```jhyy\nconst B: [i32; 3] = [1, 2, 3];   // ✅\n```\n\n⚠️ 规范 § 12 也这么说：「元素**应当是字面量**（编译器不做 const 检查）」⇒\n⇒ **行为本身在规范允许的范围内**，但**静默给错值**仍然危险\n⇒ ⇒ 至少该给一条**诊断**（或干脆把 `as` 形式也求值出来）。"
+    },
+    {
+      "id": "W-235",
+      "title": "窄类型（`i8`/`u8`/`i16`/`u16`）的**局部变量**既不截断、也不回绕（实际按 32 位算）",
+      "status": "ACTIVE",
+      "symptom": "```jhyy\n\nlet loc_add: u8 = 200u8 + 100u8;   // ⇒ 300（该是 44：u8 溢出要回绕）\nlet loc_cast: i8 = 200i32 as i8;    // ⇒ 200（该是 -56：as 到 i8 要截断）\n```\n\n⇒ **但内存里是真的窄**（`struct` 字段 / 数组元素走显式 `storeb` / `loadub`）：\n\n```jhyy\nlet s: S = S { b: 300 as u8 };         // ⇒ 读出 44 ✅（真截断）\nlet arr: [u8; 2] = [300 as u8, 1u8];   // ⇒ arr[0] = 44 ✅\n```\n\n⇒ ⇒ **同一个类型，两种宽度** ⇒ ⇒ **局部变量里的位宽是假的**。",
+      "fix": "位宽敏感就别用窄类型的**局部变量** —— 一律用 `i32` / `u32`\n\n（要截断就**自己 `& 0xFF`**），或者把值写进 `struct` 字段 / 数组元素（那里是真窄的）。"
     }
   ],
   "example": "// 完全可编译的一个程序：入口 + 泛型 + struct + enum + match + 闭包 + defer\nimport vec;\n\ntype Shape = enum {\n    Circle(i32),     // 半径\n    Rect(i32),       // 面积（变体只带一个 payload —— 见附录 B）\n    Empty,\n}\n\ntype Point = struct {\n    x: i32,\n    y: i32,\n}\n\nfn area(s: Shape) -> i32 {\n    match s {\n        Shape::Circle(r) => 3 * r * r,\n        Shape::Rect(a) => a,\n        Shape::Empty => 0,\n    }\n}\n\nfn max<T>(a: T, b: T) -> T {\n    if a > b { return a; }\n    return b;\n}\n\nfn cleanup() -> i32 {\n    return 0;\n}\n\nfn main_jhyy() -> i32 {\n    defer cleanup();\n\n    let p = Point { x: 3, y: 4 };\n    let s = Shape::Rect(p.x * p.y);\n    let a = area(s);\n\n    let f = |n: i32| { n * 2 };\n    let d = f(a);\n\n    let m: i32 = max::<i32>(d, 100);\n\n    return m;   // 100\n}",

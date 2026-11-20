@@ -1,0 +1,49 @@
+// 复现件 —— 对应台账 W-235（**故意不在回归套件里**，见本目录 README.md）
+//
+// 现状（2026-11-20 实测）：**编译通过、不报错**，但窄类型的**局部变量**
+//   **不截断、不回绕** —— 实际按 32 位算：
+//   LOC_ADD[200u8 + 100u8] ⇒ 300   （该是 44：u8 溢出要回绕）
+//   LOC_CAST[200i32 as i8] ⇒ 200    （该是 -56：as 到 i8 要截断）
+//   但**内存里是真的窄**（struct 字段 / 数组元素 ⇒ 真截断）：
+//   FIELD[300 as u8]      ⇒ 44  ✅
+//
+// 修好后：LOC_ADD ⇒ 44、LOC_CAST ⇒ -56（与规范 § 4.2 / § 4.3 一致）
+//   （或：编译器对窄类型局部变量给一条**诊断**）
+//
+// 断言（搬进 examples/ 时生效）：
+//   EXPECT: 0
+//
+// 根因：`qbe_type_of` 把 PRIM_I8 / PRIM_U8 / PRIM_I16 / PRIM_U16 全部映到
+//   `QBE_W()`（32 位）⇒ 局部变量的值就**待在一个 32 位寄存器里**
+//   ⇒ 既不截断（`as` 成了 no-op）也不回绕（`add` 是 32 位加法）。
+//   而内存路径（数组元素 / struct 字段）走显式 `storeb` / `loadub`
+//   ⇒ **那边是真窄的** ⇒ ⇒ **同一个类型，两种宽度**。
+//
+// 绕法：位宽敏感就别用窄类型的**局部变量** —— 一律用 `i32` / `u32`
+//   （要截断就自己 `& 0xFF`），或者把值写进 struct 字段 / 数组元素。
+type S = struct {
+    b: u8,
+}
+
+fn main_jhyy() -> i32 {
+    let loc_add: u8 = 200u8 + 100u8;
+    let loc_cast: i8 = 200i32 as i8;
+    let s: S = S { b: 300 as u8 };
+    let field: i64 = s.b as i64;
+    let arr: [u8; 2] = [300 as u8, 1u8];
+    let elem: i64 = arr[0] as i64;
+
+    let a: i64 = loc_add as i64;
+    let b: i64 = loc_cast as i64;
+    // 现在：a=300、b=200、field=44、elem=44
+    if a == 44i64 {
+        if b == -56i64 {
+            if field == 44i64 {
+                if elem == 44i64 {
+                    return 0;
+                }
+            }
+        }
+    }
+    return 1;
+}
