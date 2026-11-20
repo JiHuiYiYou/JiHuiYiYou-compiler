@@ -621,7 +621,7 @@
         {
           "name": "fmt_hex_u32",
           "args": "out_buf, val, upper",
-          "ret": "写入 u32 十六进制;返回字节数"
+          "ret": "写入 u32 十六进制;返回字节数（upper: 0 = 小写 a-f，1 = 大写 A-F）"
         }
       ],
       "notes": [

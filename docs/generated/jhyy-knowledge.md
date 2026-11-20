@@ -551,7 +551,7 @@
 - `fmt_i32(out_buf, val)` -> 写入 i32 十进制到 out_buf (null-terminated);返回写入字节数 (不含 \0)
 - `fmt_i64(out_buf, val)` -> 写入 i64 十进制;返回字节数
 - `fmt_str(out_buf, s)` -> 复制 cstr 到 out_buf;返回字节数
-- `fmt_hex_u32(out_buf, val, upper)` -> 写入 u32 十六进制;返回字节数
+- `fmt_hex_u32(out_buf, val, upper)` -> 写入 u32 十六进制;返回字节数（upper: 0 = 小写 a-f，1 = 大写 A-F）
 
   > 注:buffer 必须 ≥ 32 字节(i32/i64 最多 11/20 位 + sign + \0;hex u32 10 位 + \0)。
 
