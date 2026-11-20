@@ -50,6 +50,7 @@ SPEC_PATH = JHYY_ROOT / "docs" / "abis" / "jhyy-lang-spec-v4.0.0.md"
 SPEC_BASENAME = "jhyy-lang-spec-v4.0.0.md"
 STD_DIR = JHYY_ROOT / "compiler" / "src0" / "std"
 OUT_DIR = JHYY_ROOT / "docs" / "generated"
+LEDGER_PATH = JHYY_ROOT / "docs" / "internal" / "workarounds.md"
 OUT_MD = OUT_DIR / "jhyy-knowledge.md"
 OUT_JSON = OUT_DIR / "jhyy-knowledge.json"
 # 「报错 → 修法」表（给 IDE 的 hook 用 —— 诊断顺手带上怎么改）
@@ -155,6 +156,70 @@ def collect_toc(doc):
             }
         )
     return toc
+
+
+def collect_active_workarounds():
+    """台账里**还没修**的条目（**ACTIVE** + **DEFERRED**）⇒ 知识包的一节。
+
+    ⚠️ **为什么要放进知识包**（2026-11-20 用户提出）：
+    - 知识包里原有的「未实装」「已实装但受限」讲的是**设计边界**（一直如此）；
+    - 台账的 ACTIVE / DEFERRED 条目讲的是**「这个坑现在还没修、这么绕」**
+      ⇒ ⇒ 模型写代码时**最该先知道的是后者** ⇒ ⇒ 而它原来**只在**
+      「报错速查表」（`jhyy-error-fix.json`）里 ⇒ ⇒ **要模型先想到去查 MCP 才看得到**
+      ⇒ ⇒ 现在**常驻**。
+
+    ⚠️ **自动同步（不需要人为维护）**：
+    - 这里**只收 ACTIVE / DEFERRED** ⇒ ⇒ 台账里那条翻成 RESOLVED / SUPERSEDED
+      ⇒ ⇒ **重新生成就没了** ⇒ ⇒ 台账是**唯一真相源**。
+    - 且 `scripts/dev/refresh-artifacts.py` 的知识包 triggers **已含台账**
+      ⇒ ⇒ 「改了台账但知识包没刷」**CI 会抓**（门红）⇒ ⇒ 不会漏。
+
+    ⚠️ **每条只取「症状 + 绕法」的要点** ⇒ ⇒ 不把整条台账塞进包里
+    ⇒ ⇒ 台账全文用 `jhyy_workarounds` 工具查。
+    """
+    if not LEDGER_PATH.exists():
+        return []
+    text = LEDGER_PATH.read_text(encoding="utf-8", errors="replace")
+    out = []
+    # 条目切块：`## W-NNN: 标题`
+    parts = re.split(r"^## (W-\d+): (.+)$", text, flags=re.M)
+    # parts = [前言, id1, 标题1, 正文1, id2, 标题2, 正文2, ...]
+    for i in range(1, len(parts) - 2, 3):
+        wid, title, body = parts[i], parts[i + 1].strip(), parts[i + 2]
+        m = re.search(r"^\*\*状态:\*\*\s*([A-Z]+)", body, flags=re.M)
+        if not m or m.group(1) not in ("ACTIVE", "DEFERRED"):
+            continue
+        out.append({
+            "id": wid,
+            "title": title,
+            "status": m.group(1),
+            "symptom": _ledger_field(body, "症状"),
+            "fix": _ledger_field(body, "workaround"),
+        })
+    return out
+
+
+def _ledger_field(body: str, name: str) -> str:
+    """取台账条目里某个 `**字段:**` 的正文（到下一个 `**字段:**` 为止），压成几行。"""
+    m = re.search(r"^\*\*" + re.escape(name) + r":\*\*\s*(.*)$", body, flags=re.M)
+    if not m:
+        return ""
+    rest = body[m.end():]
+    # 到下一个 `**xxx:**` 字段为止
+    nxt = re.search(r"^\*\*[A-Za-z一-鿿 -]+:\*\*", rest, flags=re.M)
+    seg = rest[: nxt.start()] if nxt else rest
+    lines = [ln.rstrip() for ln in seg.split("\n")]
+    # 丢掉空行、把代码块收进来（复现件对模型有用），但最多 8 行
+    out = []
+    for ln in lines:
+        if not ln.strip():
+            if out and out[-1] != "":
+                out.append("")
+            continue
+        out.append(ln)
+        if len([x for x in out if x.strip()]) >= 8:
+            break
+    return "\n".join(out).strip()
 
 
 def collect_pitfalls(doc):
@@ -1276,7 +1341,8 @@ def collect_error_lookup(doc):
 # ── 渲染 ────────────────────────────────────────────────────────
 
 def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
-                    error_lookup, usage_examples=None, verified_rules=None):
+                    error_lookup, usage_examples=None, verified_rules=None,
+                    active_workarounds=None):
     L = []
     A = L.append
 
@@ -1336,6 +1402,37 @@ def build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
         for c, j, why in C_MIGRATION:
             A("| %s | %s | %s |" % (c, j, why))
         A("")
+    # ── **⚠ 还没修的坑（台账 ACTIVE / DEFERRED）** ────────────────
+    #   实测/用户提出（2026-11-20）：模型撞到**还没修**的缺陷时，
+    #   知识包里原先**看不到**这些条目（只在「报错速查表」里 ⇒ 要它先想到查 MCP）
+    #   ⇒ ⇒ 现在**常驻**在第一屏后面。
+    #   ⚠️ **自动同步**：只收 ACTIVE / DEFERRED ⇒ 台账一改、重新生成就没了。
+    if active_workarounds:
+        A("## ⚠ **还没修的坑**（台账 ACTIVE / DEFERRED）—— 撞上了**按「绕法」写**")
+        A("")
+        A("> 这些是**编译器现在还没修**的真缺陷 ⇒ ⇒ 撞上了**照「绕法」绕**，别硬扛。")
+        A("> 每条的根因 / 复现件 / 失效条件：台账全文，用 `jhyy_workarounds` 工具查。")
+        A(">")
+        A("> ⚠️ **这一节是自动生成的** ⇒ 台账里那条修好（状态翻成 `RESOLVED`）")
+        A("> ⇒ ⇒ **重新生成知识包它就没了** ⇒ ⇒ **不需要人为维护**。")
+        A("")
+        for w in active_workarounds:
+            A("### %s · %s" % (w["id"], w["title"]))
+            A("")
+            A("**状态：** %s" % w["status"])
+            A("")
+            if w["fix"]:
+                A("**绕法：**")
+                A("")
+                for ln in w["fix"].split("\n"):
+                    A(("  " + ln) if ln.strip() else "")
+                A("")
+            if w["symptom"]:
+                A("**症状：**")
+                A("")
+                for ln in w["symptom"].split("\n"):
+                    A(("  " + ln) if ln.strip() else "")
+                A("")
     A("## 规范章节目录")
     A("")
     A("查某一节用 `jhyy_lang_ref`，参数传章节号（如 `\"5.6\"` / `\"附录 B\"`）。")
@@ -1619,6 +1716,9 @@ def main():
     stdlib = collect_stdlib()
     usage_examples = [] if args.no_usage_examples else collect_usage_examples()
     verified_rules = [] if args.no_verified_rules else collect_verified_rules()
+    # ⚠️ **台账的 ACTIVE / DEFERRED 条目** ⇒ 知识包的一节
+    # （自动同步：台账一改、重新生成就没了 ⇒ 不需要人为维护）
+    active_workarounds = collect_active_workarounds()
     # ⚠️ **高频速查必须跟正文对得上** —— 对不上就**不许生成**
     _check_quick_fire(verified_rules)
     # ⚠️ **`--check` 模式**：生成到**临时目录**，比对目标是**仓里的**产物。
@@ -1639,7 +1739,8 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
     md = build_markdown(doc, toc, pitfalls, impl, limited, stdlib, example,
-                        error_lookup, usage_examples, verified_rules)
+                        error_lookup, usage_examples, verified_rules,
+                        active_workarounds)
     with open(out_md, "w", encoding="utf-8", newline="") as f:
         f.write(md)
 
@@ -1659,6 +1760,7 @@ def main():
         "stdlib": stdlib,
         "usage_examples": usage_examples,
         "verified_rules": verified_rules,
+        "active_workarounds": active_workarounds,
         "example": example,
         "error_lookup": error_lookup,
     }

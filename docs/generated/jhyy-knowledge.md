@@ -66,6 +66,203 @@
 | `for (i = 0; i < n; i++)` | `for i in 0..n { }` | 区间**半开** ⇒ 与 C 一致 ✓（但 `match` 的区间是**闭**的 ⇒ 别混） |
 | `(int64_t)a * b` | `(a as i64) * b` | `as` 与 `*` **同级**（左结合）⇒ `a * b as u64` 是 **`(a * b) as u64`** |
 
+## ⚠ **还没修的坑**（台账 ACTIVE / DEFERRED）—— 撞上了**按「绕法」写**
+
+> 这些是**编译器现在还没修**的真缺陷 ⇒ ⇒ 撞上了**照「绕法」绕**，别硬扛。
+> 每条的根因 / 复现件 / 失效条件：台账全文，用 `jhyy_workarounds` 工具查。
+>
+> ⚠️ **这一节是自动生成的** ⇒ 台账里那条修好（状态翻成 `RESOLVED`）
+> ⇒ ⇒ **重新生成知识包它就没了** ⇒ ⇒ **不需要人为维护**。
+
+### W-184 · peephole 对 > 4096 字节的 `.s` **整段跳过** —— 真实产物上 peephole 从来没跑过
+
+**状态：** DEFERRED
+
+**症状：**
+
+  ⇒ peephole 只在 hello-world 级输入上跑过 ⇒ **任何「`.s` 级 pass」的验证都缺一个可信的 `.s` 级工具**
+  (v4.4.5-plan 把这条列为「非性能但必须先修」的原因)。
+
+  **根因(⚠️ 至今未定位):** 源码注释自陈(v2.13.0 埋 workaround 时写下的):
+  `peephole_concat_loop` 在大输入上**静默崩** —— trace 停在 "concat start",
+  到不了 "concat end" / `jh_write_file` ⇒ peephole 返回 **inconsistent fold**,
+  触发后续 self-backend **静默 skip `.s` 写盘**。
+  注释原文:「RCA pending(jhyy codegen 对 1.5K+ line concat loop 有 silent exit,
+  **具体 root cause 待 Phase 2+ 真修**)」⇒ **根因至今没有定位**。
+
+### W-228 · 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致**
+
+**状态：** DEFERRED
+
+**绕法：**
+
+  u32 `[0, 4294967295]`、i64 / u64 同理。
+  - 要算一个越界的值 ⇒ **用表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致 ✓。
+  - 要更大的值 ⇒ **换个更宽的类型**（u64 / i64）。
+
+  **怎么修的（还没修 —— 修法方向）:** 两条路，**推荐报错**：
+  - **(A) 报错**：字面量超出声明类型范围 ⇒ 编译期拒绝（像 Rust；C 只是警告，
+    但 C 至少只有**一种**解释）。
+  - **(B) 窄化**：按声明类型窄化（像 C 的截断）⇒ 但**必须保证窄化后只有
+    一种解释** ⇒ 也就是说常量折叠和运行时**必须走同一条窄化路径**。
+
+**症状：**
+
+  ```
+  $ cat ovf.jhyy
+  fn main_jhyy() -> i32 {
+      let a: i32 = 2147483648;      // ← 装不下 i32（最大 2147483647）
+      let b: u32 = 4294967296;      // ← 装不下 u32（最大 4294967295）
+      return 0;
+  }
+  $ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）
+
+### W-229 · 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 + 产物爆栈**
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  `GetProcAddress(GetModuleHandleA("user32.dll"), "DefWindowProcA")` ⇒ 实测可用
+  （`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。
+
+**症状：**
+
+  ```jhyy
+  fn handler(x: i32) -> i32 { return x + 1; }
+  fn take(p: *u8) -> i64 { return p as i64; }
+  fn main_jhyy() -> i32 { print_i64(take(handler)); return 0; }
+  ```
+
+  ⇒ **编译器崩**：
+
+  ```
+  codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059
+
+### W-230 · 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee 收到高 4 字节是残渣的指针**
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  ```jhyy
+  let z: *u8 = null;
+  CreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满
+  ```
+
+**症状：**
+
+  ```
+  CreateWindowExA(..., null, null, hinst, null)   → 返回 NULL，GetLastError() = 1400
+  CreateWindowExA(..., z,    z,    hinst, z)       → 正常建窗（IsWindow = 1）
+  ```
+
+  ⇒ `1400` = ERROR_INVALID_WINDOW_HANDLE ⇒ **hWndParent 拿到的是垃圾指针**。
+  （同一段代码只改「字面量 null → 带类型的局部变量」就恢复正常。）
+
+  **IL 证据** ⇒ 同一个调用，两个版本的差别只在 `w` / `l`：
+
+  ```
+
+### W-231 · struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch`
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  ```jhyy
+  let z: *u8 = null;
+  let w = W { a: z, b: z };         // ✅
+  ```
+
+**症状：**
+
+  type W = struct { a: *u8, b: *u8 }
+  let w = W { a: null, b: null };    // → field type mismatch ×2
+  ```
+
+  ⇒ 而**同一个 `null` 字面量**写进 let 初始化是**合法**的：
+
+  ```jhyy
+  let z: *u8 = null;                // ✅ 编译通过
+  ```
+
+  ⇒ ⇒ **同一个字面量在两个上下文里一个通一个不通**，而且报错措辞
+
+### W-232 · 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  ```jhyy
+  let X: u32 = 5;      // ✅
+  ```
+
+  ⚠️ 顶层 `let` 落 `.data` 段 ⇒ 初始化器只认**整型常量表达式**
+  （字面量 / 一元 / 二元算术 / 整型之间的 `as`）⇒ `let X: f64 = 3.5;` 读回是 0
+  （见附录 B「顶层全局变量只有整数类型初始化正确」）。
+
+**症状：**
+
+  const X: u32 = 5;
+  // → error: expected [ for const array init, got int
+  ```
+
+  ⇒ 规范 § 12 的事实是「**仅支持顶层** `const` 数组」⇒ **行为本身是对的**
+  （编译器明确拒绝了，没有静默接受）⇒ 这是**诊断文案**的问题：
+  报错在讲「const array init 的语法」，却没说「顶层 const 只支持数组，
+  标量请用顶层 let」⇒ 用户看不出该怎么改。
+
+### W-233 · 字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒ 访问违例
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  ```jhyy
+  let s: *u8 = "hello";        // ✅ 类型是 *u8（规范 § 2.5）
+  let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
+  ```
+
+  ⇒ **不要**写 `"hello" as [*]u8` ⇒ ⇒ 它会给你一个 len=0 的切片，
+  下标一读就**访问违例**。
+
+**症状：**
+
+  let s: [*]u8 = "hello" as [*]u8;
+  let n: i64 = len(s);     // ⇒ 0（该是 5）
+  let c: i64 = s[0] as i64; // ⇒ **访问违例**（0xC0000005 / EXITCODE 3221225477）
+  ```
+
+  ⇒ 对照：`arr as [*]i32`（数组→切片）**是好的** ⇒ len=5 ✓ ⇒ ⇒
+  **问题只出在「字面量 → 切片」这一条路上**。
+
+### W-234 · 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0**
+
+**状态：** ACTIVE
+
+**绕法：**
+
+  ```jhyy
+  const B: [i32; 3] = [1, 2, 3];   // ✅
+  ```
+
+  ⚠️ 规范 § 12 也这么说：「元素**应当是字面量**（编译器不做 const 检查）」⇒
+  ⇒ **行为本身在规范允许的范围内**，但**静默给错值**仍然危险
+  ⇒ ⇒ 至少该给一条**诊断**（或干脆把 `as` 形式也求值出来）。
+
+**症状：**
+
+  const A: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];
+  print_i64(A[1] as i64);        // ⇒ 0（该是 2）—— **不报错**
+
+  const B: [i32; 3] = [1, 2, 3];
+  print_i64(B[1] as i64);        // ⇒ 2  ✅
+  ```
+
+  ⇒ ⇒ **同样的语义（i32 数组）、只差一个 `as`** ⇒ 一个对、一个**静默给 0**。
+
 ## 规范章节目录
 
 查某一节用 `jhyy_lang_ref`，参数传章节号（如 `"5.6"` / `"附录 B"`）。
