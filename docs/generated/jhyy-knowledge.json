@@ -1299,6 +1299,13 @@
       "status": "ACTIVE",
       "symptom": "```jhyy\n\nlet loc_add: u8 = 200u8 + 100u8;   // ⇒ 300（该是 44：u8 溢出要回绕）\nlet loc_cast: i8 = 200i32 as i8;    // ⇒ 200（该是 -56：as 到 i8 要截断）\n```\n\n⇒ **但内存里是真的窄**（`struct` 字段 / 数组元素走显式 `storeb` / `loadub`）：\n\n```jhyy\nlet s: S = S { b: 300 as u8 };         // ⇒ 读出 44 ✅（真截断）\nlet arr: [u8; 2] = [300 as u8, 1u8];   // ⇒ arr[0] = 44 ✅\n```\n\n⇒ ⇒ **同一个类型，两种宽度** ⇒ ⇒ **局部变量里的位宽是假的**。",
       "fix": "位宽敏感就别用窄类型的**局部变量** —— 一律用 `i32` / `u32`\n\n（要截断就**自己 `& 0xFF`**），或者把值写进 `struct` 字段 / 数组元素（那里是真窄的）。"
+    },
+    {
+      "id": "W-236",
+      "title": "调用**不检查实参个数** ⇒ 少传/多传 ⇒ 编译通过 ⇒ 参数**全是垃圾**",
+      "status": "ACTIVE",
+      "symptom": "```jhyy\n\nfn three(a: i32, b: i32, c: i32) -> i32 {\n    return a * 100 + b * 10 + c;\n}\n\nfn main_jhyy() -> i32 {\n    let x: i32 = three(1, 2);   // ⇒ 少传一个 ⇒ 编译通过 ⇒ 得 56（垃圾）\n    return x;\n}\n```\n\n⇒ 实测：`three(1, 2)`（该是 `three(1, 2, 3)`）⇒ **编译通过**、退出码 **56**\n⇒ `a=0, b=5, c=6` ⇒ ⇒ **三个参数全是错的**（连**前两个都错位**）。\n\n⚠️ **规范 § 2.4 只说了「实参*类型*不做检查」** —— **实参*个数*** 这件事",
+      "fix": "调用前**自己数一遍参数个数** —— 尤其调标准库函数时\n\n（`fmt_hex_u32` 是 **3** 个参数，第三个是 `upper`；`fmt_i32` / `fmt_i64` 是 **2** 个）。"
     }
   ],
   "example": "// 完全可编译的一个程序：入口 + 泛型 + struct + enum + match + 闭包 + defer\nimport vec;\n\ntype Shape = enum {\n    Circle(i32),     // 半径\n    Rect(i32),       // 面积（变体只带一个 payload —— 见附录 B）\n    Empty,\n}\n\ntype Point = struct {\n    x: i32,\n    y: i32,\n}\n\nfn area(s: Shape) -> i32 {\n    match s {\n        Shape::Circle(r) => 3 * r * r,\n        Shape::Rect(a) => a,\n        Shape::Empty => 0,\n    }\n}\n\nfn max<T>(a: T, b: T) -> T {\n    if a > b { return a; }\n    return b;\n}\n\nfn cleanup() -> i32 {\n    return 0;\n}\n\nfn main_jhyy() -> i32 {\n    defer cleanup();\n\n    let p = Point { x: 3, y: 4 };\n    let s = Shape::Rect(p.x * p.y);\n    let a = area(s);\n\n    let f = |n: i32| { n * 2 };\n    let d = f(a);\n\n    let m: i32 = max::<i32>(d, 100);\n\n    return m;   // 100\n}",
