@@ -1125,6 +1125,15 @@
       "right_code": "fn main_jhyy() -> i32 {\n    return 0;\n}\n"
     },
     {
+      "kind": "fact",
+      "title": "**字符串字面量转切片 ⇒ `len` 是 0**（已知缺陷 W-233）",
+      "why": "字符串字面量的类型是 **`*u8`**（NUL 结尾），**不是切片**。\n⚠️ 显式写 `\"hello\" as [*]u8` ⇒ 转换**不报错**，但产出的切片\n   **len 字段没被填** ⇒ `len(s)` 得 **0**、`s[0]` 直接**访问违例**\n   （0xC0000005）⇒ ⇒ **台账 W-233**。\n⇒ ⇒ **别这么用**：字符串字面量就用 `*u8`，长度用 `strlen_local`。",
+      "code": "let s: [*]u8 = \"hello\" as [*]u8;\n    print_i64(len(s) as i64);",
+      "note": "⇒ 实测输出见下（**由生成器实测填入**）",
+      "code_body": "let s: [*]u8 = \"hello\" as [*]u8;\n    print_i64(len(s) as i64);",
+      "measured": "0"
+    },
+    {
       "kind": "bite",
       "title": "**struct 字面量的字段值要显式带类型**",
       "why": "字段类型**必须精确匹配** ⇒ 整数字面量默认是 **i32** ⇒\n`P { c: 7 }`（`c: u8`）⇒ 报 **`field type mismatch`**。\n⚠️ **从 C 过来的模型 100% 会踩**（C 里 `struct P p = {7};` 天经地义）。",

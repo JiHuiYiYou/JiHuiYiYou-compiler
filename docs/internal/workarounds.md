@@ -362,6 +362,7 @@
 | [W-230](#w-230) | ACTIVE | 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee... |
 | [W-231](#w-231) | ACTIVE | struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch` |
 | [W-232](#w-232) | ACTIVE | 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」 |
+| [W-233](#w-233) | ACTIVE | 字符串字面量 `as [*]u8` ⇒ **切片的 len 没填**（=0）⇒ 读元素**越界访问违例** |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -16313,3 +16314,67 @@ let X: u32 = 5;      // ✅
   ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
   正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
 - 相关：附录 B「顶层全局变量只有整数类型初始化正确」
+
+<a id="w-233"></a>
+## W-233: 字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒ 访问违例
+
+**状态:** ACTIVE since 2026-11-20 (v4.1.5) — 转换本身**不报错**，但产出的切片是**半个**的（len=0）
+**Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：给一道「字符串字面量的长度」⇒ 真编译真跑才发现）
+**日期:** 2026-11-20
+
+**触发面:** `compiler/src0/codegen.jhyy:5284`（`NODE_CAST` 分支）—— 它**只特判
+array→slice**：
+
+```jhyy
+if (*src_arr).kind == KIND_ARRAY() && (*dst_arr).kind == KIND_SLICE() {
+    // 16 字节槽：ptr 存 @0、len 存 @8、len 取 arr_count   ✅
+}
+```
+
+⇒ 字符串字面量（类型 `*u8`）转 `[*]u8` **落不进那个分支** ⇒ 落到通用的
+`cg_convert_arg` ⇒ **只拷了指针**，切片的 **len 字段根本没被写**。
+
+**症状:**
+
+```jhyy
+let s: [*]u8 = "hello" as [*]u8;
+let n: i64 = len(s);     // ⇒ 0（该是 5）
+let c: i64 = s[0] as i64; // ⇒ **访问违例**（0xC0000005 / EXITCODE 3221225477）
+```
+
+⇒ 对照：`arr as [*]i32`（数组→切片）**是好的** ⇒ len=5 ✓ ⇒ ⇒
+**问题只出在「字面量 → 切片」这一条路上**。
+
+**根因:** `as` 到切片类型的转换**只实现了 array→slice 一条**；其余来源
+（尤其 `*u8` 的字符串字面量）既没填 len、也没被拒绝 ⇒
+⇒ **产出一个「指针对、长度错」的切片** ⇒ 下标访问**没有任何检查**（规范：
+「下标不做运行时边界检查」）⇒ ⇒ 直接踩到越界内存。
+
+**workaround:** 字符串字面量**就用 `*u8`**（它本来就是 NUL 结尾的 `*u8`）：
+
+```jhyy
+let s: *u8 = "hello";        // ✅ 类型是 *u8（规范 § 2.5）
+let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
+```
+
+⇒ **不要**写 `"hello" as [*]u8` ⇒ ⇒ 它会给你一个 len=0 的切片，
+下标一读就**访问违例**。
+
+**影响范围:** 任何「把字符串字面量当切片用」的代码 ⇒ ⇒ 症状是**运行时的
+访问违例**（不是编译错误）⇒ ⇒ 在 IDE 里表现为「一跑就崩」，很难定位。
+
+**失效条件:** 编译器要么给 `*u8 → [*]u8` **填上字面量的长度**、要么**明确拒绝**
+这个转换（报一条「字符串字面量是 *u8，不是切片」）⇒ 本条关闭。
+
+**引用:**
+- `compiler/src0/codegen.jhyy:5284`（`NODE_CAST` —— array→slice 的特判在
+  `:5286-5299`；`*u8 → [*]u8` 落到 `:5305` 的 `cg_convert_arg`）
+- 规范 § 2.5「字符串字面量」（类型是 `*u8`，**不是**切片）、§ 10.2「切片」
+  （「下标不做运行时边界检查」）
+- 复现件：`compiler/tests/known-bugs/w233_string_literal_slice_len.jhyy`
+  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
+  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
+  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
+  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
+  正常的 EXPECT 用例，同时把本条翻成 RESOLVED）
+- 相关：附录 B「未实装 / 已实装但受限」
