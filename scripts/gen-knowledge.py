@@ -214,6 +214,11 @@ def _ledger_field(body: str, name: str) -> str:
     nxt = re.search(r"^\*\*[A-Za-z一-鿿 -]+:\*\*", rest, flags=re.M)
     seg = rest[: nxt.start()] if nxt else rest
     lines = [ln.rstrip() for ln in seg.split("\n")]
+    # ⚠️ **去掉开头的空行** —— `rest` 是从 head 那行**之后**开始的 ⇒ 它的
+    #   第一个元素必然是空串 ⇒ 不去掉的话，代码块的**开围栏后面会多一个空行**
+    #   ⇒ ⇒ 渲染出来是「```\n\n<code>」⇒ 模型读到一半。
+    while lines and not lines[0].strip():
+        lines.pop(0)
     if head:
         lines.insert(0, head)
     # 丢掉空行、把代码块收进来（复现件对模型有用），但最多 12 行

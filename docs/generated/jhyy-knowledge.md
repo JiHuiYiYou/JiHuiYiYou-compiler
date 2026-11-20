@@ -90,7 +90,6 @@
 **症状：**
 
   自举产物的 `.s` 规模是 MB 级 ⇒ **真实程序永远走跳过分支**
-
   ⇒ peephole 只在 hello-world 级输入上跑过 ⇒ **任何「`.s` 级 pass」的验证都缺一个可信的 `.s` 级工具**
   (v4.4.5-plan 把这条列为「非性能但必须先修」的原因)。
 
@@ -110,7 +109,6 @@
 **绕法：**
 
   - **字面量别超出声明类型的范围** —— i32 `[−2147483648, 2147483647]`、
-
     u32 `[0, 4294967295]`、i64 / u64 同理。
   - 要算一个越界的值 ⇒ **用表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致 ✓。
   - 要更大的值 ⇒ **换个更宽的类型**（u64 / i64）。
@@ -128,7 +126,6 @@
 **症状：**
 
   字面量**装不下**声明的类型时，编译器**不报错**，而是让**同一个值有两种解释**：
-
   ```
   $ cat ovf.jhyy
   fn main_jhyy() -> i32 {
@@ -150,14 +147,12 @@
 **绕法：**
 
   **不要把函数名当值用。** 需要回调地址时，从 DLL 里取：
-
   `GetProcAddress(GetModuleHandleA("user32.dll"), "DefWindowProcA")` ⇒ 实测可用
   （`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。
 
 **症状：**
 
   最小复现（三个字面量级）：
-
   ```jhyy
   fn handler(x: i32) -> i32 { return x + 1; }
   fn take(p: *u8) -> i64 { return p as i64; }
@@ -181,7 +176,6 @@
 **绕法：**
 
   要传空指针时**先落到一个带类型的局部变量**：
-
   ```jhyy
   let z: *u8 = null;
   CreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满
@@ -190,7 +184,6 @@
 **症状：**
 
   跨 FFI 的确定性表现（Win32 `CreateWindowExA`，第 9/10/12 个实参是空指针）：
-
   ```
   CreateWindowExA(..., null, null, hinst, null)   → 返回 NULL，GetLastError() = 1400
   CreateWindowExA(..., z,    z,    hinst, z)       → 正常建窗（IsWindow = 1）
@@ -213,7 +206,6 @@
 **绕法：**
 
   先声明带类型的局部变量，再放进字面量：
-
   ```jhyy
   let z: *u8 = null;
   let w = W { a: z, b: z };         // ✅
@@ -222,7 +214,6 @@
 **症状：**
 
   ```jhyy
-
   type W = struct { a: *u8, b: *u8 }
   let w = W { a: null, b: null };    // → field type mismatch ×2
   ```
@@ -244,7 +235,6 @@
 **绕法：**
 
   标量常量用**顶层 `let`**：
-
   ```jhyy
   let X: u32 = 5;      // ✅
   ```
@@ -256,7 +246,6 @@
 **症状：**
 
   ```jhyy
-
   const X: u32 = 5;
   // → error: expected [ for const array init, got int
   ```
@@ -273,7 +262,6 @@
 **绕法：**
 
   字符串字面量**就用 `*u8`**（它本来就是 NUL 结尾的 `*u8`）：
-
   ```jhyy
   let s: *u8 = "hello";        // ✅ 类型是 *u8（规范 § 2.5）
   let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
@@ -285,7 +273,6 @@
 **症状：**
 
   ```jhyy
-
   let s: [*]u8 = "hello" as [*]u8;
   let n: i64 = len(s);     // ⇒ 0（该是 5）
   let c: i64 = s[0] as i64; // ⇒ **访问违例**（0xC0000005 / EXITCODE 3221225477）
@@ -301,7 +288,6 @@
 **绕法：**
 
   顶层 `const` 数组的元素**只写裸字面量**（不带 `as`）：
-
   ```jhyy
   const B: [i32; 3] = [1, 2, 3];   // ✅
   ```
@@ -313,7 +299,6 @@
 **症状：**
 
   ```jhyy
-
   const A: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];
   print_i64(A[1] as i64);        // ⇒ 0（该是 2）—— **不报错**
 
@@ -330,13 +315,11 @@
 **绕法：**
 
   位宽敏感就别用窄类型的**局部变量** —— 一律用 `i32` / `u32`
-
   （要截断就**自己 `& 0xFF`**），或者把值写进 `struct` 字段 / 数组元素（那里是真窄的）。
 
 **症状：**
 
   ```jhyy
-
   let loc_add: u8 = 200u8 + 100u8;   // ⇒ 300（该是 44：u8 溢出要回绕）
   let loc_cast: i8 = 200i32 as i8;    // ⇒ 200（该是 -56：as 到 i8 要截断）
   ```
@@ -357,13 +340,11 @@
 **绕法：**
 
   调用前**自己数一遍参数个数** —— 尤其调标准库函数时
-
   （`fmt_hex_u32` 是 **3** 个参数，第三个是 `upper`；`fmt_i32` / `fmt_i64` 是 **2** 个）。
 
 **症状：**
 
   ```jhyy
-
   fn three(a: i32, b: i32, c: i32) -> i32 {
       return a * 100 + b * 10 + c;
   }
