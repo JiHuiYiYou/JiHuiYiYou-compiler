@@ -2216,38 +2216,23 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
                     else if dp3 == PRIM_U16() { nop = "extuh" as *u8; }
                     if nop != (0 as *u8) {
                         if sp3 != dp3 {
-                            // ⚠️ **复用源槽**:cast 的操作数在这之后就是死的
-                            //   ⇒ 原地截断(`%t5 =w extub %t5`)⇒ **不多占栈槽**。
-                            //   窄类型转换不算罕见(数组字面量里满地都是
-                            //   `0 as u8`)⇒ 每个多占 8 字节栈槽 ⇒ 帧变大
-                            //   ⇒ 撞静态指标门(perf gate 的 frame_med)。
-                            //
-                            // ⚠️ 只在源是 **'w' 槽**时复用:'l' 槽的写回只写 4 字节
-                            //   ⇒ 上半截留残渣 ⇒ 那种情况另开一个槽。
-                            let mut out3 = arg;
-                            let mut src_reusable: i32 = 0 as i32;
-                            if arg.kind == IRVAL_TEMP() {
-                                if arg.qbe_type == QBE_W() {
-                                    src_reusable = 1 as i32;
-                                }
-                            }
-                            if src_reusable == (0 as i32) {
-                                let nt = *ir_new_tmp(ir, QBE_W());
-                                if arg.kind == IRVAL_TEMP() {
-                                    ir_emit_copy_tmp(ir, nt, arg);
-                                } else {
-                                    // 立即数(常量窄转换已在 cg_expr 的 NODE_CAST 里
-                                    // 折掉 ⇒ 这里几乎到不了;留着兜底)
-                                    ir_emit_copy(ir, nt, arg.ival);
-                                }
-                                out3 = nt;
-                            }
+                            // ⚠️ **不复用源槽**(试过,放弃了):原地截断
+                            //   (`%t5 =w extub %t5`)看着省一个栈槽,其实**省不到**
+                            //   —— 帧的大小是后端**预扫**估的(address-holder 池按
+                            //   「每个 binop 记 8 字节」)⇒ 多一条扩展指令就多 8 字节,
+                            //   跟用几个槽无关。
+                            //   而**复用**会让同一个 temp **被定义两次** ⇒
+                            //   寄存器分配的两套独立实现(`check_regalloc_parity.py`
+                            //   的 Python 参考实现 vs 编译器侧)对「重定义的 temp」
+                            //   判据不一致 ⇒ **对拍门直接红**。
+                            //   ⇒ 老实另开一个槽。
+                            let out3 = *ir_new_tmp(ir, QBE_W());
                             ir_emit_str(ir, "    %t" as *u8);
                             ir_emit_int(ir, "%d" as *u8, out3.id);
                             ir_emit_str(ir, " =w " as *u8);
                             ir_emit_str(ir, nop);
                             ir_emit_str(ir, " %t" as *u8);
-                            ir_emit_int(ir, "%d" as *u8, out3.id);
+                            ir_emit_int(ir, "%d" as *u8, arg.id);
                             ir_emit_str(ir, "\n" as *u8);
                             return out3;
                         }
