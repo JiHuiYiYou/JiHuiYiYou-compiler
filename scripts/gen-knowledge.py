@@ -55,6 +55,10 @@ OUT_MD = OUT_DIR / "jhyy-knowledge.md"
 OUT_JSON = OUT_DIR / "jhyy-knowledge.json"
 # 「报错 → 修法」表（给 IDE 的 hook 用 —— 诊断顺手带上怎么改）
 OUT_ERROR_FIX = OUT_DIR / "jhyy-error-fix.json"
+# FACTS.md § 8.1 里由本脚本拥有的那一段（数字不许手抄 —— 见 render_facts_block）
+FACTS_PATH = JHYY_ROOT / "docs" / "internal" / "FACTS.md"
+FACTS_BLOCK_BEGIN = "<!-- knowledge:begin"
+FACTS_BLOCK_END = "<!-- knowledge:end -->"
 
 
 # ── 链接重写（手工扫描，不用正则：反斜杠在这台机器上容易被各种工具吃掉）────────
@@ -1760,12 +1764,15 @@ def collect_error_fix():
 
     ⚠️ **索引模块 import 失败也要能跑** —— 这张表是「锦上添花」，
     缺了不该让整个知识包生成挂掉。
+
+    返回 `(条目列表, 人工校订条数)` —— 两个数**都**来自 `jhyy_errors`
+    ⇒ FACTS.md § 8.1 的表里那两个数**不许手抄**（手抄过一次就过期了）。
     """
     try:
         import jhyy_errors
     except Exception as e:
         print("! 错误索引 import 失败（跳过「报错速查表」）：%s" % e)
-        return []
+        return [], 0
     entries = []
     for e in jhyy_errors.build_index().values():
         item = {
@@ -1778,10 +1785,76 @@ def collect_error_fix():
                 item[k] = e[k]
         entries.append(item)
     entries.sort(key=lambda x: x["text"])
-    return entries
+    curated = len(getattr(jhyy_errors, "CURATED_FIXES", []) or [])
+    return entries, curated
 
 
-def _compare(gen_dir: Path, repo_dir: Path) -> int:
+# ── FACTS.md § 8.1 的那一段:数字由本脚本生成 ───────────────────────
+#
+# **为什么要有这一段**(2026-11-21 实测):
+#   FACTS.md § 8.1 那张表原先是**手抄**的 ⇒ 规范 / 标准库一改就过期
+#   ⇒ 实测它写着「反直觉点（编译器验证过）**22** 条」,而实测是 **29 条**
+#   ⇒ **没有任何门盯着它** ⇒ 「事实单一真相源」里最该是真相的那一节自己在骗人。
+# ⇒ 现在由本脚本**生成**(口径同 `scripts/dev/langstat.py` 的 § 7)
+#   ⇒ `--check` 顺手对拍 ⇒ 过期即红。
+#
+# ⚠️ **只有「完整模式」才写 / 对拍** ⇒ `--no-usage-examples` /
+#   `--no-verified-rules` / `--out-dir` 是**做 A/B 实验**用的
+#   ⇒ 那些模式下的数**不是**全量包的数 ⇒ 拿它们覆盖 FACTS.md 会把表写成半个包。
+def render_facts_block(s: dict) -> str:
+    """FACTS.md § 8.1 里由本脚本拥有的那一段。"""
+    out = [
+        FACTS_BLOCK_BEGIN + " —— 这一节由 `scripts/gen-knowledge.py` 生成，别手改 -->",
+        "",
+        "| 项 | 值 |",
+        "|---|---|",
+        "| 规范章节目录 | **%d** 章 |" % s["toc"],
+        "| 反直觉点（规范里带 ⚠ 标记的行） | **%d** 条 |" % s["pitfalls"],
+        "| 附录 B「未实装」 | **%d** 项 |" % s["impl"],
+        "| 附录 B「已实装但受限」 | **%d** 行 |" % s["limited"],
+        "| 标准库公开 API | **%d** 模块 / **%d** 个函数 |" % (s["stdlib_modules"], s["stdlib_funcs"]),
+        "| 常见报错速查（诊断类别） | **%d** 条 |" % s["error_lookup"],
+        "| 常用用法（**每个都真编译过**） | **%d** 段 |" % s["usage_examples"],
+        "| **反直觉点（编译器逐条验证过）** | **%d** 条 |" % s["verified_rules"],
+        "| 「报错 → 修法」表（`jhyy-error-fix.json`） | **%d** 条（其中 **%d** 条人工校订） |"
+        % (s["error_fix"], s["curated"]),
+        "| 知识包体积 | **%d** 字符 |" % s["md_chars"],
+        "",
+        FACTS_BLOCK_END,
+    ]
+    return "\n".join(out)
+
+
+def replace_facts_block(block: str) -> bool:
+    """把 FACTS.md § 8.1 的标记之间换成新内容。标记不在 ⇒ False（不自己造小节）。"""
+    if not FACTS_PATH.is_file():
+        return False
+    text = FACTS_PATH.read_bytes().decode("utf-8")
+    i = text.find(FACTS_BLOCK_BEGIN)
+    j = text.find(FACTS_BLOCK_END)
+    if i < 0 or j < 0 or j < i:
+        return False
+    FACTS_PATH.write_bytes(
+        (text[:i] + block + text[j + len(FACTS_BLOCK_END):]).encode("utf-8"))
+    return True
+
+
+def check_facts_block(block: str) -> list[str]:
+    """FACTS.md § 8.1 的那一段必须 == 刚生成的 ⇒ 返回不一致的描述（空 = 一致）。"""
+    if not FACTS_PATH.is_file():
+        return ["docs/internal/FACTS.md 不存在"]
+    text = FACTS_PATH.read_bytes().decode("utf-8")
+    i = text.find(FACTS_BLOCK_BEGIN)
+    j = text.find(FACTS_BLOCK_END)
+    if i < 0 or j < 0 or j < i:
+        return ["FACTS.md § 8.1 里没有 knowledge:begin / knowledge:end 标记"]
+    if text[i:j + len(FACTS_BLOCK_END)] != block:
+        return ["FACTS.md § 8.1 的数字不是最新的（手抄的数会过期）—— "
+                "跑 `python scripts/gen-knowledge.py`"]
+    return []
+
+
+def _compare(gen_dir: Path, repo_dir: Path, extra_diffs: list[str] | None = None) -> int:
     """比对「刚生成的」与「仓里的」⇒ 不一致就 FAIL。
 
     ⚠️ **JSON 要去掉 `builtAt`** —— 那是时间戳，每次生成都不同
@@ -1789,7 +1862,7 @@ def _compare(gen_dir: Path, repo_dir: Path) -> int:
     """
     import json as _json
 
-    diffs = []
+    diffs = list(extra_diffs or [])
     for name in ("jhyy-knowledge.md", "jhyy-knowledge.json", "jhyy-error-fix.json"):
         a = gen_dir / name
         b = repo_dir / name
@@ -1917,13 +1990,41 @@ def main():
     with open(out_json, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
-    error_fix = collect_error_fix()
+    error_fix, curated = collect_error_fix()
     fix_payload = {
         "version": doc.get("version", ""),
         "entries": error_fix,
     }
     with open(out_error_fix, "w", encoding="utf-8", newline="") as f:
         f.write(json.dumps(fix_payload, ensure_ascii=False, indent=2) + "\n")
+
+    # ── FACTS.md § 8.1 的那一段 ─────────────────────────────────────
+    # ⚠️ **只有「完整模式」才碰它** —— `--no-usage-examples` /
+    #   `--no-verified-rules` / `--out-dir` 是做 A/B 实验用的
+    #   ⇒ 那些模式下的数**不是**全量包的数 ⇒ 拿它们去覆盖会把表写成半个包。
+    full_mode = not (args.no_usage_examples or args.no_verified_rules or args.out_dir)
+    facts_block = render_facts_block({
+        "toc": len(toc),
+        "pitfalls": len(pitfalls),
+        "impl": len(impl),
+        "limited": len(limited),
+        "stdlib_modules": len(stdlib),
+        "stdlib_funcs": sum(len(m["functions"]) for m in stdlib),
+        "error_lookup": len(error_lookup),
+        "usage_examples": len(usage_examples),
+        "verified_rules": len(verified_rules),
+        "error_fix": len(error_fix),
+        "curated": curated,
+        "md_chars": len(md),
+    })
+    facts_diffs: list[str] = []
+    if full_mode:
+        if args.check:
+            facts_diffs = check_facts_block(facts_block)
+        else:
+            if not replace_facts_block(facts_block):
+                print("[gen-knowledge] ⚠ FACTS.md § 8.1 里没有 knowledge:begin / "
+                      "knowledge:end 标记 —— 那一段没刷（自己补上标记）", file=sys.stderr)
 
     print("✓ %s（版本 %s）" % (SPEC_PATH.name, doc.get("version")))
     print("  章节目录 %d 章" % len(toc))
@@ -1941,7 +2042,7 @@ def main():
     print("  报错速查表 %d 条 → %s" % (len(error_fix), out_error_fix))
     print("  （markdown %d 字符）" % len(md))
     if args.check:
-        rc = _compare(out_dir, OUT_DIR)
+        rc = _compare(out_dir, OUT_DIR, facts_diffs)
         try:
             import shutil
             shutil.rmtree(check_tmp, ignore_errors=True)

@@ -11,7 +11,7 @@
 
 | 文档 | 职责 | 什么时候读 |
 |---|---|---|
-| [`docs/internal/FACTS.md`](FACTS.md) | **事实单一真相源** —— 版本 / 回归数 / ACTIVE 数 / 产物尺寸 / v4.x 排期 / OS-N 映射 / 目标三元组 | 任何时候要引用一个「会变的数字」 |
+| [`docs/internal/FACTS.md`](FACTS.md) | **事实单一真相源** —— 版本 / 回归数 / ACTIVE 数 / 产物尺寸 / v4.x 排期 / OS-N 映射 / 目标三元组 / 知识包与评测现状 | 任何时候要引用一个「会变的数字」 |
 | [`docs/internal/workarounds.md`](workarounds.md) | workaround 台账（**永不归档**）—— 每个 workaround 的触发条件 / 绕法 / 根因 / 状态 | 改编译器之前；怀疑某个「已知问题」时 |
 | [`docs/internal/feedback-codes.md`](feedback-codes.md) | **`feedback_*` 代号索引** —— 代号 → 工作规约的映射（**索引进仓，规约正文仍留仓外**） | 读到不认识的 `feedback_*` 代号时 |
 | [`docs/abis/jhyy-lang-spec-v4.0.0.md`](../abis/jhyy-lang-spec-v4.0.0.md) | **语言规范**（锁定）—— 语法 / 语义 / 附录 B 已知限制 | 写或读 `.jhyy` 代码时 |
@@ -22,7 +22,7 @@
 | [`docs/perf/self-backend-baseline-2026-10-29.md`](../perf/self-backend-baseline-2026-10-29.md) | 现行性能基线（帧尺寸 / 访存占比 / 回归比） | 做性能相关改动前 |
 | [`docs/internal/build.md`](build.md) | 构建 / 运行 / 工具链 / 门 / 版本号自动化 | 第一次在本机把这套东西跑起来 |
 | [`docs/internal/architecture.md`](architecture.md) | 编译器架构速览（流水线 / 模块图 / 自举机制） | 要改 codegen 或搞懂 emit 路径时 |
-| [`docs/archive/`](../archive/) | 历史归档（changelog / 旧计划 / 旧性能 / 审计报告） | 想追溯「当初为什么这么定」时 |
+| [`docs/archive/`](../archive/) | 历史归档（changelog / 旧计划 / 旧性能 / 审计报告 / **一次性实验的实测记录**） | 想追溯「当初为什么这么定」时 |
 
 仓库根之外、但**仍在仓内**的各子系统（各自带 README，不在本表的 `docs/` 树下）：
 

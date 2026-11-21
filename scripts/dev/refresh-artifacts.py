@@ -8,7 +8,7 @@
 | 产物 | 生成器 | 什么时候会过期 |
 |---|---|---|
 | 语言构成（`langstat.json` / 两个 svg / **FACTS.md § 7** / 两份 README 的那一行） | `scripts/dev/langstat.py` | 任何**被计数的源码**变了（行数变了） |
-| 知识包（`jhyy-knowledge.md` + `.json` + 报错速查 `.json`） | `scripts/gen-knowledge.py` | 规范 / 标准库 / 报错索引变了 |
+| 知识包（`jhyy-knowledge.md` + `.json` + 报错速查 `.json` + **FACTS.md § 8.1 那一段**） | `scripts/gen-knowledge.py` | 规范 / 标准库 / 报错索引变了 |
 
 ## 为什么要有这个脚本
 
@@ -72,6 +72,9 @@ REFRESHERS = [
             #   会改报错索引 ⇒ 不刷 ⇒ CI 的 gen-knowledge 门当场红。
             #   (踩坑实录:W-232 登记那天,钩子只刷了 langstat,知识包没刷 ⇒ CI 红。)
             "docs/internal/workarounds.md",
+            # ⚠️ 2026-11-21 补:**FACTS.md § 8.1 的那一段也是本工具的产物**
+            #   (数字由生成器写,不许手抄)⇒ 改了 FACTS.md 就得查它那一段。
+            "docs/internal/FACTS.md",
             "compiler/src0/*",
             "mcp-jhyy/*",
             "scripts/gen-knowledge.py",
@@ -81,6 +84,7 @@ REFRESHERS = [
             "docs/generated/jhyy-knowledge.md",
             "docs/generated/jhyy-knowledge.json",
             "docs/generated/jhyy-error-fix.json",
+            "docs/internal/FACTS.md",      # ← § 8.1 那一段（⚠️ 与 langstat 共用同一个文件）
         ],
     },
 ]
