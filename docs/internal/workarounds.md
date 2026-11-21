@@ -370,6 +370,7 @@
 | [W-238](#w-238) | RESOLVED | `mono.jhyy` 调 `ast_new_for` **少传一个实参** +... |
 | [W-239](#w-239) | RESOLVED | 门面(两份 README)复述的数 —— 文档门**一条都看不见** ⇒ 上一版的数在门全绿下挂着 |
 | [W-240](#w-240) | RESOLVED | 文档门的「门数」词表把「N 道题」当门数 ⇒ **假阳性**(同一段里只要提过「产物级门」就中招) |
+| [W-241](#w-241) | RESOLVED | 工具链收集**依赖环境的 PATH** ⇒ release job 里 cc1 起不来 ⇒ 头闭包空 ⇒ 发布链红 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -16850,3 +16851,58 @@ MCP 工具数 `11` —— **全部在门全绿的情况下挂着**(⇒ 门面在
 **引用:**
 - 源码:`scripts/dev/docs_facts_check.py`(`FACT_NUMBERS["artifact_checks"]`)
 - 相关:W-193 / W-194(同一个门的两代盲区)、W-239(同一个门的另一类盲区)
+
+<a id="w-241"></a>
+## W-241: 工具链收集**依赖环境的 PATH** ⇒ release job 里 cc1 起不来 ⇒ 头闭包空 ⇒ 发布链红
+
+**状态:** RESOLVED closed 2026-11-21 (v4.1.6) — 收集脚本自己把 `<ucrt>\bin` 顶到 PATH 最前 + CI 的工具链门改用**贫瘠 PATH** 跑
+**Filed-by:** 2026-11-21 (v4.1.6 的 release job run `44873035071` —— `build-and-test` 全绿,release job 死在「Build installer」这一步)
+**日期:** 2026-11-21 (登记) → 2026-11-21 (真修)
+
+**触发面:** `installer/scripts/collect-toolchain.ps1` 的头闭包那一步
+(`gcc -E -v` 探针 + `Invoke-NativeCapture`)。
+
+**症状:** release job 的「Build installer」这一步:
+```
+[collect-toolchain] gcc 16.2.0 @ D:\a\_temp\msys64\ucrt64
+[collect-toolchain] copied 10 bin + 8 gcc-lib + 14 crt-lib + 2 extra bin->gcc-lib
+[collect-toolchain] runtime DLL closure: 10 dll(s) -> ...
+Exception: collect-toolchain.ps1:353
+  could not read gcc's include search path - is this a real gcc?
+```
+⇒ **三道 CI 门全绿**(`build-and-test` ✓ `vscode-ext` ✓ `sysv` ✓)
+⇒ 轮到了 release job 才红 ⇒ 装好了也发不出去。
+
+**根因:** `cc1.exe`(预处理器)住在 `<ucrt>\lib\gcc\<target>\<ver>\`,
+它要的运行时 DLL(libisl / libmpc / libmpfr / libgmp / zstd / zlib)住在
+`<ucrt>\bin` —— **不在它旁边**。Windows 上「不在旁边的 DLL 从 PATH 找」
+⇒ PATH 里没有 `<ucrt>\bin` ⇒ **cc1 起不来** ⇒ `gcc -E -v` 只打出
+driver 的横幅和 cc1 的命令行就**停了**,**搜索路径一行都没有**
+⇒ 头闭包空 ⇒ 那句 throw。
+
+⚠️ **为什么 CI 的门是绿的:** 工具链门那个 step 跑在 **msys2 shell** 里
+⇒ 它的 PATH **含** `/ucrt64/bin` ⇒ cc1 起得来 ⇒ 门绿。
+而 release job 是从 **plain pwsh** 跑同一个脚本的 ⇒ PATH = runner 默认值
+⇒ 新装的 MSYS2 **不在里面** ⇒ 红。
+⇒ ⇒ **门盖不住发布路径**(同一个脚本、两条不同的 PATH)。
+
+**修法(2026-11-21 已修):**
+- 收集脚本**自己**把 `<ucrt>\bin` 顶到 PATH 最前(整个脚本期间)
+  ⇒ 收集不再依赖环境 PATH;
+  ⇒ 顺带:cc1 现在加载的是**将要出货的那份 DLL**,而不是 PATH 上碰巧
+  另一份 MSYS2 的 DLL —— 设计注释里警告的「ABI mismatch」也一并消掉;
+- 报错信息里带上 **gcc 的原始输出 + 退出码** ⇒ 下一次不用猜;
+- **CI 的工具链门改用贫瘠 PATH 跑**(见下)⇒ 门从此盖住发布路径。
+
+**怎么验的(2026-11-21 实测):**
+- **红灯(复现)**:本机把 PATH 剥成 `/c/Windows/System32:/c/Windows`
+  跑**修前**的脚本 ⇒ 复现出**一模一样**的那句 throw ✓
+  (`could not read gcc's include search path - is this a real gcc?`);
+- **绿灯**:同样贫瘠的 PATH 跑**修后**的脚本 ⇒ 收集走完
+  (头闭包 304 个文件 + 预编对象建好 ✓);
+- **门**:CI 的工具链门现在也用贫瘠 PATH 跑 ⇒ 这类回归在**发布之前**就被抓住。
+
+**引用:**
+- 源码:`installer/scripts/collect-toolchain.ps1`(`$env:PATH` 那段 + 报错信息)
+- workflow:`.github/workflows/ci.yml`(工具链门那一步的 `env PATH=`)
+- 相关:**W-163**(gcc 16 把系统头路径写死)、**W-159 / W-160 / W-161**(工具链自包含那批)

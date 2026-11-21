@@ -1,14 +1,14 @@
 {
   "metric": "code lines (non-blank, non-comment-only)",
   "source": "git ls-files",
-  "total_lines": 56522,
+  "total_lines": 56528,
   "total_files": 495,
   "languages": [
     {
       "lang": "JHYY",
       "lines": 37448,
       "files": 386,
-      "pct": 66.3,
+      "pct": 66.2,
       "color": "#00d4aa"
     },
     {
@@ -27,7 +27,7 @@
     },
     {
       "lang": "PowerShell",
-      "lines": 1900,
+      "lines": 1906,
       "files": 20,
       "pct": 3.4,
       "color": "#a06bb5"

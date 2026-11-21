@@ -77,7 +77,7 @@ JHY_GCC 环境变量 → %JHYY_HOME%\env.txt → **内置 toolchain** → C:\msy
 ⇒ **默认用内置那份**（确定性 + 版本受控 + 不依赖用户 PATH 形态）。
 用户要用回自己的 gcc：设 `JHY_GCC` 或写 `env.txt`（installer **不**代写）。
 
-### 四个必须记住的坑
+### 五个必须记住的坑
 
 1. **`ucrt64/` 这一层的名字不能改** —— gcc 16 把系统头路径写死成
    `<prefix>/bin/../../ucrt64/include` ⇒ prefix 目录**必须叫 `ucrt64`**。
@@ -90,6 +90,15 @@ JHY_GCC 环境变量 → %JHYY_HOME%\env.txt → **内置 toolchain** → C:\msy
    gcc 与 collect2 按**裸名**找这两个；PATH 上有个别的 ld（典型：MSYS2 POSIX 层的
    `/usr/bin/ld.exe`）就会被捡走 ⇒ **链接失败且 stderr 零输出**。
 4. **头闭包不能只收 `*.h`** —— ucrt 的 `stdio.h` 会 `#include <swprintf.inl>`。
+5. **收集工具链的脚本不能依赖环境 PATH**（2026-11-21 实测，v4.1.6 的 release job 红在这）
+   —— `cc1.exe`（预处理器）住在 `<ucrt>\lib\gcc\<target>\<ver>\`，它要的运行时 DLL
+   住在 `<ucrt>\bin`，**不在它旁边** ⇒ Windows 上「不在旁边的 DLL 从 PATH 找」
+   ⇒ PATH 里没有 `<ucrt>\bin` ⇒ **cc1 起不来** ⇒ `gcc -E -v` 只打出 driver 的
+   横幅就停了，**搜索路径一行都没有** ⇒ 头闭包空
+   ⇒ `could not read gcc's include search path - is this a real gcc?`。
+   ⇒ 收集脚本现在**自己**把 `<ucrt>\bin` 顶到 PATH 最前；
+   ⇒ **CI 的工具链门也用贫瘠 PATH 跑**（否则门绿、发布红 —— 同一个脚本、
+   两条不同的 PATH）。
 
 ### 预编 `.o`
 

@@ -612,7 +612,15 @@ jobs:
           # it via the gcc on PATH, so this is belt-and-braces.
           MSYS2_ROOT_WIN=$(cygpath -w /)
           echo "MSYS2 root: $MSYS2_ROOT_WIN"
-          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
+          # ⚠️ 2026-11-21:PATH **故意不含** MSYS2 的 bin ——
+          # release job 是从 plain pwsh 跑这个脚本的(PATH = runner 默认值,
+          # 新装的 MSYS2 不在里面)⇒ v4.1.6 那次发布就是这么红的:
+          # cc1.exe 找不到自己的 DLL ⇒ `gcc -E -v` 根本不打印搜索路径
+          # ⇒ 头闭包空 ⇒ "could not read gcc's include search path"。
+          # 这个 step 原本跑在 msys2 shell 里(PATH **含** /ucrt64/bin)
+          # ⇒ 门是绿的、发布是红的 ⇒ 门盖不住发布路径。
+          # ⇒ 收集必须**不依赖环境 PATH** ⇒ 这里也用同样贫瘠的 PATH 跑。
+          env PATH="/c/Windows/System32:/c/Windows" powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
 
       # ⚠️ 2026-11-03:这一条**从上面那个 step 里拆出来**。

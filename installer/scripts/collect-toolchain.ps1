@@ -154,6 +154,26 @@ if (-not (Test-Path $gccExe)) {
 }
 if (-not (Test-Path $objdumpExe)) { throw "objdump not found: $objdumpExe" }
 
+# --- 0. the collector must NOT depend on the ambient PATH --------------------
+# cc1.exe (the preprocessor) lives in <ucrt>\lib\gcc\<target>\<ver>\ and needs
+# the runtime DLLs (libisl / libmpc / libmpfr / libgmp / zstd / zlib) which
+# live in <ucrt>\bin - NOT next to it. On Windows a DLL that is not next to
+# its exe is resolved from PATH.
+# => Without <ucrt>\bin on PATH, `gcc -E -v` cannot even start cc1: the driver
+#    prints its banner and the cc1 command line and then STOPS - the include
+#    search list is never printed at all.
+# The CI release job runs this script from a plain pwsh step, where PATH is
+# the runner's default and the fresh MSYS2's bin is NOT on it => the header
+# closure came out empty and the release died with "could not read gcc's
+# include search path - is this a real gcc?" (2026-11-21, v4.1.6 release
+# job). The CI toolchain gate did NOT catch it: that step runs under the
+# msys2 shell, whose PATH does have /ucrt64/bin.
+# => Put the toolchain's own bin dir FIRST on PATH for the whole script.
+#    That also makes cc1 load EXACTLY the DLLs that will be shipped - the
+#    design notes above warn about picking up another MSYS2's DLLs from PATH
+#    (an ABI mismatch).
+$env:PATH = (Join-Path $ucrt "bin") + ";" + $env:PATH
+
 # --- 1. version gate (hard failure) ----------------------------------------
 $gccVer = (& $gccExe -dumpversion 2>$null | Select-Object -First 1).Trim()
 if ($gccVer -ne $mf.toolchain.gcc_version) {
@@ -350,7 +370,15 @@ foreach ($l in ($probe.out -split "`r?`n")) {
         if ($t -and ($t -notmatch '^#')) { [void]$searchDirs.Add((Resolve-GccPath $t)) }
     }
 }
-if ($searchDirs.Count -eq 0) { throw "could not read gcc's include search path - is this a real gcc?" }
+if ($searchDirs.Count -eq 0) {
+    # Include gcc's OWN output: the usual cause is that cc1 could not start
+    # (see the PATH note above) - the driver banner is all you get, and
+    # without it this error is a guessing game.
+    throw ("could not read gcc's include search path - is this a real gcc?" +
+           "`n  gcc: $gccExe (exit code $($probe.code))" +
+           "`n  raw output:" +
+           "`n$($probe.out)")
+}
 # Every search dir must live under the ucrt64 root, otherwise the collected
 # tree cannot reproduce the layout gcc expects and the toolchain would not
 # be relocatable. Fail loudly instead of shipping a half-broken toolchain.
