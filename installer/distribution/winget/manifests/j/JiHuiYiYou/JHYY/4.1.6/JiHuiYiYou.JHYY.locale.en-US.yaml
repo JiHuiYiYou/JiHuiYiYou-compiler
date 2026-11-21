@@ -38,7 +38,17 @@ Tags:
   - bootstrapping
   - statically-typed
 ReleaseNotes: |-
-  v4.1.6: (TODO: 这一版改了什么 —— 发布前补上)
+  v4.1.6: nine silent defects are gone. Out-of-range integer literals, wrong
+  argument counts, and a function name used as a value are now compile errors
+  instead of quietly wrong code; a null argument or struct field no longer
+  leaves garbage in the callee; a string literal converted to a slice no
+  longer yields an empty slice that reads out of bounds; a const array
+  element no longer reads back as zero; and narrow integers
+  (i8/u8/i16/u16) now wrap at their own width instead of behaving like
+  32-bit ones. The new argument-count check also caught two bugs in the
+  compiler itself. On top of that, a link failure now names the missing
+  entry symbol instead of only "ld returned 1", and the AST dump prints
+  64-bit hex digits correctly.
   v4.1.5: three real fixes - std::arena's reset no longer lets the next
   allocation write past the end of the block (the heap really did get
   corrupted); a #[naked] function's label and body finally sit together
