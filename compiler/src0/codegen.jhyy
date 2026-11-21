@@ -1494,6 +1494,256 @@ fn cg_emit_phi(ir: *IRBuf, result: IRVal, block1: IRVal, val1: IRVal,
 
 // ══════════════════════════════════════════════════════════════════════
 // W-143:饱和的 float→整数 转换(Rust 风格)
+// ════════════════════════════════════════════════════
+// cg_const_fold — 顶层全局初始化器的编译期常量折叠
+// ════════════════════════════════════════════════════
+//
+// W-173 (2026-11-01 真修):顶层 `let mut g: T = expr;` 的初始化器之前**只对
+// NODE_INT 字面量**折叠,其余一律 emit 0 ⇒
+//
+//   let mut gx: i32 = (0 - 1);   // → 0  ❌(应当 -1)
+//   let mut gy: i32 = 2 * 3 + 4; // → 0  ❌(应当 10)
+//
+// 顶层全局落在 **.data 段**(编译期常量)⇒ 它的初始化器**必须**是编译期常量
+// —— 这不是「少支持一个表达式」,而是「顶层全局的语义就是编译期常量」。
+//
+// 本折叠器支持的形态(全部是**整数**常量表达式):
+//   · NODE_INT      —— 字面量
+//   · NODE_UNARY    —— `-x` / `~x` / `!x`
+//   · NODE_BINARY   —— `+ - * / % << >> & | ^`
+//   · NODE_CAST     —— 整型之间的 `as`(按目标宽度截断)
+//
+// ⚠️ 折叠**不做隐式类型提升**:无后缀整数字面量默认 i32(spec §2.4),
+//    所以 `1 + 2` 按 i32 算;要 i64 必须显式 `as i64`。
+//    除法/取模遇 0 → 折叠失败(返回 0 = 不 ok)⇒ 调用方维持 emit 0。
+//    f64 / struct / 指针类型的顶层变量**仍然不折叠**(保持修前行为)——
+//    它们的语义问题与本条不同(spec §3 已记载「指针 / struct 类型的顶层变量
+//    是未定义读」),不在本条的修复范围内。
+//
+// 折叠失败 ⇒ 调用方 emit 0(**保持修前行为**,不引入新语义)。
+
+// ── W-185② / W-187 真修 (2026-11-04):折叠路径的**类型判据** ──
+//
+// 折叠路径必须与**运行期路径逐位一致**。运行期按**左操作数**的类型分流:
+//   · 无符号(u8/u16/u32/u64)⇒ `udiv`/`urem`(无符号)、`shr`(逻辑右移)
+//   · 有符号(i8/i16/i32/i64)⇒ `div`/`rem`(有符号)、`sar`(算术右移)
+// ⇒ 折叠器也必须按同一判据分流,否则顶层 `let` 与函数体里的同一表达式会给出不同的值。
+//
+// ⚠️ **别名(KIND_ALIAS)不解包** —— 与运行期的判据同款(已知限制,见台账 W-185)。
+fn cg_fold_prim(node: *Node) -> i32 {
+    if node == (0 as *Node) { return -(1 as i32); }
+    if (*node).type_ptr == (0 as *u8) { return -(1 as i32); }
+    let t = (*node).type_ptr as *Type;
+    if (*t).kind != KIND_PRIMITIVE() { return -(1 as i32); }
+    return (*t).prim;
+}
+
+// 把一个 i64 的**位模式**换算成「该类型下的**值**」。
+//
+// ── 折叠器的值约定(v4.1.3,2026-11-04 统一)────────────────────────
+//   **每个节点的折叠结果 = 该表达式在它自己类型下的值**
+//   (窄类型先按宽度掩码;**有符号**的窄类型再符号扩展回 i64)。
+//
+// 为什么必须统一(这是 W-191 挖出来的连带缺陷):
+//   · `/` `%` `>>` 是**值语义** —— 位模式当值算就错。
+//     (例:`(4294967295 as i32) >> 2` 的操作数是掩过的位模式 4294967295,
+//      当值算得 1073741823,而运行期(算术右移)得 -1。)
+//   · 而加/减/乘是**位模式语义** —— 用掩过的位模式算才与运行期逐位一致。
+//   ⇒ 两种语义混在同一个「值」里必然出错
+//     (实测:混着来时 `-16 >> 2` 折叠成 -4294967312 —— 差了一整个 2^32)。
+//   ⇒ 统一成「值」之后,位模式语义靠**出口处的掩码**保证
+//     (二补码的掩码与加/减/乘**可交换** ⇒ 掩完仍是同一个位模式)。
+fn cg_fold_typed_value(v: i64, prim: i32) -> i64 {
+    if prim == PRIM_I8() {
+        let m = v & (255 as i64);
+        if (m & (128 as i64)) != (0 as i64) { return m - (256 as i64); }
+        return m;
+    }
+    if prim == PRIM_I16() {
+        let m = v & (65535 as i64);
+        if (m & (32768 as i64)) != (0 as i64) { return m - (65536 as i64); }
+        return m;
+    }
+    if prim == PRIM_I32() {
+        let m = v & (4294967295 as i64);
+        if (m & (2147483648 as i64)) != (0 as i64) { return m - (4294967296 as i64); }
+        return m;
+    }
+    if prim == PRIM_U8()  { return v & (255 as i64); }
+    if prim == PRIM_U16() { return v & (65535 as i64); }
+    if prim == PRIM_U32() { return v & (4294967295 as i64); }
+    // i64 / u64 / 类型认不出来 ⇒ 原样(位模式即值)
+    return v;
+}
+
+fn cg_const_fold(n: *Node, out_val: *i64) -> i32 {
+    if n == (0 as *Node) { return 0 as i32; }
+    let k = (*n).kind;
+    if k == NODE_INT() {
+        let nd = node_int_data(n);
+        // 字面量自身的 prim 决定宽度(i32 默认 / 显式 as 后是目标类型)
+        let prim = (*nd).prim;
+        // ⚠️ **按值约定出口**:窄类型掩码 + 有符号窄类型符号扩展
+        //   (例:`4294967295` 当 i32 ⇒ 值是 -1,与运行期一致)
+        let v = cg_fold_typed_value((*nd).value, prim);
+        *(out_val as *i64) = v;
+        return 1 as i32;
+    }
+    if k == NODE_UNARY() {
+        let ud = node_unary_data(n);
+        let uop = (*ud).op;
+        let mut uv: i64 = 0 as i64;
+        let uok = cg_const_fold(((*ud).expr) as *Node, &uv);
+        if uok == (0 as i32) { return 0 as i32; }
+        let mut r: i64 = 0 as i64;
+        // ⚠️ 分支块末句的类型必须一致(assign = () vs return = i32)⇒
+        //    这里**不能**在某个分支里 `return` 早退(那会让两分支异型)。
+        //    改用 flag 变量:算完再统一 return。
+        let mut u_hit: i32 = 0 as i32;
+        if uop == TOKEN_MINUS() { r = -uv; u_hit = 1; }
+        else if uop == TOKEN_TILDE() { r = ~uv; u_hit = 1; }
+        else if uop == TOKEN_BANG() { r = if uv == (0 as i64) { 1 as i64 } else { 0 as i64 }; u_hit = 1; }
+        if u_hit == (0 as i32) { return 0 as i32; }
+        // ⚠️ **按值约定出口**:一元运算的结果按**本节点的类型**换算
+        //   (例:`-(-1)` 当 i32 ⇒ 掩回 32 位 ⇒ 1;不掩会溢出到 i64 的高位)
+        *(out_val as *i64) = cg_fold_typed_value(r, cg_fold_prim(n));
+        return 1 as i32;
+    }
+    if k == NODE_BINARY() {
+        let bd = node_binary_data(n);
+        let bop = (*bd).op;
+        let mut lv: i64 = 0 as i64;
+        let mut rv: i64 = 0 as i64;
+        let lok = cg_const_fold(((*bd).left) as *Node, &lv);
+        if lok == (0 as i32) { return 0 as i32; }
+        let rok = cg_const_fold(((*bd).right) as *Node, &rv);
+        if rok == (0 as i32) { return 0 as i32; }
+        // ── W-185② / W-187 真修 (2026-11-04):按**左操作数**的类型分流 ──
+        //   判据与运行期路径(codegen 的 `is_unsigned`)**同款**。
+        let fold_lp = cg_fold_prim(((*bd).left) as *Node);
+        let mut fold_unsigned: i32 = 0;
+        if fold_lp == PRIM_U8() || fold_lp == PRIM_U16()
+           || fold_lp == PRIM_U32() || fold_lp == PRIM_U64() {
+            fold_unsigned = 1;
+        }
+        // ⚠️ **值约定**:操作数的折叠值**已经是「该类型下的值」**
+        //   (子节点的出口已经做过掩码 + 符号扩展)⇒ 这里**不再**扩展一次。
+        //   (2026-11-04 修:先前在这里对窄有符号类型又扩展一次 ⇒ 双重扩展
+        //    ⇒ `-16 >> 2` 折叠成 -4294967312 —— 差一整个 2^32。)
+        let lval: i64 = lv;
+        let rval: i64 = rv;
+        // ⚠️ **移位计数的掩码必须跟运行期一致**(2026-11-04 补):
+        //   x86 的移位指令按**操作数宽度**掩计数 —— 32 位(`sarl`/`shrl`/`shll`)
+        //   掩到 5 位(31),64 位(`sarq`/`shrq`/`shlq`)掩到 6 位(63)。
+        //   ⇒ 折叠时若一律按 64 位算(掩 63),则「32 位值移 32 位以上」时
+        //     **折叠值与运行期值不同**(例:`1024 >> 40`:折叠 0,运行期 4)。
+        //   判据跟运行期同款:按**左操作数**的 QBE 宽度
+        //   (i8/u8/i16/u16/i32/u32 ⇒ W(32 位);i64/u64 ⇒ L(64 位);
+        //    类型认不出来 ⇒ 运行期默认 W ⇒ 掩 31)。
+        let mut fold_shift_mask: i64 = 31;
+        let lnode = ((*bd).left) as *Node;
+        if lnode != (0 as *Node) {
+            if (*lnode).type_ptr != (0 as *u8) {
+                if qbe_type_of((*lnode).type_ptr) == QBE_L() {
+                    fold_shift_mask = 63 as i64;
+                }
+            }
+        }
+        let mut r: i64 = 0 as i64;
+        // ⚠️ 同上:分支块末句类型必须一致 ⇒ 不用 `return` 早退,用 flag。
+        let mut b_hit: i32 = 0 as i32;
+        if bop == TOKEN_PLUS() { r = lv + rv; b_hit = 1; }
+        else if bop == TOKEN_MINUS() { r = lv - rv; b_hit = 1; }
+        else if bop == TOKEN_STAR() { r = lv * rv; b_hit = 1; }
+        // ⚠️ `+` `-` `*` 是**位模式**语义(掩码与加减乘可交换 ⇒ 用「值」算也一样);
+        //    `/` `%` `>>` 是**值**语义 ⇒ 用 lval/rval(即操作数的值)。
+        else if bop == TOKEN_SLASH() {
+            if rv != (0 as i64) {
+                if fold_unsigned != 0 {
+                    // 无符号:位模式当 u64 算(C 侧,精确)
+                    r = jh_udiv64(lv, rv);
+                    b_hit = 1;
+                } else if lval == (0i64 - 9223372036854775807i64 - 1i64) && rval == (0i64 - 1i64) {
+                    // i64::MIN / -1 ⇒ x86 idiv 溢出(#DE)⇒ **不折叠**
+                    // (运行期同样 trap ⇒ 折叠与运行期保持一致)
+                    b_hit = 0;
+                } else {
+                    r = lval / rval;
+                    b_hit = 1;
+                }
+            }
+        }
+        else if bop == TOKEN_PERCENT() {
+            if rv != (0 as i64) {
+                if fold_unsigned != 0 {
+                    // 无符号余数 = 被除数 - 商×除数(位模式回绕算 ⇒ 精确)
+                    r = lv - (jh_udiv64(lv, rv) * rv);
+                    b_hit = 1;
+                } else if lval == (0i64 - 9223372036854775807i64 - 1i64) && rval == (0i64 - 1i64) {
+                    b_hit = 0;
+                } else {
+                    r = lval % rval;
+                    b_hit = 1;
+                }
+            }
+        }
+        else if bop == TOKEN_LTLT() {
+            // ⚠️ 移位计数按**左操作数的宽度**掩(见上面 fold_shift_mask)
+            //   —— 与运行期(x86 按操作数宽度掩计数)一致。
+            let shl: i64 = rv & fold_shift_mask;
+            r = lv << shl;
+            b_hit = 1;
+        }
+        else if bop == TOKEN_GTGT() {
+            // W-187:有符号 ⇒ **算术**右移(补符号);无符号 ⇒ **逻辑**右移(零填充)。
+            // ⚠️ **不能**直接写 `lv >> rv` —— 那取决于**编译器自己**的 `>>` 语义
+            //   (自举 ⇒ 改一次 `>>` 的语义就变一次)⇒ 显式算,不依赖编译器自身的移位实现。
+            let sh: i64 = rv & fold_shift_mask;
+            let p: i64 = (1 as i64) << sh;          // 2^sh 的位模式(sh=63 ⇒ 0x8000…)
+            let lsh: i64 = jh_udiv64(lval, p);        // 逻辑右移(位模式语义)
+            if fold_unsigned != 0 {
+                r = lsh;
+            } else if sh == (0 as i64) {
+                r = lval;
+            } else {
+                r = lsh;
+                if lval < (0 as i64) {
+                    // 补符号:高 sh 位全 1(0i64-1i64 = 全 1;64-sh 用 i64 字面量)
+                    r = r | ((0i64 - 1i64) << ((64 as i64) - sh));
+                }
+            }
+            b_hit = 1;
+        }
+        else if bop == TOKEN_AMP() { r = lv & rv; b_hit = 1; }
+        else if bop == TOKEN_PIPE() { r = lv | rv; b_hit = 1; }
+        else if bop == TOKEN_CARET() { r = lv ^ rv; b_hit = 1; }
+        if b_hit == (0 as i32) { return 0 as i32; }
+        // ⚠️ **按值约定出口**:结果按**本节点的类型**换算
+        //   (窄类型掩码 + 有符号窄类型符号扩展 ⇒ 与运行期逐位一致)
+        *(out_val as *i64) = cg_fold_typed_value(r, cg_fold_prim(n));
+        return 1 as i32;
+    }
+    if k == NODE_CAST() {
+        let cd = node_cast_data(n);
+        let mut cv: i64 = 0 as i64;
+        let cok = cg_const_fold(((*cd).expr) as *Node, &cv);
+        if cok == (0 as i32) { return 0 as i32; }
+        // 目标类型按 node 的 type_ptr 截断(sema 已解出最终类型)
+        // ⚠️ **按值约定**:掩码 + (有符号窄类型的)符号扩展
+        //   (掩码与符号扩展在同一次换算里做完 ⇒ 出口就是「目标类型下的值」)
+        let ct_raw = (*n).type_ptr;
+        if ct_raw != (0 as *u8) {
+            let ct = ct_raw as *Type;
+            if (*ct).kind == KIND_PRIMITIVE() {
+                cv = cg_fold_typed_value(cv, (*ct).prim);
+            }
+        }
+        *(out_val as *i64) = cv;
+        return 1 as i32;
+    }
+    return 0 as i32;
+}
+
 // ══════════════════════════════════════════════════════════════════════
 //
 // 语义(spec §4.3 v4.0.22):
@@ -1966,13 +2216,38 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
                     else if dp3 == PRIM_U16() { nop = "extuh" as *u8; }
                     if nop != (0 as *u8) {
                         if sp3 != dp3 {
-                            let out3 = *ir_new_tmp(ir, QBE_W());
+                            // ⚠️ **复用源槽**:cast 的操作数在这之后就是死的
+                            //   ⇒ 原地截断(`%t5 =w extub %t5`)⇒ **不多占栈槽**。
+                            //   窄类型转换不算罕见(数组字面量里满地都是
+                            //   `0 as u8`)⇒ 每个多占 8 字节栈槽 ⇒ 帧变大
+                            //   ⇒ 撞静态指标门(perf gate 的 frame_med)。
+                            //
+                            // ⚠️ 只在源是 **'w' 槽**时复用:'l' 槽的写回只写 4 字节
+                            //   ⇒ 上半截留残渣 ⇒ 那种情况另开一个槽。
+                            let mut out3 = arg;
+                            let mut src_reusable: i32 = 0 as i32;
+                            if arg.kind == IRVAL_TEMP() {
+                                if arg.qbe_type == QBE_W() {
+                                    src_reusable = 1 as i32;
+                                }
+                            }
+                            if src_reusable == (0 as i32) {
+                                let nt = *ir_new_tmp(ir, QBE_W());
+                                if arg.kind == IRVAL_TEMP() {
+                                    ir_emit_copy_tmp(ir, nt, arg);
+                                } else {
+                                    // 立即数(常量窄转换已在 cg_expr 的 NODE_CAST 里
+                                    // 折掉 ⇒ 这里几乎到不了;留着兜底)
+                                    ir_emit_copy(ir, nt, arg.ival);
+                                }
+                                out3 = nt;
+                            }
                             ir_emit_str(ir, "    %t" as *u8);
                             ir_emit_int(ir, "%d" as *u8, out3.id);
                             ir_emit_str(ir, " =w " as *u8);
                             ir_emit_str(ir, nop);
                             ir_emit_str(ir, " %t" as *u8);
-                            ir_emit_int(ir, "%d" as *u8, arg.id);
+                            ir_emit_int(ir, "%d" as *u8, out3.id);
                             ir_emit_str(ir, "\n" as *u8);
                             return out3;
                         }
@@ -5384,9 +5659,38 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
     if kind == NODE_CAST() {
         let ncd = node_cast_data(n);
         let inner_node = (*ncd).expr as *Node;
-        let inner_v = *cg_expr(cg_raw, inner_node);
         let src_t = (*inner_node).type_ptr;
         let dst_t = (*n).type_ptr;
+        // W-235 (2026-11-21 真修)· 性能:窄目标的 cast,源若是**常量表达式**
+        // ⇒ **直接折叠**出截断后的值(常量折叠器按「值约定」出口 ⇒ 拿到的
+        // 已经是该类型下的值)⇒ **不发** extub/extsb 指令。
+        //
+        // 为什么值得单独做:窄类型转换的运行期版本要 3 条指令 + 2 个栈槽
+        // (后端的 ext 落地:movl + movzbl + movl)⇒ 而 `0 as u8` 这种
+        // **常量**转换(数组字面量里满地都是)根本不需要它 ⇒ 折掉。
+        //
+        // ⚠️ 必须在 `cg_expr(inner)` **之前**判 —— 否则源的代码已经发出去了。
+        if src_t != (0 as *u8) && dst_t != (0 as *u8) {
+            let dst_c = dst_t as *Type;
+            if (*dst_c).kind == KIND_PRIMITIVE() {
+                let dprim = (*dst_c).prim;
+                if dprim == PRIM_I8() || dprim == PRIM_U8() ||
+                   dprim == PRIM_I16() || dprim == PRIM_U16() {
+                    let mut cval: i64 = 0 as i64;
+                    let cok = cg_const_fold(inner_node, &cval);
+                    if cok != (0 as i32) {
+                        // ⚠️ 折叠器的出口是「**源**类型下的值」(`300` 当 i32 ⇒ 300)
+                        //   ⇒ 必须**再按目标类型截断一次**才是窄类型下的值
+                        //   (`300 as u8` ⇒ 44;`200i32 as i8` ⇒ −56)。
+                        cval = cg_fold_typed_value(cval, dprim);
+                        let ctmp = *ir_new_tmp(ir, QBE_W());
+                        ir_emit_copy(ir, ctmp, cval);
+                        return irval_box(ir, (ctmp).kind, (ctmp).id, (ctmp).ival, (ctmp).name, (ctmp).qbe_type);
+                    }
+                }
+            }
+        }
+        let inner_v = *cg_expr(cg_raw, inner_node);
         // Sprint 4.2 mirror: array→slice cast — alloc 16-byte slot, store ptr at offset 0, len at offset 8
         if src_t != (0 as *u8) && dst_t != (0 as *u8) {
             let src_arr = src_t as *Type;
@@ -6038,255 +6342,6 @@ fn cg_func(cg_raw: *u8, n: *Node, inline_fns: *u8, n_inline_fns: i64, target_tag
     return 1;
 }
 
-// ════════════════════════════════════════════════════
-// cg_const_fold — 顶层全局初始化器的编译期常量折叠
-// ════════════════════════════════════════════════════
-//
-// W-173 (2026-11-01 真修):顶层 `let mut g: T = expr;` 的初始化器之前**只对
-// NODE_INT 字面量**折叠,其余一律 emit 0 ⇒
-//
-//   let mut gx: i32 = (0 - 1);   // → 0  ❌(应当 -1)
-//   let mut gy: i32 = 2 * 3 + 4; // → 0  ❌(应当 10)
-//
-// 顶层全局落在 **.data 段**(编译期常量)⇒ 它的初始化器**必须**是编译期常量
-// —— 这不是「少支持一个表达式」,而是「顶层全局的语义就是编译期常量」。
-//
-// 本折叠器支持的形态(全部是**整数**常量表达式):
-//   · NODE_INT      —— 字面量
-//   · NODE_UNARY    —— `-x` / `~x` / `!x`
-//   · NODE_BINARY   —— `+ - * / % << >> & | ^`
-//   · NODE_CAST     —— 整型之间的 `as`(按目标宽度截断)
-//
-// ⚠️ 折叠**不做隐式类型提升**:无后缀整数字面量默认 i32(spec §2.4),
-//    所以 `1 + 2` 按 i32 算;要 i64 必须显式 `as i64`。
-//    除法/取模遇 0 → 折叠失败(返回 0 = 不 ok)⇒ 调用方维持 emit 0。
-//    f64 / struct / 指针类型的顶层变量**仍然不折叠**(保持修前行为)——
-//    它们的语义问题与本条不同(spec §3 已记载「指针 / struct 类型的顶层变量
-//    是未定义读」),不在本条的修复范围内。
-//
-// 折叠失败 ⇒ 调用方 emit 0(**保持修前行为**,不引入新语义)。
-
-// ── W-185② / W-187 真修 (2026-11-04):折叠路径的**类型判据** ──
-//
-// 折叠路径必须与**运行期路径逐位一致**。运行期按**左操作数**的类型分流:
-//   · 无符号(u8/u16/u32/u64)⇒ `udiv`/`urem`(无符号)、`shr`(逻辑右移)
-//   · 有符号(i8/i16/i32/i64)⇒ `div`/`rem`(有符号)、`sar`(算术右移)
-// ⇒ 折叠器也必须按同一判据分流,否则顶层 `let` 与函数体里的同一表达式会给出不同的值。
-//
-// ⚠️ **别名(KIND_ALIAS)不解包** —— 与运行期的判据同款(已知限制,见台账 W-185)。
-fn cg_fold_prim(node: *Node) -> i32 {
-    if node == (0 as *Node) { return -(1 as i32); }
-    if (*node).type_ptr == (0 as *u8) { return -(1 as i32); }
-    let t = (*node).type_ptr as *Type;
-    if (*t).kind != KIND_PRIMITIVE() { return -(1 as i32); }
-    return (*t).prim;
-}
-
-// 把一个 i64 的**位模式**换算成「该类型下的**值**」。
-//
-// ── 折叠器的值约定(v4.1.3,2026-11-04 统一)────────────────────────
-//   **每个节点的折叠结果 = 该表达式在它自己类型下的值**
-//   (窄类型先按宽度掩码;**有符号**的窄类型再符号扩展回 i64)。
-//
-// 为什么必须统一(这是 W-191 挖出来的连带缺陷):
-//   · `/` `%` `>>` 是**值语义** —— 位模式当值算就错。
-//     (例:`(4294967295 as i32) >> 2` 的操作数是掩过的位模式 4294967295,
-//      当值算得 1073741823,而运行期(算术右移)得 -1。)
-//   · 而加/减/乘是**位模式语义** —— 用掩过的位模式算才与运行期逐位一致。
-//   ⇒ 两种语义混在同一个「值」里必然出错
-//     (实测:混着来时 `-16 >> 2` 折叠成 -4294967312 —— 差了一整个 2^32)。
-//   ⇒ 统一成「值」之后,位模式语义靠**出口处的掩码**保证
-//     (二补码的掩码与加/减/乘**可交换** ⇒ 掩完仍是同一个位模式)。
-fn cg_fold_typed_value(v: i64, prim: i32) -> i64 {
-    if prim == PRIM_I8() {
-        let m = v & (255 as i64);
-        if (m & (128 as i64)) != (0 as i64) { return m - (256 as i64); }
-        return m;
-    }
-    if prim == PRIM_I16() {
-        let m = v & (65535 as i64);
-        if (m & (32768 as i64)) != (0 as i64) { return m - (65536 as i64); }
-        return m;
-    }
-    if prim == PRIM_I32() {
-        let m = v & (4294967295 as i64);
-        if (m & (2147483648 as i64)) != (0 as i64) { return m - (4294967296 as i64); }
-        return m;
-    }
-    if prim == PRIM_U8()  { return v & (255 as i64); }
-    if prim == PRIM_U16() { return v & (65535 as i64); }
-    if prim == PRIM_U32() { return v & (4294967295 as i64); }
-    // i64 / u64 / 类型认不出来 ⇒ 原样(位模式即值)
-    return v;
-}
-
-fn cg_const_fold(n: *Node, out_val: *i64) -> i32 {
-    if n == (0 as *Node) { return 0 as i32; }
-    let k = (*n).kind;
-    if k == NODE_INT() {
-        let nd = node_int_data(n);
-        // 字面量自身的 prim 决定宽度(i32 默认 / 显式 as 后是目标类型)
-        let prim = (*nd).prim;
-        // ⚠️ **按值约定出口**:窄类型掩码 + 有符号窄类型符号扩展
-        //   (例:`4294967295` 当 i32 ⇒ 值是 -1,与运行期一致)
-        let v = cg_fold_typed_value((*nd).value, prim);
-        *(out_val as *i64) = v;
-        return 1 as i32;
-    }
-    if k == NODE_UNARY() {
-        let ud = node_unary_data(n);
-        let uop = (*ud).op;
-        let mut uv: i64 = 0 as i64;
-        let uok = cg_const_fold(((*ud).expr) as *Node, &uv);
-        if uok == (0 as i32) { return 0 as i32; }
-        let mut r: i64 = 0 as i64;
-        // ⚠️ 分支块末句的类型必须一致(assign = () vs return = i32)⇒
-        //    这里**不能**在某个分支里 `return` 早退(那会让两分支异型)。
-        //    改用 flag 变量:算完再统一 return。
-        let mut u_hit: i32 = 0 as i32;
-        if uop == TOKEN_MINUS() { r = -uv; u_hit = 1; }
-        else if uop == TOKEN_TILDE() { r = ~uv; u_hit = 1; }
-        else if uop == TOKEN_BANG() { r = if uv == (0 as i64) { 1 as i64 } else { 0 as i64 }; u_hit = 1; }
-        if u_hit == (0 as i32) { return 0 as i32; }
-        // ⚠️ **按值约定出口**:一元运算的结果按**本节点的类型**换算
-        //   (例:`-(-1)` 当 i32 ⇒ 掩回 32 位 ⇒ 1;不掩会溢出到 i64 的高位)
-        *(out_val as *i64) = cg_fold_typed_value(r, cg_fold_prim(n));
-        return 1 as i32;
-    }
-    if k == NODE_BINARY() {
-        let bd = node_binary_data(n);
-        let bop = (*bd).op;
-        let mut lv: i64 = 0 as i64;
-        let mut rv: i64 = 0 as i64;
-        let lok = cg_const_fold(((*bd).left) as *Node, &lv);
-        if lok == (0 as i32) { return 0 as i32; }
-        let rok = cg_const_fold(((*bd).right) as *Node, &rv);
-        if rok == (0 as i32) { return 0 as i32; }
-        // ── W-185② / W-187 真修 (2026-11-04):按**左操作数**的类型分流 ──
-        //   判据与运行期路径(codegen 的 `is_unsigned`)**同款**。
-        let fold_lp = cg_fold_prim(((*bd).left) as *Node);
-        let mut fold_unsigned: i32 = 0;
-        if fold_lp == PRIM_U8() || fold_lp == PRIM_U16()
-           || fold_lp == PRIM_U32() || fold_lp == PRIM_U64() {
-            fold_unsigned = 1;
-        }
-        // ⚠️ **值约定**:操作数的折叠值**已经是「该类型下的值」**
-        //   (子节点的出口已经做过掩码 + 符号扩展)⇒ 这里**不再**扩展一次。
-        //   (2026-11-04 修:先前在这里对窄有符号类型又扩展一次 ⇒ 双重扩展
-        //    ⇒ `-16 >> 2` 折叠成 -4294967312 —— 差一整个 2^32。)
-        let lval: i64 = lv;
-        let rval: i64 = rv;
-        // ⚠️ **移位计数的掩码必须跟运行期一致**(2026-11-04 补):
-        //   x86 的移位指令按**操作数宽度**掩计数 —— 32 位(`sarl`/`shrl`/`shll`)
-        //   掩到 5 位(31),64 位(`sarq`/`shrq`/`shlq`)掩到 6 位(63)。
-        //   ⇒ 折叠时若一律按 64 位算(掩 63),则「32 位值移 32 位以上」时
-        //     **折叠值与运行期值不同**(例:`1024 >> 40`:折叠 0,运行期 4)。
-        //   判据跟运行期同款:按**左操作数**的 QBE 宽度
-        //   (i8/u8/i16/u16/i32/u32 ⇒ W(32 位);i64/u64 ⇒ L(64 位);
-        //    类型认不出来 ⇒ 运行期默认 W ⇒ 掩 31)。
-        let mut fold_shift_mask: i64 = 31;
-        let lnode = ((*bd).left) as *Node;
-        if lnode != (0 as *Node) {
-            if (*lnode).type_ptr != (0 as *u8) {
-                if qbe_type_of((*lnode).type_ptr) == QBE_L() {
-                    fold_shift_mask = 63 as i64;
-                }
-            }
-        }
-        let mut r: i64 = 0 as i64;
-        // ⚠️ 同上:分支块末句类型必须一致 ⇒ 不用 `return` 早退,用 flag。
-        let mut b_hit: i32 = 0 as i32;
-        if bop == TOKEN_PLUS() { r = lv + rv; b_hit = 1; }
-        else if bop == TOKEN_MINUS() { r = lv - rv; b_hit = 1; }
-        else if bop == TOKEN_STAR() { r = lv * rv; b_hit = 1; }
-        // ⚠️ `+` `-` `*` 是**位模式**语义(掩码与加减乘可交换 ⇒ 用「值」算也一样);
-        //    `/` `%` `>>` 是**值**语义 ⇒ 用 lval/rval(即操作数的值)。
-        else if bop == TOKEN_SLASH() {
-            if rv != (0 as i64) {
-                if fold_unsigned != 0 {
-                    // 无符号:位模式当 u64 算(C 侧,精确)
-                    r = jh_udiv64(lv, rv);
-                    b_hit = 1;
-                } else if lval == (0i64 - 9223372036854775807i64 - 1i64) && rval == (0i64 - 1i64) {
-                    // i64::MIN / -1 ⇒ x86 idiv 溢出(#DE)⇒ **不折叠**
-                    // (运行期同样 trap ⇒ 折叠与运行期保持一致)
-                    b_hit = 0;
-                } else {
-                    r = lval / rval;
-                    b_hit = 1;
-                }
-            }
-        }
-        else if bop == TOKEN_PERCENT() {
-            if rv != (0 as i64) {
-                if fold_unsigned != 0 {
-                    // 无符号余数 = 被除数 - 商×除数(位模式回绕算 ⇒ 精确)
-                    r = lv - (jh_udiv64(lv, rv) * rv);
-                    b_hit = 1;
-                } else if lval == (0i64 - 9223372036854775807i64 - 1i64) && rval == (0i64 - 1i64) {
-                    b_hit = 0;
-                } else {
-                    r = lval % rval;
-                    b_hit = 1;
-                }
-            }
-        }
-        else if bop == TOKEN_LTLT() {
-            // ⚠️ 移位计数按**左操作数的宽度**掩(见上面 fold_shift_mask)
-            //   —— 与运行期(x86 按操作数宽度掩计数)一致。
-            let shl: i64 = rv & fold_shift_mask;
-            r = lv << shl;
-            b_hit = 1;
-        }
-        else if bop == TOKEN_GTGT() {
-            // W-187:有符号 ⇒ **算术**右移(补符号);无符号 ⇒ **逻辑**右移(零填充)。
-            // ⚠️ **不能**直接写 `lv >> rv` —— 那取决于**编译器自己**的 `>>` 语义
-            //   (自举 ⇒ 改一次 `>>` 的语义就变一次)⇒ 显式算,不依赖编译器自身的移位实现。
-            let sh: i64 = rv & fold_shift_mask;
-            let p: i64 = (1 as i64) << sh;          // 2^sh 的位模式(sh=63 ⇒ 0x8000…)
-            let lsh: i64 = jh_udiv64(lval, p);        // 逻辑右移(位模式语义)
-            if fold_unsigned != 0 {
-                r = lsh;
-            } else if sh == (0 as i64) {
-                r = lval;
-            } else {
-                r = lsh;
-                if lval < (0 as i64) {
-                    // 补符号:高 sh 位全 1(0i64-1i64 = 全 1;64-sh 用 i64 字面量)
-                    r = r | ((0i64 - 1i64) << ((64 as i64) - sh));
-                }
-            }
-            b_hit = 1;
-        }
-        else if bop == TOKEN_AMP() { r = lv & rv; b_hit = 1; }
-        else if bop == TOKEN_PIPE() { r = lv | rv; b_hit = 1; }
-        else if bop == TOKEN_CARET() { r = lv ^ rv; b_hit = 1; }
-        if b_hit == (0 as i32) { return 0 as i32; }
-        // ⚠️ **按值约定出口**:结果按**本节点的类型**换算
-        //   (窄类型掩码 + 有符号窄类型符号扩展 ⇒ 与运行期逐位一致)
-        *(out_val as *i64) = cg_fold_typed_value(r, cg_fold_prim(n));
-        return 1 as i32;
-    }
-    if k == NODE_CAST() {
-        let cd = node_cast_data(n);
-        let mut cv: i64 = 0 as i64;
-        let cok = cg_const_fold(((*cd).expr) as *Node, &cv);
-        if cok == (0 as i32) { return 0 as i32; }
-        // 目标类型按 node 的 type_ptr 截断(sema 已解出最终类型)
-        // ⚠️ **按值约定**:掩码 + (有符号窄类型的)符号扩展
-        //   (掩码与符号扩展在同一次换算里做完 ⇒ 出口就是「目标类型下的值」)
-        let ct_raw = (*n).type_ptr;
-        if ct_raw != (0 as *u8) {
-            let ct = ct_raw as *Type;
-            if (*ct).kind == KIND_PRIMITIVE() {
-                cv = cg_fold_typed_value(cv, (*ct).prim);
-            }
-        }
-        *(out_val as *i64) = cv;
-        return 1 as i32;
-    }
-    return 0 as i32;
-}
 
 // ════════════════════════════════════════════════════
 // cg_module — Pass A const data + Pass B function emit
