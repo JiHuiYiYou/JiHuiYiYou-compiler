@@ -8,7 +8,7 @@
     },
     "depends": "",
     "url": "https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.6/jhyy-installer-4.1.6.exe",
-    "hash": "951ba78e0eb71fd6d78c5a7c03e9133fc4ae1aad7682144f98b39e6557c4414d",
+    "hash": "552cbbc7c179fb79d771c34b78fdf269370555884fd48e5546b7eb0b9082efd8",
     "shortcuts": [
         ["JHYY Compiler", "C:\\Program Files\\JHYY\\bin\\jhyy.exe", ""],
         ["JHYY Documentation", "C:\\Program Files\\JHYY\\common\\JHYY Documentation.url", ""],

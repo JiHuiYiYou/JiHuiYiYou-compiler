@@ -259,13 +259,13 @@
 async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 —— **不预先落文档**，启动时再领版本号。
 
-### 4.5 第三方包管理上游发布（**2026-11-07 随 v4.1.4 发出去 · 2026-11-09 随 v4.1.5 跟上**）
+### 4.5 第三方包管理上游发布（**2026-11-07 随 v4.1.4 发出去 · 2026-11-09 随 v4.1.5 跟上 · 2026-11-21 随 v4.1.6 继续**）
 
-| 渠道 | 状态（2026-11-09） |
+| 渠道 | 状态（2026-11-21） |
 |---|---|
-| winget-pkgs | **PR 已提交**（**#475435**，`JiHuiYiYou/winget-pkgs` 的 `jh-4.1.5` 分支）—— 4.1.4 的 #473726 **已关闭**（被 4.1.5 取代）。`InstallerSha256` 按**已发布**的资产回填（本地构建那个不算数：MSI 含时间戳，两边差一整个）。本机 `winget validate` **验证成功** ✓。**CLA 已签**（2026-11-07 在 #473726 上回 `agree`，账号级 ⇒ 覆盖之后所有 PR）⇒ 现在只差**社区版主审批**（`mergeStateStatus: BLOCKED`，检查全绿）。**上游合并前 `winget install` 还装不上** |
-| scoop | **个人 bucket 已上线**（`JiHuiYiYou/scoop-bucket` 的 `bucket/jhyy.json`）—— 按本仓 2026-11-05 的决定：**先走个人 bucket**，Main bucket 另议（装法：`scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket`）。4.1.5 已回填（版本 + 已发布资产的 sha256）✓ |
-| 仓内 manifest | **已修好 + 已随版发布** —— 4.1.5 的三件套 + scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt **实测命中**（autoupdate 的正则从已发布的 SHA256.txt 里取出的 hash 与 bucket 里写的**逐字相同** ✓）。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样） |
+| winget-pkgs | **PR 已提交**（**#485761**，`JiHuiYiYou/winget-pkgs` 的 `jh-4.1.6` 分支）—— 4.1.5 的 #475435 **已关闭**（被 4.1.6 取代；同一个包只能有**一个** open 的 "new package" PR ⇒ 旧版的 PR 会挡住新版）。`InstallerSha256` 按**已发布**的资产回填（本地构建那个不算数：MSI 含时间戳，两边差一整个）。⚠️ **本机现在没有 winget CLI**（WindowsApps 里只剩 0 字节的别名占位）⇒ **这一版的 `winget validate` 没跑**（4.1.5 那版跑过 ✓，三件套结构相同）⇒ 靠上游的自动检查。**CLA 已签**（2026-11-07 在 #473726 上回 `agree`，账号级 ⇒ 覆盖之后所有 PR）⇒ 现在只差**社区版主审批**（`mergeStateStatus: BLOCKED`，检查全绿）。**上游合并前 `winget install` 还装不上** |
+| scoop | **个人 bucket 已上线**（`JiHuiYiYou/scoop-bucket` 的 `bucket/jhyy.json`）—— 按本仓 2026-11-05 的决定：**先走个人 bucket**，Main bucket 另议（装法：`scoop bucket add jhyy https://github.com/JiHuiYiYou/scoop-bucket`）。4.1.6 已回填（版本 + **已发布**资产的 sha256）✓ |
+| 仓内 manifest | **已修好 + 已随版发布** —— 4.1.6 的三件套 + scoop 的 `checkver` / `autoupdate` 正则对着线上 tags 页与 SHA256.txt **实测命中**（autoupdate 的正则从已发布的 SHA256.txt 里取出的 hash 与 bucket 里写的**逐字相同** ✓）。**1.5.5 / 1.5.6 是历史占位符**（那两次 release 的资产已 404 ⇒ sha256 填不上 ⇒ 天生不可发布，保留原样） |
 
 > ⚠️ 别把这一格跟 § 4.4 的「包管理器」混为一谈 —— § 4.4 说的是**语言层面**的
 > 包管理器（`jhyy new/build/test` + `jhyy.toml`），这一格说的是**发行渠道**。
