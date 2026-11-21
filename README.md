@@ -8,15 +8,15 @@
 
 **Statically typed. Expression-oriented. Compiled to native by a self-written amd64 backend.**
 
-[![Version](https://img.shields.io/badge/version-v4.1.5-00d4aa)](CHANGELOG.md)
-[![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v415)
+[![Version](https://img.shields.io/badge/version-v4.1.6-00d4aa)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/self--host-byte--equal-success)](#status-v416)
 [![Backend](https://img.shields.io/badge/backend-self--hosted%20amd64-blue)](#architecture)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Gotchas](#known-limitations) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v415) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
+[What is JHYY](#what-is-jhyy) · [Tour](#a-tour-of-the-syntax) · [Install](#install) · [Quick Start](#quick-start) · [Language](#language) · [CLI](#cli) · [Gotchas](#known-limitations) · [Architecture](#architecture) · [Layout](#project-layout) · [Status](#status-v416) · [Roadmap](#roadmap) · [Tools](#tools--integrations) · [Docs](#docs) · [License](#license)
 
-**[Chinese version →](README.zh-CN.md)** ｜ This page describes **v4.1.5**. The language-spec baseline is **v4.0.0** (locked 2026-10-24); the v4.1.x deltas are in [CHANGELOG.md](CHANGELOG.md).
+**[Chinese version →](README.zh-CN.md)** ｜ This page describes **v4.1.6**. The language-spec baseline is **v4.0.0** (locked 2026-10-24); the v4.1.x deltas are in [CHANGELOG.md](CHANGELOG.md).
 
 **Three ways in** — **Use it** → [Install](#install) · [Quick Start](#quick-start) · [CLI](#cli) ｜ **Build it** → [CONTRIBUTING.md](CONTRIBUTING.md) ｜ **Study it** → [Architecture](#architecture) · [language spec](docs/abis/jhyy-lang-spec-v4.0.0.md)
 
@@ -103,8 +103,8 @@ toolchain (`<INSTALLDIR>\toolchain\`).
 
 | Artifact | Size | What it is |
 |---|---|---|
-| [`jhyy-installer-4.1.5.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.5/jhyy-installer-4.1.5.exe) | ~54 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
-| [`jhyy-compiler-4.1.5.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.5/jhyy-compiler-4.1.5.msi) | ~27 MB | Same payload, no GUI — for enterprise / SCCM distribution |
+| [`jhyy-installer-4.1.6.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.6/jhyy-installer-4.1.6.exe) | ~54 MB | GUI installer — compiler + `.jhyy` file association + VS Code extension + PATH |
+| [`jhyy-compiler-4.1.6.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.6/jhyy-compiler-4.1.6.msi) | ~27 MB | Same payload, no GUI — for enterprise / SCCM distribution |
 
 Checksums are published alongside the assets as `SHA256.txt`.
 
@@ -251,8 +251,8 @@ python regress.py
 ```
 
 What those numbers mean — one term, one definition each (the counts themselves live
-in the [Status](#status-v415) table). The tool reports it as
-`passed=281/301 failed=0` and `skipped=20`:
+in the [Status](#status-v416) table). The tool reports it as
+`passed=290/310 failed=0` and `skipped=20`:
 
 - **total** — every `.jhyy` file in `compiler/tests/examples/` except the
   `_`-prefixed helper fixtures.
@@ -440,7 +440,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy self-written backend: IL lexer / emit_* / peephole / register cache
 │   ├── runtime/                C runtime (arena + main entry)
 │   ├── tests/
-│   │   ├── examples/           integration tests — 301 cases (+9 `_`-prefixed fixtures) in 5 subdirectories; run by regress.py
+│   │   ├── examples/           integration tests — 310 cases (+9 `_`-prefixed fixtures) in 7 subdirectories; run by regress.py
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe (self-hosted artifacts)
 ├── runtime/linux_elf/          Linux ELF runtime (crt0.S + link.ld)
@@ -461,7 +461,7 @@ JiHuiYiYou-compiler/
 
 ---
 
-## Status (v4.1.5)
+## Status (v4.1.6)
 
 In plain terms: **the regression suite is green** — every runnable case is checked and
 none fails. The compiler compiles itself to a byte-identical result, and the workaround
@@ -479,10 +479,10 @@ numbers.
 | `artifact_checks.sh` | **23 gates** (PASS 23 / KNOWN-FAIL 0 / FAIL 0) |
 | `closure_check.sh` | local gate (not in CI) — v2.s == v3.s, byte-identical |
 | ACTIVE workarounds | **0** — see [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.5.exe` | shipped (~54 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
-| `jhyy-compiler-4.1.5.msi` | shipped (~27 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
-| `jhyy-lang-4.1.5.vsix` | shipped (VS Code extension) |
-| Language composition | **66.4%** of the code is JHYY — 37448 of 56389 lines, 386 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| `jhyy-installer-4.1.6.exe` | shipped (~54 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
+| `jhyy-compiler-4.1.6.msi` | shipped (~27 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
+| `jhyy-lang-4.1.6.vsix` | shipped (VS Code extension) |
+| Language composition | **66.3%** of the code is JHYY — 37448 of 56522 lines, 386 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">
@@ -543,7 +543,7 @@ Version numbers on reserved slots are **placeholders** — each plan carries a
 
 ### Claude Code MCP server
 
-`mcp-jhyy/` provides **11 MCP tools**:
+`mcp-jhyy/` provides **12 MCP tools**:
 
 | Tool | Purpose |
 |------|---------|
@@ -553,6 +553,7 @@ Version numbers on reserved slots are **placeholders** — each plan carries a
 | `jhyy_il_diff` | byte-equal check + contextual diff of two `.il` files |
 | `jhyy_selfhost_check` | one-shot self-host closure verification (v1→v2→v3→v4) |
 | `jhyy_workarounds` | look up the status of a W-NNN workaround |
+| `jhyy_error_lookup` | turn a compiler error into "what it means / how to fix it" |
 | `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | language / ABI / formatting queries |
 
 Install with `pip install fastmcp` (⚠️ **not** `mcp[cli]` — `fastmcp` is a separate
@@ -562,7 +563,7 @@ top-level distribution). See [`mcp-jhyy/README.md`](mcp-jhyy/README.md).
 
 `vscode-ext/` provides syntax highlighting (TextMate grammar + file icons), a native ▶
 `Run JHYY File` command (`Ctrl+F5`) and a `Compile JHYY File (no run)` command. The
-latest shipped build is `jhyy-lang-4.1.5.vsix`.
+latest shipped build is `jhyy-lang-4.1.6.vsix`.
 
 ---
 
@@ -602,4 +603,4 @@ Since v0.6, every sprint has been built collaboratively with AI assistance.
 
 ---
 
-<sub>v4.1.5 — 2026-11-09 · version automation (`VERSION` is the single source of truth) · self-written amd64 backend</sub>
+<sub>v4.1.6 — 2026-11-21 · version automation (`VERSION` is the single source of truth) · self-written amd64 backend</sub>

@@ -368,6 +368,7 @@
 | [W-236](#w-236) | RESOLVED | 调用**不检查实参个数** ⇒ 少传/多传 ⇒ 编译通过 ⇒ 参数**全是垃圾** |
 | [W-237](#w-237) | RESOLVED | `mono.jhyy` 调 `ast_new_slice_lit` **多传一个实参** ⇒... |
 | [W-238](#w-238) | RESOLVED | `mono.jhyy` 调 `ast_new_for` **少传一个实参** +... |
+| [W-239](#w-239) | RESOLVED | 门面(两份 README)复述的数 —— 文档门**一条都看不见** ⇒ 上一版的数在门全绿下挂着 |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -16750,3 +16751,53 @@ return ast_new_slice_lit(arena, ..., new_elems_buf, nelems_val);
 - `compiler/src0/mono.jhyy`（`mono_subst_stmt` 的 `NODE_FOR` 分支）
 - `compiler/src0/ast.jhyy`（`type NodeFor` 的布局 + `ast_new_for` / `ast_new_for_slice`）
 - 相关：W-237（同一条检查抓出来的另一处）、W-236（那条检查本身）
+
+<a id="w-239"></a>
+## W-239: 门面(两份 README)复述的数 —— 文档门**一条都看不见** ⇒ 上一版的数在门全绿下挂着
+
+**状态:** RESOLVED closed 2026-11-21 (v4.1.6) — 文档门新增 D' 项:门面复述的数跟**现实**对拍
+**Filed-by:** 2026-11-21 (v4.1.6 发版前的「确认没有已知遗留问题」那一轮 —— 顺手把门面数字全核了一遍)
+**日期:** 2026-11-21 (登记) → 2026-11-21 (真修)
+
+**触发面:** 两份 README(`README.md` / `README.zh-CN.md`)复述了三类数,
+而门 `docs-facts` 的 D 项(`FACT_NUMBERS`)**一条都看不见**。
+
+**症状(三个面,全是实测):**
+
+| 门面写的 | 现实 | 为什么门看不见 |
+|---|---|---|
+| `` `passed=281/301 failed=0` `` | `regress.py` 的**原样输出** | D 项的词表只认「数字在词**前**」(`N passed` / `N PASS`)⇒ 数在词**后**的写法整个在词表外 |
+| `310 cases (+9 `_`-prefixed fixtures) in 7 subdirectories` | `compiler/tests/examples/` 的**实际**文件数 | 这个数**根本不在 FACTS.md 里** ⇒ D 项无从对拍 |
+| `12 MCP tools` | `mcp-jhyy/server.py` 里 `@mcp.tool` 的**实际**个数 | 同上 |
+
+⇒ 实测后果:**上一版**(v4.1.5)的回归数 `281/301`、子目录数 `5`、
+MCP 工具数 `11` —— **全部在门全绿的情况下挂着**(⇒ 门面在骗人)。
+
+**根因:** D 项的设计前提是「这个数写在 FACTS.md 里,live 文档复述它」
+⇒ **数不在 FACTS.md 里**的那些(facade 自指的数)整类落在词表外;
+而「数在词后」的写法(`passed=N/M`)又落在「词表只认数在词前」的那半边。
+⇒ 两个半边各漏一类,而**没有一道门**管这两类。
+
+**怎么修的(2026-11-21 已修):**
+- 文档门新增 **D' 项**(`check_facade_counts()`):
+  - `passed=N/M` ⇒ 跟 FACTS.md § 2.1 声明的 pass/total 对拍
+    (FACTS 本身对不对由门 `regress-facts` 管 —— 这里只管门面跟它一致);
+  - 用例数 / fixture 数 / 子目录数 ⇒ 跟 `compiler/tests/examples/` 的**实际**对拍;
+  - MCP 工具数 ⇒ 跟 `mcp-jhyy/server.py` 里**实际注册**的对拍;
+- 门面措辞变了 ⇒ 门**响亮地**说「找不到这一行」(而不是默默放过)
+  ⇒ 改措辞的人会立刻知道要同步门;
+- 顺带:门面那几处数**当场改对**(281/301 → 290/310、5 个子目录 → 7 个、
+  11 个 MCP 工具 → 12 个)。
+
+**怎么验的(2026-11-21 实测):**
+- **红灯**:变异测试新增 **6** 条变异(两份门面 × 三类数)⇒ 每一条都让门红;
+- **绿灯**:整链组仍「docs 门绿 / 对拍门红」⇒ 新增的 D' 项**没有**把
+  「自洽但假」那组测歪 —— 为此整链组**必须**跟着改门面那一行 `passed=N/M`
+  (漏改就不是「自洽」的了 ⇒ 门会因为「门面与 FACTS 不一致」而红
+  ⇒ 那测的就不是「自洽」而是「不一致」了)。
+
+**引用:**
+- 源码:`scripts/dev/docs_facts_check.py`(`check_facade_counts()` /
+  `_FACADE_CASES` / `_FACADE_MCP` / `_FACADE_TOOLOUT`)
+- 测试:`scripts/dev/test_docs_gate_mutations.py`(`_facade_mutations()`)
+- 相关:W-193 / W-194(同一个门的两代盲区)、W-220(同类:把会被改的数写死在自己身上)

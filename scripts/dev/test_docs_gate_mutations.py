@@ -130,6 +130,65 @@ _AC = _N["artifact_checks"]
 _KNF = _N["known_fail"]
 _SZ = _N["size_installer"]
 
+
+# ── 门面里那几行**当前**的原文(2026-11-21 加)─────────────────────────
+# ⚠️ **跟 W-193 同款**:这几行的数**会变**(加一个用例、MCP 加一个工具)
+#   ⇒ 写死变异点 = 数一变就找不到 ⇒ 「变异点找不到」⇒ 那条变异判漏网
+#   ⇒ 门自己变红 ⇒ CI 红 ⇒ 早晚有人去「修」它(最省事的修法 = 删掉变异或门)
+#   ⇒ 恰好毁掉「事实链看得见」这**唯一的证明**。
+# ⇒ 所以:从门面**现场取**那一行,再在它上面改一个数。
+def _facade_line(rel: str, pat: str) -> str | None:
+    """从门面里取**当前**那一行(按正则);取不到 ⇒ None(该变异点自动消失)。"""
+    p = ROOT / rel
+    try:
+        with open(p, "r", encoding="utf-8", newline="") as f:
+            text = f.read()
+    except OSError:
+        return None
+    m = re.search(pat, text)
+    return m.group(0) if m else None
+
+
+def _facade_mutations() -> list[tuple[str, str, str, str]]:
+    """门面复述的数 —— 每条变异的 (名字, 文件, 当前原文, 变异后原文)。
+
+    这几个数**不在 FACTS.md 里** ⇒ 门里新增的 D' 项只能拿**现实**对拍
+    ⇒ 变异点必须按「门面当前那行」构造,不能写死数字。
+    """
+    out: list[tuple[str, str, str, str]] = []
+
+    # `passed=N/M` —— 数在词**后** ⇒ D 项的词表(只认 `N passed`)看不见它
+    for rel in ("README.md", "README.zh-CN.md"):
+        line = _facade_line(rel, r"`passed=\d+/\d+ failed=0`")
+        if line:
+            new = re.sub(r"passed=(\d+)/(\d+)",
+                         lambda m: f"passed={int(m.group(1)) - 1}/{m.group(2)}", line)
+            out.append((f"门面引用的工具原样输出（{rel}）", rel, line, new))
+
+    # 布局树里的用例数(+fixture 数 / 子目录数)
+    for rel, pat in (
+        ("README.md",
+         r"integration tests — \d+ cases \(\+\d+ `_`-prefixed fixtures\) in \d+ subdirectories"),
+        ("README.zh-CN.md",
+         r"集成测试 —— \d+ 个用例\(\+\d+ 个 `_` 前缀 fixture\)· \d+ 个子目录"),
+    ):
+        line = _facade_line(rel, pat)
+        if line:
+            new = re.sub(r"(\d+) (cases|个用例)",
+                         lambda m: f"{int(m.group(1)) + 1} {m.group(2)}", line)
+            out.append((f"门面复述的用例数（{rel}）", rel, line, new))
+
+    # MCP 工具数
+    for rel, pat in (("README.md", r"provides \*\*\d+ MCP tools\*\*"),
+                     ("README.zh-CN.md", r"提供 \*\*\d+ 个 MCP 工具\*\*")):
+        line = _facade_line(rel, pat)
+        if line:
+            new = re.sub(r"\*\*(\d+) (MCP tools|个 MCP 工具)\*\*",
+                         lambda m: f"**{int(m.group(1)) + 1} {m.group(2)}**", line)
+            out.append((f"门面复述的 MCP 工具数（{rel}）", rel, line, new))
+
+    return out
+
 # ── 各文件里承载这几个数的**行模板**(数由上面动态填)────────────────────
 # ⚠️ **模板必须与门面里那几行逐字一致** —— 门面改了措辞或分隔符,这里要跟着改,
 #   否则 `check_points()` 数到 0 处 ⇒ 报「变异点找不到」⇒ 那条变异被判漏网。
@@ -143,6 +202,12 @@ _SZ = _N["size_installer"]
 _RB_EN = f"# => {_P} passed, {_S} skipped ({_T} total)"
 _RT_EN = f"| `regress.py` (regression suite) | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP** ({_T} total) |"
 _AU_EN = f"| Assertion audit | {_SC} scanned · {_RN} runnable · {_RA} real assertions · 0 zero-signal |"
+# 门面**引用工具原样输出**的那一行(2026-11-21 加)—— 数在词**后**
+# ⇒ D 项的词表(只认 `N passed`)看不见它 ⇒ 门里新增的 D' 项管它
+# ⇒ **整链变异必须一起改** ⇒ 否则「自洽但假」就不自洽了(门会因为
+#    「门面与 FACTS 不一致」而红 ⇒ 那就不是「自洽」而是「不一致」了)。
+_TO_EN = f"`passed={_P}/{_T} failed=0`"
+_TO_EN_FAKE = "`passed=999/1019 failed=0`"
 # README.zh-CN.md(中文门面)
 _RB_ZH = f"# => {_P} passed, {_S} skipped ({_T} total)"
 _RT_ZH = f"| `regress.py`(\u56de\u5f52\u5957\u4ef6) | **{_P} PASS + 0 XFAIL + 0 failed + {_S} SKIP**({_T} total) |"
@@ -218,6 +283,13 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         "closed 2026-11-02 (v4.1.9) — build 路径缺")]),
 ]
 
+# (h) 门面复述的数(2026-11-21 加)—— 门里新增的 D' 项。
+# ⚠️ **变异点按门面当前那行现场构造**(见 `_facade_mutations`)
+#   ⇒ 不用写死数字 ⇒ 加一个用例 / 加一个 MCP 工具都不会让变异点失效
+#   ⇒ (W-193 同款坑:写死 = 变异点找不到 = 全部漏网 = 门自己红)
+for _name, _rel, _old, _new in _facade_mutations():
+    MUTATIONS.append((_name, [(_rel, _old, _new)]))
+
 # ── 「自洽但假」的整链变异(2026-11-03 新增)──────────────────────────────
 # 这类是**最难抓**的一类:所有文档一起改成同一个假数 ⇒ 「一致性」门全绿。
 # 2026-11-02 实测:这类变异能同时骗过 5 道门 ⇒ 那时「事实为真」只是声明。
@@ -269,6 +341,8 @@ def _chain_mutations() -> list[tuple[str, list[Edit]]]:
             ("README.zh-CN.md",
              _RT_ZH,
              f"| `regress.py`(\u56de\u5f52\u5957\u4ef6) | **999 PASS + 0 XFAIL + 0 failed + {_S} SKIP**(1019 total) |"),
+            ("README.md", _TO_EN, _TO_EN_FAKE),
+            ("README.zh-CN.md", _TO_EN, _TO_EN_FAKE),
             (_PLAN_REL, _PLAN_OLD, _PLAN_NEW),
         ])),
         ("断言审计静态数自洽但假", _with_optional([

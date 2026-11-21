@@ -14,6 +14,7 @@
 | B | 台账索引行数 / ACTIVE 数 == FACTS.md 声明 | 零 |
 | C | `artifact_checks.sh` / `fixed_point.sh` 的门数 == FACTS.md 声明 | 零 |
 | D | **非 archive 文档里「回归基线」语境下的 PASS 数必须等于 FACTS.md 的数** | 零 |
+| D' | **门面复述的数必须为真** —— `passed=N/M` 对拍 FACTS;用例数 / fixture 数 / 子目录数 / MCP 工具数对拍**现实** | 零 |
 | E | 全仓 markdown 链接 + 锚点无断链(含显式 `<a id>` 与同页锚点) | 秒级 |
 | F | FACTS.md 引用的文件都存在 | 零 |
 | G | 台账**正文**解析:5 态枚举 / per-status 计数 / 索引↔正文**双向**对拍 | 零 |
@@ -544,6 +545,119 @@ def check_fact_numbers(d: dict) -> None:
                     fail(f"{rel}:{lineno}: 写了「{m.group(0).strip()}」"
                          f"（{key} 应为 {want}）—— 要么改 FACTS.md,要么改成**引用**它"
                          f"（不要复述数字）")
+
+
+# --------------------------------------------------------------------------
+# D'. 门面自己复述的数 —— 跟**现实**对拍
+# --------------------------------------------------------------------------
+# **为什么单开一道**(2026-11-21 发版前实测):D 项(`FACT_NUMBERS`)只认
+# 「数字在词**前**」的写法(`N passed` / `N PASS`)⇒ 门面里**引用工具原样输出**
+# 的那一行(`The tool reports it as passed=281/301`)**整个不在词表里**
+# ⇒ 上一版的数(281/301)在**门全绿**的情况下挂了很久。
+#
+# 另有两类数**根本不在 FACTS.md 里** ⇒ D 项无从对拍,只能**跟现实**对拍:
+#   · `310 cases (+9 fixtures) in 7 subdirectories` —— 布局树里的用例数
+#   · `12 MCP tools` —— MCP 工具数
+#
+# ⚠️ 这两类数本来就不该在门面里复述(「会变的数字只写在 FACTS.md」)
+# —— 改门面措辞是更大的动作;这里先让它们**为真**(复述 ≠ 假)。
+def _examples_facts() -> dict[str, int]:
+    """`compiler/tests/examples/` 的实际构成 —— 门拿它当**现实**。"""
+    ex = ROOT / "compiler" / "tests" / "examples"
+    if not ex.is_dir():
+        return {}
+    allj = list(ex.rglob("*.jhyy"))
+    return {
+        "cases": len([p for p in allj if not p.name.startswith("_")]),
+        "fixtures": len([p for p in allj if p.name.startswith("_")]),
+        "subdirs": len([p for p in ex.iterdir() if p.is_dir()]),
+    }
+
+
+def _mcp_tool_count() -> int:
+    """`mcp-jhyy/server.py` 里**注册**的 MCP 工具数(`@mcp.tool` 装饰器)。"""
+    p = ROOT / "mcp-jhyy" / "server.py"
+    if not p.is_file():
+        return -1
+    return len(re.findall(r"^@mcp\.tool\b", read(p), re.M))
+
+
+# 门面里那几行的**行内**写法(门面改措辞 ⇒ 这儿要跟着改;改了就门会「找不到复述」)
+# ⇒ 那时门会**响亮地**说「门面里找不到这一行」,而不是默默放过。
+_FACADE_CASES = (
+    ("README.md",
+     r"integration tests\s*—\s*(\d+)\s*cases\s*\(\+(\d+)\s+`_`-prefixed fixtures\)\s*in\s+(\d+)\s+subdirectories"),
+    ("README.zh-CN.md",
+     r"集成测试\s*——\s*(\d+)\s*个用例\(\+(\d+)\s*个\s*`_`\s*前缀\s*fixture\)\s*·\s*(\d+)\s*个子目录"),
+)
+_FACADE_MCP = (
+    ("README.md", r"provides\s*\*\*(\d+)\s+MCP tools\*\*"),
+    ("README.zh-CN.md", r"提供\s*\*\*(\d+)\s*个\s*MCP\s*工具\*\*"),
+)
+# 门面**引用工具原样输出**的那一行(`passed=N/M failed=0`)—— 数在词**后面**
+# ⇒ D 项的词表看不见它(词表只认 `N passed`)。
+_FACADE_TOOLOUT = r"passed\s*=\s*(\d{1,5})\s*/\s*(\d{1,5})"
+
+
+def check_facade_counts(d: dict) -> None:
+    """门面(两份 README)复述的数 —— 必须**为真**。
+
+    - `passed=N/M` ⇒ 跟 FACTS.md § 2.1 声明的 pass/total 对拍
+      （FACTS 本身对不对由门 `regress-facts` 管 —— 这里只管门面跟它一致）;
+    - 用例数 / fixture 数 / 子目录数 ⇒ 跟 `compiler/tests/examples/` 的**实际**对拍;
+    - MCP 工具数 ⇒ 跟 `mcp-jhyy/server.py` 里**实际注册**的对拍。
+    """
+    ex = _examples_facts()
+    for rel, pat in _FACADE_CASES:
+        p = ROOT / rel
+        if not p.is_file():
+            continue
+        text = read(p)
+        if not ex:
+            fail(f"{rel}: 找不到 compiler/tests/examples/ ⇒ 没法对拍门面写的用例数")
+            continue
+        if not re.search(pat, text):
+            fail(f"{rel}: 找不到「用例数 / fixture 数 / 子目录数」那一行 ⇒ "
+                 f"门面改过措辞?请同步 scripts/dev/docs_facts_check.py 的 _FACADE_CASES")
+            continue
+        want = (ex["cases"], ex["fixtures"], ex["subdirs"])
+        for i, line in enumerate(text.splitlines(), 1):
+            m = re.search(pat, line)
+            if not m:
+                continue
+            got = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            if got != want:
+                fail(f"{rel}:{i}: 门面写的用例数是 {got[0]}(+{got[1]} 个 fixture / {got[2]} 个子目录)"
+                     f" ⇒ 实际是 {want[0]}(+{want[1]} 个 fixture / {want[2]} 个子目录)")
+
+    n_tools = _mcp_tool_count()
+    for rel, pat in _FACADE_MCP:
+        p = ROOT / rel
+        if not p.is_file() or n_tools < 0:
+            continue
+        text = read(p)
+        if not re.search(pat, text):
+            fail(f"{rel}: 找不到「MCP 工具数」那一行 ⇒ 门面改过措辞?请同步 "
+                 f"scripts/dev/docs_facts_check.py 的 _FACADE_MCP")
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            m = re.search(pat, line)
+            if not m:
+                continue
+            if int(m.group(1)) != n_tools:
+                fail(f"{rel}:{i}: 门面说 MCP 工具 {m.group(1)} 个 ⇒ "
+                     f"mcp-jhyy/server.py 里实际注册了 {n_tools} 个")
+
+    if "pass" in d and "total" in d:
+        for rel in ("README.md", "README.zh-CN.md"):
+            p = ROOT / rel
+            if not p.is_file():
+                continue
+            for i, line in enumerate(read(p).splitlines(), 1):
+                for m in re.finditer(_FACADE_TOOLOUT, line):
+                    if int(m.group(1)) != d["pass"] or int(m.group(2)) != d["total"]:
+                        fail(f"{rel}:{i}: 门面引用工具的原样输出「{m.group(0)}」"
+                             f" ⇒ FACTS.md § 2.1 声明的是 {d['pass']}/{d['total']}")
 
 
 # --------------------------------------------------------------------------
@@ -1236,6 +1350,7 @@ def main() -> int:
     check_ledger_version_labels()
     check_gates(d)
     check_fact_numbers(d)
+    check_facade_counts(d)
     check_artifact_sizes(d)
     check_template_size()
     check_links()

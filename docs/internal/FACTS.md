@@ -15,17 +15,17 @@
 
 | 项 | 值 |
 |---|---|
-| 当前版本 | **4.1.5**（真相源 = 仓库根 `VERSION` 文件） |
+| 当前版本 | **4.1.6**（真相源 = 仓库根 `VERSION` 文件） |
 | **怎么刷版本** | [`docs/internal/build.md` § 版本号自动化](build.md#版本号自动化) —— `bump_version.py set` → `make` → bundle → `finalize` → `check`，**顺序不能反** |
-| 最新 release | `v4.1.5`（2026-11-09） |
+| 最新 release | `v4.1.6`（2026-11-21） |
 | 版本轴 | v0.x(C 编译器，冻结于 v1.0.0) · v1.x(自举，终结于 v1.8.3) · v2.x(QBE 重写，终结于 v2.16.0) · v3.x(语言扩展，终结于 v3.4.2) · **v4.x(当前)** |
 | 编译器二进制 | `compiler/build/bin/jhyy.exe`（~2 MB） |
 
 | 产物 | 体积 |
 |---|---|
-| `jhyy-installer-4.1.5.exe` | ~54 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
-| `jhyy-compiler-4.1.5.msi` | ~27 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
-| `jhyy-lang-4.1.5.vsix` | VS Code 扩展 |
+| `jhyy-installer-4.1.6.exe` | ~54 MB（GUI 安装器；含 .NET 8 Desktop Runtime + **内置 ucrt64 工具链**） |
+| `jhyy-compiler-4.1.6.msi` | ~27 MB（企业 / SCCM 分发；含 `jhyy-setuc.exe` + 内置工具链） |
+| `jhyy-lang-4.1.6.vsix` | VS Code 扩展 |
 
 > ℹ️ **体积是实测的** —— `bump_version.py finalize` 量 `installer/build-artifacts/`
 > 里的产物后回填（见 [build.md § 版本号自动化](build.md#版本号自动化)）
@@ -145,10 +145,10 @@
 | 项 | 值 |
 |---|---|
 | 台账 | [`docs/internal/workarounds.md`](workarounds.md) —— **永不归档** |
-| 条目总数 | **234** |
+| 条目总数 | **235** |
 | ACTIVE | **0** |
 | DEFERRED | 1 |
-| RESOLVED / SUPERSEDED / INVALID | 211 / 19 / 3 |
+| RESOLVED / SUPERSEDED / INVALID | 212 / 19 / 3 |
 
 > ⚠️ **2026-11-15**：ACTIVE 从 0 变成 4 —— 新登记的 4 条真实缺陷
 > （W-229 函数名当值用会崩编译器 / W-230 栈位置实参传 `null` 字面量 ⇒ 指针带残渣 /
@@ -174,6 +174,10 @@
 > ⇒ 9 条复现件全部搬进 `compiler/tests/examples/`（**9 条新的回归用例**）。
 > ⇒ 顺带抓出编译器**自身**的 2 个真缺陷（**W-237 / W-238** —— `mono.jhyy` 两处
 > 调用的**实参个数**对不上）⇒ 同一批修好 ⇒ 条目总数 232 → **234**。
+> ⚠️ **2026-11-21**：条目总数 234 → **235** —— **W-239**（发版前核门面数字时
+> 发现的**门盲区**：门面复述的数文档门**一条都看不见** ⇒ 上一版的 `281/301`、
+> `5 个子目录`、`11 个 MCP 工具` 都在门全绿下挂着）⇒ 文档门新增 **D' 项**
+> （门面复述的数跟**现实**对拍）⇒ 同批修好。
 
 ---
 
@@ -304,9 +308,9 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 
 | 语言 | 代码行 | 占比 | 文件数 |
 |---|---|---|---|
-| JHYY | 37448 | 66.4% | 386 |
-| Python | 12321 | 21.9% | 43 |
-| Shell | 2566 | 4.6% | 20 |
+| JHYY | 37448 | 66.3% | 386 |
+| Python | 12454 | 22.0% | 43 |
+| Shell | 2566 | 4.5% | 20 |
 | PowerShell | 1900 | 3.4% | 20 |
 | C | 1315 | 2.3% | 13 |
 | C# | 287 | 0.5% | 1 |
@@ -314,7 +318,7 @@ async/await · 包管理器 · 并发 cap + 完整 memory model · 多架构 ABI
 | Batchfile | 137 | 0.2% | 4 |
 | JavaScript | 125 | 0.2% | 1 |
 | TypeScript | 65 | 0.1% | 1 |
-| **合计** | **56389** | **100%** | **495** |
+| **合计** | **56522** | **100%** | **495** |
 
 > 口径：**代码行数**（非空、非纯注释）；文件清单取自 `git ls-files`
 > ⇒ 生成物与 vendored 代码自动被 `.gitignore` 排除（不维护第二份排除清单）。

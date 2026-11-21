@@ -8,16 +8,16 @@
 
 **静态类型 · 表达式导向 · 由自研 amd64 后端编译为原生机器码。**
 
-[![版本](https://img.shields.io/badge/版本-v4.1.5-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
-[![状态](https://img.shields.io/badge/自举-byte--equal-success)](#状态-v415)
+[![版本](https://img.shields.io/badge/版本-v4.1.6-00d4aa)](docs/archive/logs/v4/changelog-v4.0.0.md)
+[![状态](https://img.shields.io/badge/自举-byte--equal-success)](#状态-v416)
 [![后端](https://img.shields.io/badge/后端-自研%20amd64-blue)](#架构)
 [![平台](https://img.shields.io/badge/平台-Windows%20x64-lightgrey)](#安装)
 [![协议](https://img.shields.io/badge/协议-MIT-blue)](LICENSE)
 [![English](https://img.shields.io/badge/lang-English-red)](README.md)
 
-[这是什么](#这是什么) · [一段代码看语法](#一段代码看语法) · [安装](#安装) · [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [已知限制](#已知限制) · [架构](#架构) · [项目结构](#项目结构) · [状态](#状态-v415) · [路线图](#路线图) · [工具](#工具--集成) · [文档](#文档) · [协议](#协议)
+[这是什么](#这是什么) · [一段代码看语法](#一段代码看语法) · [安装](#安装) · [快速开始](#快速开始) · [语言特性](#语言特性) · [命令行](#命令行) · [已知限制](#已知限制) · [架构](#架构) · [项目结构](#项目结构) · [状态](#状态-v416) · [路线图](#路线图) · [工具](#工具--集成) · [文档](#文档) · [协议](#协议)
 
-**[English README →](README.md)** ｜ 本页对应 **v4.1.5**;语言规范基线是 **v4.0.0**(锁定于 2026-10-24),v4.1.x 的增量记在 [CHANGELOG.md](CHANGELOG.md)。
+**[English README →](README.md)** ｜ 本页对应 **v4.1.6**;语言规范基线是 **v4.0.0**(锁定于 2026-10-24),v4.1.x 的增量记在 [CHANGELOG.md](CHANGELOG.md)。
 
 **三条读法** —— **想用它** → [安装](#安装) · [快速开始](#快速开始) · [命令行](#命令行) ｜ **想改它** → [CONTRIBUTING.md](CONTRIBUTING.md) ｜ **想读它** → [架构](#架构) · [语言规范](docs/abis/jhyy-lang-spec-v4.0.0.md)
 
@@ -98,8 +98,8 @@ fn main_jhyy() -> i32 {
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| [`jhyy-installer-4.1.5.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.5/jhyy-installer-4.1.5.exe) | ~54 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
-| [`jhyy-compiler-4.1.5.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.5/jhyy-compiler-4.1.5.msi) | ~27 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
+| [`jhyy-installer-4.1.6.exe`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.6/jhyy-installer-4.1.6.exe) | ~54 MB | GUI 安装器 —— 编译器 + `.jhyy` 文件关联 + VS Code 扩展 + PATH |
+| [`jhyy-compiler-4.1.6.msi`](https://github.com/JiHuiYiYou/JiHuiYiYou-compiler/releases/download/v4.1.6/jhyy-compiler-4.1.6.msi) | ~27 MB | 同样内容、无 GUI —— 企业 / SCCM 分发用 |
 
 校验和随产物一起发布在 `SHA256.txt`。
 
@@ -239,8 +239,8 @@ python regress.py
 # => 290 passed, 20 skipped (310 total)
 ```
 
-这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v415)那张表里)。
-工具自己报的是 `passed=281/301 failed=0` 与 `skipped=20`:
+这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v416)那张表里)。
+工具自己报的是 `passed=290/310 failed=0` 与 `skipped=20`:
 
 - **total** —— `compiler/tests/examples/` 下除 `_` 前缀的辅助 fixture 外的每一个
   `.jhyy` 文件。
@@ -416,7 +416,7 @@ JiHuiYiYou-compiler/
 │   │   └── codegen_amd64_*.jhyy 自研后端:IL lexer / emit_* / peephole / 寄存器缓存
 │   ├── runtime/                C 运行时(Arena + main 入口)
 │   ├── tests/
-│   │   ├── examples/           集成测试 —— 301 个用例(+9 个 `_` 前缀 fixture)· 5 个子目录;regress.py 自动跑
+│   │   ├── examples/           集成测试 —— 310 个用例(+9 个 `_` 前缀 fixture)· 7 个子目录;regress.py 自动跑
 │   │   └── bootstrap/          fixed_point.sh · closure_check.sh · artifact_checks.sh · byte_equal*.sh
 │   └── build/bin/              jhyy.exe · jhyy_v1.exe.exe(自举产物)
 ├── runtime/linux_elf/          Linux ELF 运行时(crt0.S + link.ld)
@@ -436,7 +436,7 @@ JiHuiYiYou-compiler/
 
 ---
 
-## 状态 (v4.1.5)
+## 状态 (v4.1.6)
 
 说人话:**回归套件是全绿的** —— 每个可跑的用例都有判定、没有一个失败。编译器编译自己
 得到逐字节相同的结果,workaround 台账里**没有已知未修的编译器 bug**。下面的表是
@@ -452,10 +452,10 @@ JiHuiYiYou-compiler/
 | `artifact_checks.sh` | **23 道产物级门**(PASS 23 / KNOWN-FAIL 0 / FAIL 0) |
 | `closure_check.sh` | 本地门(不接 CI)—— v2.s == v3.s,逐字节相同 |
 | ACTIVE workaround | **0** —— 见 [FACTS.md § 3](docs/internal/FACTS.md) |
-| `jhyy-installer-4.1.5.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
-| `jhyy-compiler-4.1.5.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
-| `jhyy-lang-4.1.5.vsix` | 已发布(VS Code 扩展) |
-| 语言构成 | **66.4%** 的代码是 JHYY —— 56389 行里的 37448 行，386 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| `jhyy-installer-4.1.6.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
+| `jhyy-compiler-4.1.6.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
+| `jhyy-lang-4.1.6.vsix` | 已发布(VS Code 扩展) |
+| 语言构成 | **66.3%** 的代码是 JHYY —— 56522 行里的 37448 行，386 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">
@@ -512,7 +512,7 @@ v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版
 
 ### Claude Code MCP 服务
 
-`mcp-jhyy/` 提供 **11 个 MCP 工具**:
+`mcp-jhyy/` 提供 **12 个 MCP 工具**:
 
 | 工具 | 用途 |
 |------|------|
@@ -522,6 +522,7 @@ v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版
 | `jhyy_il_diff` | 两个 `.il` 的 byte-equal 检查 + 上下文 diff |
 | `jhyy_selfhost_check` | 一键自举闭环验证(v1→v2→v3→v4) |
 | `jhyy_workarounds` | 查 W-NNN workaround 状态 / 详情 |
+| `jhyy_error_lookup` | 把一条编译器报错翻成「什么意思 / 怎么改 / 该查哪一节」 |
 | `jhyy_lang_ref` / `jhyy_abi_info` / `jhyy_format` | 语言 / ABI / 格式化查询 |
 
 安装:`pip install fastmcp`(⚠️ **不是** `mcp[cli]` —— 顶层 `fastmcp` 是独立发行包)。
@@ -530,7 +531,7 @@ v4.x 是合并后的版本轴。**排期的权威来源** —— 每格一个版
 ### VS Code 扩展
 
 `vscode-ext/` 提供语法高亮(TextMate grammar + 文件图标)+ 原生 ▶ `Run JHYY File`
-(`Ctrl+F5`)+ `Compile JHYY File (no run)` 命令。最近 shipped = `jhyy-lang-4.1.5.vsix`。
+(`Ctrl+F5`)+ `Compile JHYY File (no run)` 命令。最近 shipped = `jhyy-lang-4.1.6.vsix`。
 
 ---
 
@@ -570,4 +571,4 @@ MIT —— 见 [`LICENSE`](LICENSE)。
 
 ---
 
-<sub>v4.1.5 — 2026-11-09 · 版本号自动化(`VERSION` 单一真相源)· 自研 amd64 后端</sub>
+<sub>v4.1.6 — 2026-11-21 · 版本号自动化(`VERSION` 单一真相源)· 自研 amd64 后端</sub>
