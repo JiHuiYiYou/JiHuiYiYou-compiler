@@ -620,7 +620,11 @@ jobs:
           # 这个 step 原本跑在 msys2 shell 里(PATH **含** /ucrt64/bin)
           # ⇒ 门是绿的、发布是红的 ⇒ 门盖不住发布路径。
           # ⇒ 收集必须**不依赖环境 PATH** ⇒ 这里也用同样贫瘠的 PATH 跑。
-          env PATH="/c/Windows/System32:/c/Windows" powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
+          # ⚠️ `env` 用**新** PATH 去找被调用的程序 ⇒ powershell 自己在新 PATH 里
+          # 找不到 ⇒ 先用**旧** PATH 把绝对路径解析出来(别写死路径)。
+          PS_EXE=$(command -v powershell)
+          echo "powershell: $PS_EXE"
+          env PATH="/c/Windows/System32:/c/Windows" "$PS_EXE" -NoProfile -ExecutionPolicy Bypass -File installer/scripts/collect-toolchain.ps1 -AllowVersionDrift -MsysRoot "$MSYS2_ROOT_WIN"
           powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/verify-toolchain.ps1
 
       # ⚠️ 2026-11-03:这一条**从上面那个 step 里拆出来**。
