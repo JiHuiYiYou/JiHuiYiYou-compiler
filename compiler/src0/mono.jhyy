@@ -395,8 +395,19 @@ fn mono_subst_expr(arena: *Arena, node: *Node,
             *((new_elems_buf as i64 + ei * (8 as i64)) as **Node) = new_e;
             ei = ei + (1 as i64);
         }
+        // W-237 (2026-11-21 真修):这里原来给 ast_new_slice_lit 传了 **6 个实参**
+        //   (而它只收 **5** 个)⇒ 形参 `array` 拿到的是**元素缓冲区**而不是
+        //   数组节点 ⇒ 切片子节点的 array 字段指错了地方(而且多传的
+        //   nelems_val 落在实参区之外 ⇒ 越界读)。
+        //
+        //   修法:先造**数组字面量**节点,再包成切片字面量 —— 与上面
+        //   NODE_ARRAY_LIT 那条路**同款形状**。
+        //
+        //   这条是被 W-236 新加的「实参个数」检查抓出来的(见台账 W-237)。
+        let new_arr = ast_new_array_lit(arena, (*node).loc_filename, (*node).loc_line,
+                                        (*node).loc_col, new_elems_buf, nelems_val);
         return ast_new_slice_lit(arena, (*node).loc_filename, (*node).loc_line,
-                                 (*node).loc_col, new_elems_buf, nelems_val);
+                                 (*node).loc_col, new_arr);
     }
     // NODE_SLICE_RANGE: target@0(8)+start@8(8)+end@16(8) = 24
     if nk == NODE_SLICE_RANGE() {
@@ -531,17 +542,36 @@ fn mono_subst_stmt(arena: *Arena, node: *Node,
         return ast_new_while(arena, (*node).loc_filename, (*node).loc_line,
                              (*node).loc_col, new_cond, new_body);
     }
-    // NODE_FOR: var@0(8)+iter@8(8)+body@16(8) = 24
+    // NODE_FOR: var@0(8)+start@8(8)+end@16(8)+body@24(8)+is_slice@32(4) = 40
+    //
+    // ⚠️ 2026-11-21 真修(W-238):原来的注释写的是「var@0+iter@8+body@16 = 24」
+    //   —— 那是**旧布局**。真实布局里 @16 是 **end**(不是 body)、body 在 @24
+    //   ⇒ 原来读到的「body」其实是 **end**;
+    //   而 ast_new_for 的调用又只给了 **7 个实参**(它要 **8** 个)
+    //   ⇒ `body` 形参拿到的是**残渣** ⇒ 泛型函数里的 `for` 循环体是垃圾。
+    //
+    //   这两条都被 W-236 新加的「实参个数」检查抓出来了(见台账 W-238)。
+    //
+    // 修法:按**真实布局**读 4 个字段;`var` 是 **Sym**(绑定)不是表达式 ⇒
+    //   不做替换(与下面 NODE_LET 那条路同款:「sym ptr preserved」)。
     if nk == NODE_FOR() {
         let fn_data = (node as i64 + NODE_SIZE()) as *u8;
         let fn_var_off = fn_data as **Node;
-        let fn_iter_off = ptr_add_u8(fn_data, (8 as i64)) as **Node;
-        let fn_body_off = ptr_add_u8(fn_data, (16 as i64)) as **Node;
-        let new_var = mono_subst_expr(arena, *fn_var_off, type_params, arg_nodes, nargs);
-        let new_iter = mono_subst_expr(arena, *fn_iter_off, type_params, arg_nodes, nargs);
+        let fn_start_off = ptr_add_u8(fn_data, (8 as i64)) as **Node;
+        let fn_end_off = ptr_add_u8(fn_data, (16 as i64)) as **Node;
+        let fn_body_off = ptr_add_u8(fn_data, (24 as i64)) as **Node;
+        let fn_isslice_off = ptr_add_u8(fn_data, (32 as i64)) as *i32;
+        let new_var = *fn_var_off;
+        let new_start = mono_subst_expr(arena, *fn_start_off, type_params, arg_nodes, nargs);
+        let new_end = mono_subst_expr(arena, *fn_end_off, type_params, arg_nodes, nargs);
         let new_body = mono_subst_stmt(arena, *fn_body_off, type_params, arg_nodes, nargs);
+        if *fn_isslice_off != (0 as i32) {
+            // `for x in slice` 形态:ast_new_for_slice 自己按 slice 重建 len 字段
+            return ast_new_for_slice(arena, (*node).loc_filename, (*node).loc_line,
+                                     (*node).loc_col, new_var as *Sym, new_start, new_body);
+        }
         return ast_new_for(arena, (*node).loc_filename, (*node).loc_line,
-                           (*node).loc_col, new_var, new_iter, new_body);
+                           (*node).loc_col, new_var as *Sym, new_start, new_end, new_body);
     }
     // NODE_LET: is_mutable@0(4)+pad@4(4)+sym@8(8)+type_annot@16(8)+init@24(8) = 32
     if nk == NODE_LET() {

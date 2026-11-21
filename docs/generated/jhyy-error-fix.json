@@ -17,6 +17,15 @@
       "w_status": "RESOLVED"
     },
     {
+      "text": "1 as i32",
+      "kind": "spec",
+      "meaning": "元素写成 `1 as i32`（带转型）这类能求值的形式，2026-11-21 起也求值了（与顶层 `let` 同款折叠器）⇒ 修前静默读出 0。求不出来的元素（函数调用等）仍取 0 —— 那是上一行那条规范行为",
+      "fix": "顶层 `const` 数组的元素**只写裸字面量**（不带 `as`）：",
+      "spec_ref": "附录 B",
+      "w_ref": "W-234",
+      "w_status": "RESOLVED"
+    },
+    {
       "text": "E0050",
       "kind": "spec",
       "meaning": "实例化 `PhantomData<T>`（带 init 的 `let`）",
@@ -217,6 +226,11 @@
       "origin": "sema.jhyy"
     },
     {
+      "text": "cannot convert a pointer to a slice: only string literals and arrays can be converted to slices",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
       "text": "cannot dereference non-pointer type",
       "kind": "sema",
       "origin": "sema.jhyy"
@@ -332,6 +346,13 @@
       "kind": "spec",
       "meaning": "元素位置放函数调用能编译，但不会被求值，运行时取到 0",
       "spec_ref": "附录 B"
+    },
+    {
+      "text": "const 元素的常量表达式不求值",
+      "kind": "spec",
+      "meaning": "元素写成 `1 as i32`（带转型）这类能求值的形式，2026-11-21 起也求值了（与顶层 `let` 同款折叠器）⇒ 修前静默读出 0。求不出来的元素（函数调用等）仍取 0 —— 那是上一行那条规范行为",
+      "spec_ref": "附录 B",
+      "w_ref": "W-234"
     },
     {
       "text": "defer not allowed in nested scope (only at function-body top level)",
@@ -481,6 +502,11 @@
       "example_file": "agg_eq_call_result_error.jhyy"
     },
     {
+      "text": "function value is not supported yet (the fn(...) pointer type is not implemented)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
       "text": "if condition must be bool",
       "kind": "sema",
       "origin": "sema.jhyy"
@@ -495,6 +521,16 @@
       "kind": "parse",
       "example_file": "err_array_size_overflow.jhyy",
       "origin": "parser.jhyy"
+    },
+    {
+      "text": "integer literal out of range for the assigned type (use a wider type or an explicit as cast)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
+      "text": "integer literal out of range for the declared type (use a wider type or an explicit as cast)",
+      "kind": "sema",
+      "origin": "sema.jhyy"
     },
     {
       "text": "invalid type annotation",
@@ -622,6 +658,19 @@
       "origin": "sema.jhyy"
     },
     {
+      "text": "not supported",
+      "kind": "corpus",
+      "meaning": "用户 Code Runner 报 \"code language not supported or defined\" / PowerShell 直跑 `jhyy run dungeon_game.jhyy` 报 \"QBE failed\" 后,我修了 PATH 解析让源码树 jhyy.exe 赢,然后发现 `jhyy ru",
+      "w_ref": "W-034",
+      "w_status": "RESOLVED",
+      "example_file": "w229_fn_value_crash.jhyy"
+    },
+    {
+      "text": "only supports array",
+      "kind": "corpus",
+      "example_file": "w232_topconst_scalar_msg.jhyy"
+    },
+    {
       "text": "ordering comparison is not supported",
       "kind": "corpus",
       "meaning": "编译期报错",
@@ -638,6 +687,11 @@
       "w_ref": "W-133.2",
       "w_status": "SUPERSEDED",
       "origin": "sema.jhyy"
+    },
+    {
+      "text": "out of range",
+      "kind": "corpus",
+      "example_file": "w228_int_literal_overflow.jhyy"
     },
     {
       "text": "qualified call function name must be identifier",
@@ -715,6 +769,11 @@
       "spec_ref": "附录 B"
     },
     {
+      "text": "string literal can only be converted to a [*]u8 slice",
+      "kind": "sema",
+      "origin": "sema.jhyy"
+    },
+    {
       "text": "struct has no field",
       "kind": "sema",
       "origin": "sema.jhyy"
@@ -756,6 +815,11 @@
       "text": "too many borrows in this function (borrow-check table overflow)",
       "kind": "sema",
       "origin": "sema.jhyy"
+    },
+    {
+      "text": "top-level const only supports array; use a top-level let for scalars",
+      "kind": "parse",
+      "origin": "parser.jhyy"
     },
     {
       "text": "type P = struct { c: u8 }",
@@ -920,6 +984,11 @@
       "origin": "sema.jhyy"
     },
     {
+      "text": "wrong number of arguments",
+      "kind": "corpus",
+      "example_file": "w236_call_arity_not_checked.jhyy"
+    },
+    {
       "text": "不可变性的写保护未实装",
       "kind": "spec",
       "meaning": "编译器不检查取地址对象是否可变；`&x` 对不可变绑定合法，`*p = v` 不报错也不生效",
@@ -1029,7 +1098,7 @@
       "fix": "标量常量用**顶层 `let`**：",
       "spec_ref": "附录 B",
       "w_ref": "W-232",
-      "w_status": "ACTIVE"
+      "w_status": "RESOLVED"
     }
   ]
 }

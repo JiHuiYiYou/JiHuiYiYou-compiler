@@ -1,0 +1,27 @@
+// w231_struct_lit_null_field.jhyy — 台账 W-231:struct 字面量里的 `null` 字段
+// ⇒ 误报 `field type mismatch`
+//
+// 修前(2026-11-15 实测):编译期报 `field type mismatch` ×2 —— 而**同一个**
+// `null` 字面量写进 let 初始化是**合法**的(`let z: *u8 = null;` ✅)
+// ⇒ 同一个字面量在两个上下文里一个通一个不通,而且报错措辞完全指不到真因。
+//
+// 修后:struct 字面量字段路径也给 `null` 填**字段类型**(与 let 路径同款)
+// ⇒ 编译通过。
+//
+// (一次就撞上 5 个字段的是 Win32 的 WNDCLASSEX:hIcon / hCursor /
+//  hbrBackground / lpszMenuName / hIconSm。)
+//
+// EXPECT: 0
+type W = struct {
+    a: *u8,
+    b: *u8,
+}
+
+fn main_jhyy() -> i32 {
+    let w = W { a: null, b: null };
+
+    let mut bad: i32 = 0;
+    if w.a != null { bad = bad + 1; }
+    if w.b != null { bad = bad + 2; }
+    return bad;
+}

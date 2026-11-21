@@ -1,0 +1,24 @@
+// w233_string_literal_slice_len.jhyy — 台账 W-233:字符串字面量 `as [*]u8`
+// ⇒ 切片的 **len 没填**(=0)⇒ 读元素越界 ⇒ **访问违例**
+//
+// 修前(2026-11-20 实测):**编译通过**,但切片的 len 是 0 ——
+//   len("hello" as [*]u8)  ⇒  0      (该是 5)
+//   s[0]                    ⇒  **访问违例**(0xC0000005 / EXITCODE 3221225477)
+// (规范 § 10.2:下标**不做**运行时边界检查 ⇒ 一读就越界。)
+//
+// 修后:codegen 给 `*u8 → [*]u8` **填上字面量的长度** ⇒ len(s) == 5、s[0] == 'h'。
+// (非字面量的 `*T → [*]T` 长度无从得知 ⇒ sema **编译期拒绝**。)
+//
+// EXPECT: 0
+fn main_jhyy() -> i32 {
+    let s: [*]u8 = "hello" as [*]u8;
+    let n: i64 = len(s);
+
+    let mut bad: i32 = 0;
+    if n != 5i64 { bad = bad + 1; }
+
+    let c: i64 = s[0] as i64;
+    if c != 104i64 { bad = bad + 2; }   // 'h' = 104
+
+    return bad;
+}

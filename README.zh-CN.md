@@ -236,7 +236,7 @@ fn main_jhyy() -> i32 {
 
 ```bash
 python regress.py
-# => 281 passed, 20 skipped (301 total)
+# => 290 passed, 20 skipped (310 total)
 ```
 
 这些数字各是什么意思 —— 一个词一个定义(数本身在[状态](#状态-v415)那张表里)。
@@ -444,8 +444,8 @@ JiHuiYiYou-compiler/
 
 | 指标 | 值 |
 |------|-----|
-| `regress.py`(回归套件) | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP**(301 total) |
-| 断言强度审计 | 扫 301 · 可跑 281 · 真断言 217 · 零信号 0 |
+| `regress.py`(回归套件) | **290 PASS + 0 XFAIL + 0 failed + 20 SKIP**(310 total) |
+| 断言强度审计 | 扫 310 · 可跑 290 · 真断言 222 · 零信号 0 |
 | 基准套件 | 9 道题 · 4 个覆盖轴 —— [已发布快照](bench/baseline/RESULTS-2026-11-04.md)(jhyy 与 gcc 的墙钟对比;**代码生成质量的地板是 gcc `-O0`**,不是及格线) |
 | 自举闭环 | `make` 迭代到不动点 —— 生成的 `.s` 跨代逐字节相同 |
 | `fixed_point.sh` | 本地门(不接 CI)—— N=10 代,`.il` 与 `.s` 跨代 byte-equal |
@@ -455,7 +455,7 @@ JiHuiYiYou-compiler/
 | `jhyy-installer-4.1.5.exe` | 已发布(~54 MB,含 .NET 8 Desktop Runtime + 内置 ucrt64 工具链) |
 | `jhyy-compiler-4.1.5.msi` | 已发布(~27 MB,含 `jhyy-setuc.exe` + 内置工具链) |
 | `jhyy-lang-4.1.5.vsix` | 已发布(VS Code 扩展) |
-| 语言构成 | **66.2%** 的代码是 JHYY —— 56073 行里的 37135 行，385 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| 语言构成 | **66.4%** 的代码是 JHYY —— 56372 行里的 37431 行，386 个文件 —— [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">

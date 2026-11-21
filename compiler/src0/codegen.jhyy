@@ -1788,6 +1788,58 @@ fn cg_sat_f64_to_int(cg_raw: *u8, x: IRVal, src_is_f32: i32, is_unsigned: i32) -
 // 等）。返回转换后的 IRVal（同 qt）或原 arg（不需要转换）。
 //
 // 输入：cg_raw, arg (IRVal), src_t (*Type), dst_t (*Type)
+// cg_narrow_trunc — 窄整型(i8/u8/i16/u16)的**截断**。
+//
+// W-235 (2026-11-21 真修):窄类型在**局部变量**里既不截断也不回绕 ——
+//   根因是 `qbe_type_of` 把四个窄整型都映成 QBE_W()(32 位)⇒ 值待在一个
+//   32 位槽里 ⇒ `as` 到窄类型成了 no-op、窄类型加法是 32 位加法。
+//   而**内存路径**(struct 字段 / 数组元素 / 可变局部变量)走显式
+//   storeb/loadub ⇒ 那边是真窄的 ⇒ **同一个类型,两种宽度**。
+//
+// 修法(本函数):**不**改 IR 的类型体系(那要动整个后端的 b/h 宽度支持),
+//   而是在「值该被截断」的地方**显式发一次扩展指令**:
+//     · `x as <窄类型>`   → extsb / extub / extsh / extuh
+//     · 窄类型的算术结果 → 同上(回绕)
+//   扩展指令读的是源槽的**低 1/2 字节** ⇒ 天然就是「截断 + 符号/零扩展」。
+//
+//   窄类型在 32 位槽里的表示 = **该类型下的值**(i8 存 −56 ⇒ 槽里是
+//   0xFFFFFFC8;i8 存 100 ⇒ 槽里是 0x00000064)⇒ 与内存路径一致 ✓。
+//
+// ⚠️ 槽宽仍是 32 位(不改成 1 字节)—— 那会让**所有**窄类型的栈布局变,
+//   等于重写后端的 sub-word 支持;而**可观测语义**(截断 + 回绕)已经对齐。
+fn cg_narrow_trunc(cg_raw: *u8, n: *Node, val: IRVal) -> IRVal {
+    if n == (0 as *Node) { return val; }
+    let t_raw = (*n).type_ptr;
+    if t_raw == (0 as *u8) { return val; }
+    let t = t_raw as *Type;
+    if (*t).kind != KIND_PRIMITIVE() { return val; }
+    let p = (*t).prim;
+    let mut op: *u8 = 0 as *u8;
+    if p == PRIM_I8() { op = "extsb" as *u8; }
+    else if p == PRIM_U8() { op = "extub" as *u8; }
+    else if p == PRIM_I16() { op = "extsh" as *u8; }
+    else if p == PRIM_U16() { op = "extuh" as *u8; }
+    if op == (0 as *u8) { return val; }
+    let cg = cg_raw as *CGContext;
+    let ir = (*cg).ir as *IRBuf;
+    // 值必须是**临时槽**(扩展指令要一个内存操作数)⇒ 立即数先落槽
+    let mut src = val;
+    if src.kind == IRVAL_INT() {
+        let tmp = *ir_new_tmp(ir, QBE_W());
+        ir_emit_copy(ir, tmp, src.ival);
+        src = tmp;
+    }
+    let out = *ir_new_tmp(ir, QBE_W());
+    ir_emit_str(ir, "    %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, out.id);
+    ir_emit_str(ir, " =w " as *u8);
+    ir_emit_str(ir, op);
+    ir_emit_str(ir, " %t" as *u8);
+    ir_emit_int(ir, "%d" as *u8, src.id);
+    ir_emit_str(ir, "\n" as *u8);
+    return out;
+}
+
 fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
     let cg = cg_raw as *CGContext;
     let ir = (*cg).ir as *IRBuf;
@@ -1879,6 +1931,52 @@ fn cg_convert_arg(cg_raw: *u8, arg: IRVal, src_t: *u8, dst_t: *u8) -> IRVal {
             if (*dst2).kind == KIND_PRIMITIVE() {
                 if (*src).prim == (*dst2).prim {
                     return arg;
+                }
+            }
+        }
+        // W-235 (2026-11-21 真修):`x as <窄类型>` ⇒ **显式截断**。
+        //
+        // 修前:窄类型在 qbe_type_of 里映成 QBE_W()(32 位)⇒ 源和目标都是 32 位
+        // ⇒ 转换表里找不到对应项 ⇒ `conv == 0` ⇒ **原样返回**(no-op)
+        // ⇒ `200i32 as i8` 得 **200**(该是 −56:截断 + 符号扩展)。
+        //
+        // 修法:目标 prim 是 i8/u8/i16/u16 ⇒ 发一次 extsb/extub/extsh/extuh
+        // (读源槽的**低 1/2 字节** ⇒ 天然「截断 + 符号/零扩展」)。
+        //
+        // ⚠️ **同 prim 不截断**(i8 → i8):值本来就已经是该类型下的值 ✓
+        //   (上面那个 same-prim 早返回已经处理了)。
+        // ⚠️ 源必须是**整型**:浮点 → 窄整型走下面的**饱和 + 夹取**路径
+        //   (W-143 的口径),不能被这里截断抢走。
+        if src_t != (0 as *u8) && dst_t != (0 as *u8) {
+            let src3 = src_t as *Type;
+            let dst3 = dst_t as *Type;
+            if (*src3).kind == KIND_PRIMITIVE() && (*dst3).kind == KIND_PRIMITIVE() {
+                let sp3 = (*src3).prim;
+                let dp3 = (*dst3).prim;
+                let mut src_is_int: i32 = 0 as i32;
+                if sp3 == PRIM_I8() || sp3 == PRIM_U8() || sp3 == PRIM_I16() || sp3 == PRIM_U16() ||
+                   sp3 == PRIM_I32() || sp3 == PRIM_U32() || sp3 == PRIM_I64() || sp3 == PRIM_U64() {
+                    src_is_int = 1 as i32;
+                }
+                if src_is_int != (0 as i32) {
+                    let mut nop: *u8 = 0 as *u8;
+                    if dp3 == PRIM_I8() { nop = "extsb" as *u8; }
+                    else if dp3 == PRIM_U8() { nop = "extub" as *u8; }
+                    else if dp3 == PRIM_I16() { nop = "extsh" as *u8; }
+                    else if dp3 == PRIM_U16() { nop = "extuh" as *u8; }
+                    if nop != (0 as *u8) {
+                        if sp3 != dp3 {
+                            let out3 = *ir_new_tmp(ir, QBE_W());
+                            ir_emit_str(ir, "    %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, out3.id);
+                            ir_emit_str(ir, " =w " as *u8);
+                            ir_emit_str(ir, nop);
+                            ir_emit_str(ir, " %t" as *u8);
+                            ir_emit_int(ir, "%d" as *u8, arg.id);
+                            ir_emit_str(ir, "\n" as *u8);
+                            return out3;
+                        }
+                    }
                 }
             }
         }
@@ -2852,7 +2950,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             let zero_v = *ir_new_tmp(ir, inner.qbe_type);
             ir_emit_copy(ir, zero_v, 0);
             ir_emit_binary(ir, result, "sub" as *u8, zero_v, inner);
-            return irval_box(ir, (result).kind, (result).id, (result).ival, (result).name, (result).qbe_type);
+            // W-235:窄整型 ⇒ 取负后按窄宽度**回绕**(`~` 同款)。
+            let nres = cg_narrow_trunc(cg_raw, n, result);
+            return irval_box(ir, (nres).kind, (nres).id, (nres).ival, (nres).name, (nres).qbe_type);
         }
         if op == TOKEN_BANG() {
             /* !expr → ceqw(expr, 0) */
@@ -2872,7 +2972,9 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             let neg_one = *ir_new_tmp(ir, inner.qbe_type);
             ir_emit_copy(ir, neg_one, -1);
             ir_emit_binary(ir, result, "xor" as *u8, inner, neg_one);
-            return irval_box(ir, (result).kind, (result).id, (result).ival, (result).name, (result).qbe_type);
+            // W-235:窄整型 ⇒ 按窄宽度**回绕**(`~5u8` 得 250,不是 −6)。
+            let nres2 = cg_narrow_trunc(cg_raw, n, result);
+            return irval_box(ir, (nres2).kind, (nres2).id, (nres2).ival, (nres2).name, (nres2).qbe_type);
         }
         return irval_box(ir, (inner).kind, (inner).id, (inner).ival, (inner).name, (inner).qbe_type);  /* default: no-op */
     }
@@ -3851,7 +3953,15 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
             }
         }
         ir_emit_binary(ir, result, op, left, right_coerced);
-        return irval_box(ir, (result).kind, (result).id, (result).ival, (result).name, (result).qbe_type);
+        // W-235 (2026-11-21 真修):窄整型(i8/u8/i16/u16)的**算术结果**按窄宽度
+        // **回绕**(规范 § 4.2:整数溢出是定义行为 —— 二补码环绕)。
+        //
+        // 修前:窄类型的加法是**32 位**加法(窄类型在 qbe_type_of 里映成 QBE_W)
+        // ⇒ `200u8 + 100u8` 得 **300**(该是 44)⇒ 与规范冲突 ⇒ 静默给错值。
+        // 修法:算完按结果的窄类型**截断一次**(extub/extsb/…)⇒ 44 ✓。
+        // (比较运算的结果类型是 bool ⇒ 这里自动跳过 ✓)
+        let narrow_res = cg_narrow_trunc(cg_raw, n, result);
+        return irval_box(ir, (narrow_res).kind, (narrow_res).id, (narrow_res).ival, (narrow_res).name, (narrow_res).qbe_type);
     }
 
     // ── NODE_INDEX ──
@@ -5297,6 +5407,33 @@ fn cg_expr(cg_raw: *u8, n: *Node) -> *IRVal {
                     return irval_box(ir, (slice_slot).kind, (slice_slot).id, (slice_slot).ival, (slice_slot).name, (slice_slot).qbe_type);
                 }
             }
+            // W-233 (2026-11-21 真修):字符串字面量(*u8)→ 切片 ⇒ **填上长度**。
+            //
+            // 修前:NODE_CAST **只特判 array→slice** ⇒ 字符串字面量(类型 *u8)
+            // 落不进那个分支 ⇒ 落到通用的 cg_convert_arg ⇒ **只拷了指针**,
+            // 切片的 **len 字段根本没被写** ⇒ len(s) 得 0 ⇒ 下标一读就越界
+            // (规范:下标不做运行时边界检查)⇒ **访问违例**(0xC0000005)。
+            //
+            // 修法:字符串字面量是**已知长度**的 ⇒ 照样造 16 字节槽,
+            // ptr 存 @0、len 存 @8(= 字面量长度)。
+            // (非字面量的 `*T → [*]T` 由 sema 拒绝 —— 长度无从得知。)
+            if (*src_arr).kind == KIND_POINTER() && (*dst_arr).kind == KIND_SLICE() {
+                if inner_node.kind == NODE_STRING() {
+                    let sd = node_string_data(inner_node);
+                    let slen = (*sd).len;
+                    let slice_slot_s = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_alloc(ir, slice_slot_s, 16 as i32);
+                    let ptr_addr_s = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, ptr_addr_s, "add" as *u8, slice_slot_s, ir_new_int(0 as i64));
+                    let _ss1 = cg_emit_store_primitive(cg_raw, 0 as *u8, inner_v, ptr_addr_s);
+                    let len_addr_s = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_binary(ir, len_addr_s, "add" as *u8, slice_slot_s, ir_new_int(8 as i64));
+                    let len_val_s = *ir_new_tmp(ir, QBE_L());
+                    ir_emit_copy(ir, len_val_s, slen);
+                    let _ss2 = cg_emit_store_primitive(cg_raw, 0 as *u8, len_val_s, len_addr_s);
+                    return irval_box(ir, (slice_slot_s).kind, (slice_slot_s).id, (slice_slot_s).ival, (slice_slot_s).name, (slice_slot_s).qbe_type);
+                }
+            }
         }
         // W-009 fix: src_t==0（literal 没 type info）也走 coerce，cg_convert_arg 用
         //   arg.qbe_type 兜底。否则 `0 as *u8` no-op 成 `w copy 0`，比较 l 字段
@@ -5519,22 +5656,6 @@ fn cg_emit_const_prim_data(ir: *IRBuf, e: *Node, t: *Type) -> i32 {
 }
 
 // ════════════════════════════════════════════════════
-// cg_const_data_prim_val — extract int/bool value from a const-data literal node.
-//   v0.9 wip commit 2.20: cg_module Pass A 内联 helper, 取 NODE_INT/BOOL value
-//   (KIND_PRIMITIVE const 数组元素)。返回 i64 (默认 0 if 非 literal)。
-fn cg_const_data_prim_val(e: *Node) -> i64 {
-    let ek = (*e).kind;
-    if ek == NODE_INT() {
-        let nd = node_int_data(e);
-        return (*nd).value;
-    }
-    if ek == NODE_BOOL() {
-        let bd = node_bool_data(e);
-        return (*bd).value as i64;
-    }
-    return 0 as i64;
-}
-
 // cg_emit_const_data_elem — recursive helper for Pass A
 // ════════════════════════════════════════════════════
 
@@ -6318,7 +6439,24 @@ fn cg_module(ir: *IRBuf, module: *Node, t: i32) -> i32 {
                                         si = si + (1 as i64);
                                     }
                                 } else {
-                                    let val: i64 = cg_const_data_prim_val(e_node);
+                                    // W-234 (2026-11-21 真修):元素初值**走常量表达式求值**。
+                                    //
+                                    // 修前:只认「纯字面量」(NODE_INT / NODE_BOOL)
+                                    // ⇒ 写成 `1 as i32` 这种**带转型**的形式时求不出值
+                                    // ⇒ 元素被**当成 0**发射 ⇒ **静默读出 0**(不报错)。
+                                    // 而顶层 `let` 的初始化器**是**走常量折叠的 ⇒
+                                    // 同样的语义、只差一个 `as` ⇒ 一个对、一个静默给 0。
+                                    //
+                                    // 修法:与顶层 let **同款** ⇒ 复用 cg_const_fold
+                                    // (它已支持 INT / BOOL / UNARY / BINARY / CAST,
+                                    //  且按「值约定」出口:窄类型掩码 + 有符号窄类型符号扩展)。
+                                    // (非常量表达式由 sema 拦下并报错 ⇒ 这里折不出来
+                                    //  只剩「折叠本身失败」这一种 ⇒ 落 0。)
+                                    let mut val: i64 = 0 as i64;
+                                    let fold_ok = cg_const_fold(e_node, &val);
+                                    if fold_ok == (0 as i32) {
+                                        val = 0 as i64;
+                                    }
                                     if first_d == 0 {
                                         ir_emit_data_str(ir, ", " as *u8);
                                     }

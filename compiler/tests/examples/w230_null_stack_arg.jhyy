@@ -1,0 +1,43 @@
+// w230_null_stack_arg.jhyy — 台账 W-230:栈位置的实参传 `null` 字面量
+// ⇒ caller 只写 4 字节 ⇒ **callee 收到高 4 字节是残渣的指针**
+//
+// 修前(2026-11-15 实测):退出码 1 —— MS x64 第 5 个及以后的实参走栈
+// (槽宽 8 字节),而 `null` 字面量在**调用实参这条路径上没被填类型**
+// ⇒ IR 把它发成 32 位(w)⇒ `emit_stack_arg_push` 只 `movl` 写 4 字节
+// ⇒ 高 4 字节保留上次写这个槽的内容 ⇒ callee 读到带残渣的指针。
+//
+// 修后:sema 给调用实参里的 `null` 填**形参类型** ⇒ IR 发成 64 位(l)
+// ⇒ 8 字节槽写满 ⇒ 残渣消失。
+//
+// ⇒ 本用例用「先调一次带 ≥5 个实参的函数」把那 4 个字节**确定性地**填成非零
+//    (不依赖进程启动残留 —— 残渣在不同环境下可能恰好是 0)。
+//
+// EXPECT: 0
+fn probe5(a: i64, b: i64, c: i64, d: i64, e: *u8) -> i64 {
+    return e as i64;
+}
+
+// 故意写一个栈参数(>4 个 ⇒ 第 5 个落栈)把 [rsp+32] 填成非零
+fn poison(a: i64, b: i64, c: i64, d: i64, e: *u8) -> i64 {
+    return e as i64;
+}
+
+fn main_jhyy() -> i32 {
+    let local: [u8; 8] = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+    let p: *u8 = &local[0];
+
+    // ① 先用非零指针占住栈参数槽(movq ⇒ 8 字节写满)
+    let _poisoned = poison(1, 2, 3, 4, p);
+
+    // ② 栈位置的 null 字面量 ⇒ 修前只写低 4 字节 ⇒ 高 4 字节是 ① 的残留
+    let v = probe5(1, 2, 3, 4, null);
+
+    // ③ 对照:先落到带类型的局部变量 ⇒ IR 是 64 位 ⇒ 槽写满
+    let z: *u8 = null;
+    let w = probe5(1, 2, 3, 4, z);
+
+    let mut bad: i64 = 0;
+    if v != 0i64 { bad = bad + 1i64; }
+    if w != 0i64 { bad = bad + 2i64; }
+    return bad as i32;
+}

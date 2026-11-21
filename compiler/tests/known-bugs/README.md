@@ -16,7 +16,11 @@
 
 ## 目录内容
 
-| 复现件 | 台账条目 | 现状（修好前） | 修好后 |
+**当前是空的** —— 2026-11-21 之前放在这里的 8 份复现件
+（**W-229 … W-236**）**全部修好了** ⇒ 已按上面的规矩搬进
+`compiler/tests/examples/`，对应台账条目也一并翻成 `RESOLVED`：
+
+| 复现件（现在在 `examples/`） | 台账条目 | 修好前 | 修好后 |
 |---|---|---|---|
 | `w229_fn_value_crash.jhyy` | W-229 | 编译器 **codegen 崩**（`unknown QBE IL mnemonic`），产物运行时爆栈 | 编译期报一条干净的「函数值未实装」错误 |
 | `w230_null_stack_arg.jhyy` | W-230 | 退出码 **1**（栈位置实参传 `null` ⇒ callee 收到带残渣的指针） | 退出码 **0** |
@@ -27,14 +31,17 @@
 | `w235_narrow_local.jhyy` | W-235 | **编译过了、不报错**，但窄类型**局部变量**既不截断也不回绕 | 局部变量也按窄类型算（回绕 + 截断） |
 | `w236_call_arity_not_checked.jhyy` | W-236 | **编译过了、不报错**，但**实参个数**不对时参数**全是垃圾** | 个数不对就编译期报错 |
 
-## 怎么跑
+⇒ **下一条缺陷进来时**：复现件放这个目录 + 台账登记（`docs/internal/workarounds.md`）
+⇒ 修好后搬进 `examples/` 并把台账条目翻成 `RESOLVED`。
+
+## 怎么跑（目录里有文件时）
 
 ```bash
 # 编译 + 跑（退出码 / stdout 就是「现状」）
 python -m jhyy_regress --tests=... # 不行 —— 它们不在套件里
 # 直接用编译器：
 compiler/build/bin/jhyy.exe compile compiler/tests/known-bugs/w230_null_stack_arg.jhyy -o /tmp/w230.exe
-/tmp/w230.exe; echo "exit=$?"     # 修好前 exit=1，修好后 exit=0
+/tmp/w230.exe; echo "exit=$?"
 ```
 
 ⇒ 每个复现件的头部注释里写明了「现状是什么、修好后是什么」，

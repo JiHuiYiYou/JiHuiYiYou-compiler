@@ -1,0 +1,18 @@
+// w232_topconst_scalar_msg.jhyy — 台账 W-232:顶层 `const` 标量
+// ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」
+//
+// 修前(2026-11-15 实测):编译期报
+//   expected [ for const array init, got int
+//   expected ] after const array init, got ;      ← 级联出来的第二条
+// ⇒ 行为本身是对的(编译器**明确拒绝**了标量 const;规范 § 12 就是「仅支持
+//   顶层 const 数组」)⇒ 这是**诊断文案**的问题。
+//
+// 修后:一条说清「顶层 const 只支持数组,标量请用顶层 let」的错误,
+// **且不再级联**出第二条语法错。
+//
+// EXPECT-ERROR: "only supports array"
+const X: u32 = 5;
+
+fn main_jhyy() -> i32 {
+    return 0;
+}

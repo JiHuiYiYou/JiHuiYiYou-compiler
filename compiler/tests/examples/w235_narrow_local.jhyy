@@ -1,0 +1,38 @@
+// w235_narrow_local.jhyy — 台账 W-235:窄类型(`i8`/`u8`/`i16`/`u16`)的
+// **局部变量**既不截断、也不回绕(实际按 32 位算)
+//
+// 修前(2026-11-20 实测):**编译通过、不报错**,但窄类型的**局部变量**
+// **不截断、不回绕** —— 实际按 32 位算:
+//   LOC_ADD[200u8 + 100u8] ⇒ 300   (该是 44:u8 溢出要回绕)
+//   LOC_CAST[200i32 as i8]  ⇒ 200   (该是 -56:as 到 i8 要截断)
+// 而**内存里是真的窄**(struct 字段 / 数组元素 ⇒ 真截断):
+//   FIELD[300 as u8]        ⇒ 44  ✅
+// ⇒ ⇒ **同一个类型,两种宽度** ⇒ 与 lang-spec § 4.2 / § 4.3 冲突。
+//
+// 修后:窄整型在**值**上按窄宽度算 —— `as` 显式截断、算术按窄宽度回绕
+// (规范 § 4.2:整数溢出是定义行为 —— 二补码环绕)。
+//
+// EXPECT: 0
+type S = struct {
+    b: u8,
+}
+
+fn main_jhyy() -> i32 {
+    let loc_add: u8 = 200u8 + 100u8;
+    let loc_cast: i8 = 200i32 as i8;
+    let s: S = S { b: 300 as u8 };
+    let field: i64 = s.b as i64;
+    let arr: [u8; 2] = [300 as u8, 1u8];
+    let elem: i64 = arr[0] as i64;
+
+    let a: i64 = loc_add as i64;
+    let b: i64 = loc_cast as i64;
+
+    let mut bad: i32 = 0;
+    if a != 44i64 { bad = bad + 1; }      // u8 回绕:300 → 44
+    if b != -56i64 { bad = bad + 2; }     // i8 截断:200 → -56
+    if field != 44i64 { bad = bad + 4; }  // 内存路径(本来就对)
+    if elem != 44i64 { bad = bad + 8; }   // 内存路径(本来就对)
+
+    return bad;
+}

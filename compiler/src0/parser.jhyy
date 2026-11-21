@@ -4141,49 +4141,70 @@ fn parse_const_decl(p: *Parser) -> *Node {
 
     // init: [elem, elem, ...]
     let mut t2 = empty_token();
-    parser_expect(p, TOKEN_LBRACKET(), "[ for const array init" as *u8, &t2);
+    parser_peek(p, &t2);
     let lbr_lf = t2.loc_filename;
     let lbr_ll = t2.loc_line;
     let lbr_lc = t2.loc_col;
     let mut elems: *u8 = 0 as *u8;
     let mut nelems: i64 = 0 as i64;
     let mut dcap: i64 = 0 as i64;
-    if parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
-        let mut done: i32 = 0 as i32;
-        while done == (0 as i32) {
-            let elem = parse_expr(p, PREC_NONE());
-            // grow array if needed (double capacity, initial 8)
-            if nelems >= dcap {
-                let mut ncap: i64 = 0 as i64;
-                if dcap != (0 as i64) {
-                    ncap = dcap * (2 as i64);
-                } else {
-                    ncap = 8 as i64;
-                }
-                let new_buf = arena_alloc((*p).arena, ncap * (8 as i64));
-                if elems != (0 as *u8) {
-                    if nelems > (0 as i64) {
-                        let mut k: i64 = 0 as i64;
-                        while k < nelems {
-                            let src_slot = ptr_add_u8(elems, k * (8 as i64)) as **Node;
-                            let dst_slot = ptr_add_u8(new_buf, k * (8 as i64)) as **Node;
-                            *dst_slot = *src_slot;
-                            k = k + (1 as i64);
+    // W-232 (2026-11-21 真修):顶层 const **只支持数组**(规范 § 12)。
+    //
+    // 修前:直接 `parser_expect(TOKEN_LBRACKET, "[ for const array init")`
+    // ⇒ 标量初值拿到的是**语法层**报错(`expected [ for const array init,
+    // got int`)⇒ 完全指不到真因(「顶层 const 只支持数组,标量请用顶层 let」),
+    // 而且**级联**出第二条 `expected ] after const array init`。
+    //
+    // 行为本身是对的(编译器**明确拒绝**了标量 const,不是静默接受)⇒ 这是
+    // **诊断文案**的问题。
+    //
+    // 修法:先看下一个 token 是不是 `[` —— 不是 ⇒ 报一条**说人话**的诊断,
+    // **不再**报第二条语法错(级联);初值按「空数组」处理 ⇒ AST 保持合法。
+    if parser_check(p, TOKEN_LBRACKET()) != (0 as i32) {
+        parser_expect(p, TOKEN_LBRACKET(), "[ for const array init" as *u8, &t2);
+        if parser_check(p, TOKEN_RBRACKET()) == (0 as i32) {
+            let mut done: i32 = 0 as i32;
+            while done == (0 as i32) {
+                let elem = parse_expr(p, PREC_NONE());
+                // grow array if needed (double capacity, initial 8)
+                if nelems >= dcap {
+                    let mut ncap: i64 = 0 as i64;
+                    if dcap != (0 as i64) {
+                        ncap = dcap * (2 as i64);
+                    } else {
+                        ncap = 8 as i64;
+                    }
+                    let new_buf = arena_alloc((*p).arena, ncap * (8 as i64));
+                    if elems != (0 as *u8) {
+                        if nelems > (0 as i64) {
+                            let mut k: i64 = 0 as i64;
+                            while k < nelems {
+                                let src_slot = ptr_add_u8(elems, k * (8 as i64)) as **Node;
+                                let dst_slot = ptr_add_u8(new_buf, k * (8 as i64)) as **Node;
+                                *dst_slot = *src_slot;
+                                k = k + (1 as i64);
+                            }
                         }
                     }
+                    elems = new_buf;
+                    dcap = ncap;
                 }
-                elems = new_buf;
-                dcap = ncap;
-            }
-            let slot = ptr_add_u8(elems, nelems * (8 as i64)) as **Node;
-            *slot = elem;
-            nelems = nelems + (1 as i64);
-            if parser_match(p, TOKEN_COMMA(), &t2) == (0 as i32) {
-                done = 1 as i32;
+                let slot = ptr_add_u8(elems, nelems * (8 as i64)) as **Node;
+                *slot = elem;
+                nelems = nelems + (1 as i64);
+                if parser_match(p, TOKEN_COMMA(), &t2) == (0 as i32) {
+                    done = 1 as i32;
+                }
             }
         }
+        let _rbr = parser_expect(p, TOKEN_RBRACKET(), "] after const array init" as *u8, &t);
+    } else {
+        jh_print_loc_stderr(lbr_lf, lbr_ll, lbr_lc);
+        jh_fputs_stderr("error: top-level const only supports array; use a top-level let for scalars\n" as *u8);
+        (*p).error_count = (*p).error_count + (1 as i32);
+        // 吃掉这个标量初值(免得它被当成下一条声明)⇒ 解析保持同步
+        let _skip_init = parse_expr(p, PREC_NONE());
     }
-    parser_expect(p, TOKEN_RBRACKET(), "] after const array init" as *u8, &t);
     let init = ast_new_array_lit((*p).arena, lbr_lf, lbr_ll, lbr_lc, elems, nelems);
 
     parser_expect(p, TOKEN_SEMICOLON(), "; after const decl" as *u8, &t);

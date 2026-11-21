@@ -142,9 +142,24 @@ type SemaContext = struct {
     //
     // 现在:捕获外层变量 → **编译期明确报错** ✓(而不是生成坏代码)。
     in_closure:       i32,
+    // W-229 (2026-11-21 真修):当前正在**调用者位置**求值的标志。
+    //
+    // 背景:函数名当值用(`let p = f;` / `g(f)`)在规范附录 B 里是**未实装**
+    // (`fn(...)` 函数指针类型未实装)⇒ 正确行为是**一条干净的编译错误**;
+    // 而现状是 sema 放行 ⇒ IR 里 call 的实参槽是空的 + 引用一个不存在的 temp
+    // ⇒ 自举后端的 IL lexer 读到坏 token ⇒ **编译器崩** + 产物运行时爆栈。
+    //
+    // 为什么需要这个标志:`infer_type` 是**表达式类型推导**的公共入口,
+    // 「callee 位置」和「值位置」走的是**同一条**路径 —— 唯一能区分它们的是
+    // **调用者**知道自己在算什么 ⇒ 由 NODE_CALL 在推 callee 类型时置位。
+    //
+    // 口径:标志为 0(值位置)且解析到 SYM_FN ⇒ 报「函数值未实装」。
+    in_callee_pos:    i32,
 }
 
-fn SEMA_CONTEXT_SIZE() -> i64 { return 152 as i64; }
+// SemaContext 字节数 = 19 个字段 × 8(jhyy 的 struct 布局:**每个字段占 8 的倍数**,
+// i32 字段后面补 4 字节 padding)= 152;W-229 加了 in_callee_pos ⇒ 160。
+fn SEMA_CONTEXT_SIZE() -> i64 { return 160 as i64; }
 
 // ════════════════════════════════════════════════════
 // SemaLocal 访问 helper（locals[i].sym / locals[i].type）
@@ -262,6 +277,33 @@ fn sema_error_str_int(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
     sb_append_cstr((*ctx).arena, &sb, ": error: " as *u8);
     sb_append_cstr((*ctx).arena, &sb, msg1);
     sb_appendf((*ctx).arena, &sb, "%d" as *u8, val);
+    sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
+    let s = sb_cstr((*ctx).arena, &sb);
+    jh_fputs_stderr(s);
+    (*ctx).error_count = (*ctx).error_count + (1 as i32);
+    sb_free(&sb);
+    return 0;
+}
+
+// W-236 (2026-11-21 真修):实参**个数**不符的诊断。
+//
+// 为什么单独一个函数:这条错误要同时带**两个数**(形参个数 / 实参个数),
+// 而 sema_error_str_int 只能带一个 ⇒ 自己拼。
+//
+// 口径:`wrong number of arguments: expected N, got M`
+fn sema_error_arity(ctx: *SemaContext, loc_filename: *u8, line: i32, col: i32,
+                     expected: i64, got: i64) -> i32 {
+    let mut sb: StringBuilder = StringBuilder { buf: 0 as *u8, len: 0 as i64, cap: 0 as i64 };
+    sb_init((*ctx).arena, &sb);
+    sb_append_cstr((*ctx).arena, &sb, loc_filename);
+    sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, line);
+    sb_append_cstr((*ctx).arena, &sb, ":" as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, col);
+    sb_append_cstr((*ctx).arena, &sb, ": error: wrong number of arguments: expected " as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, expected as i32);
+    sb_append_cstr((*ctx).arena, &sb, ", got " as *u8);
+    sb_appendf((*ctx).arena, &sb, "%d" as *u8, got as i32);
     sb_append_cstr((*ctx).arena, &sb, "\n" as *u8);
     let s = sb_cstr((*ctx).arena, &sb);
     jh_fputs_stderr(s);
@@ -1004,6 +1046,78 @@ fn sema_mark_pattern_variants(pat: *Node, variants_buf: *u8, nv: i64) -> i32 {
 // 增减只发生在这个 wrapper 的一层 ⇒ 出口必然平衡
 // (jhyy 的 defer **不覆盖隐式返回**,所以不能用 defer —— 规范 § 6.1 / 附录 B)。
 
+// sema_const_elem_ok —— **已撤**（2026-11-21）
+//
+// ⚠️ 曾经在这里加过一条「const 数组元素必须是编译期常量表达式」的诊断 ⇒
+// **被规范 § 12 直接否掉**：规范明写「编译器**不做** const 表达式检查:
+// 元素位置放函数调用能编译通过,但不会被求值,运行时取到 0」⇒
+// 仓内 `compiler/tests/examples/spec_const_nonconst_elem.jhyy` 就是这条的
+// **一致性用例** ⇒ 加那条诊断 = 与规范冲突 ⇒ 撤掉。
+// (W-234 的修法只剩 codegen 侧:元素初值**也走常量表达式求值** ⇒
+//  `1 as i32` 求得出来;`seven()` 求不出来 —— 仍落 0,那是**规范允许**的。)
+
+// sema_int_fits_prim:这个字面量装得下**目标**整型 prim 吗?
+//
+// W-228 用:字面量装不下声明类型时,编译器**必须**拒绝(否则同一个值有两种解释)。
+//
+//   `lit_prim` = 字面量**自己**的 prim(后缀;无后缀 ⇒ i32)—— 它决定
+//     **怎么解释这个值**:
+//       · `PRIM_U64` 且值为负 ⇒ 那是**位模式**(u64 的高半区,量值 ≥ 2^63)
+//         ⇒ 只有 64 位族装得下(它就是那个位模式本身);
+//       · 其余 ⇒ 按**有符号数**解释。
+//   `dst_prim` = **声明类型**(目标)的 prim —— 它决定**装不装得下**。
+//
+// ⚠️ 为什么不能只看「值」:字面量 `-1` 与 `18446744073709551615u64` 在 AST 里
+//   是**同一个位模式** ⇒ 靠值分不出来 ⇒ 必须看**后缀**。
+//   (W-186 / W-188 修的就是 u64 的高位值 —— 那批用例不能被本门误杀。)
+fn sema_int_fits_prim(v: i64, lit_prim: i32, dst_prim: i32) -> i32 {
+    // u64 字面量的「负值」是位模式(量值 ≥ 2^63)⇒ 只有 64 位族装得下
+    if lit_prim == PRIM_U64() {
+        if v < (0i64) {
+            if dst_prim == PRIM_U64() { return 1 as i32; }
+            if dst_prim == PRIM_I64() { return 1 as i32; }
+            return 0 as i32;
+        }
+    }
+    let p = dst_prim;
+    if p == PRIM_I8() {
+        if v < (0i64 - 128i64) { return 0 as i32; }
+        if v > (127i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_U8() {
+        if v < (0i64) { return 0 as i32; }
+        if v > (255i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_I16() {
+        if v < (0i64 - 32768i64) { return 0 as i32; }
+        if v > (32767i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_U16() {
+        if v < (0i64) { return 0 as i32; }
+        if v > (65535i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_I32() {
+        if v < (0i64 - 2147483648i64) { return 0 as i32; }
+        if v > (2147483647i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_U32() {
+        if v < (0i64) { return 0 as i32; }
+        if v > (4294967295i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    if p == PRIM_U64() {
+        if v < (0i64) { return 0 as i32; }
+        return 1 as i32;
+    }
+    // PRIM_I64 / 其它:装得下
+    return 1 as i32;
+}
+
 fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
     if jh_depth_check() != (0 as i32) {
         (*ctx).error_count = (*ctx).error_count + (1 as i32);
@@ -1133,6 +1247,22 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         // 1) sym 本身有 type
         if id_sym != (0 as *Sym) {
             if (*id_sym).type_ptr != (0 as *u8) {
+                // W-229 (2026-11-21 真修):函数名当**值**用 ⇒ 干净的编译错误。
+                //
+                // 规范附录 B:「`fn(...)` 函数指针类型未实装」⇒ `let p = f;` /
+                // `g(f)` 这种写法**没有实现** ⇒ 正确行为是报一条错。
+                // 修前是**放行** ⇒ IR 里 call 的实参槽是空的 + 引用一个不存在的
+                // temp ⇒ 自举后端的 IL lexer 读到坏 token ⇒ 编译器崩
+                // (`unknown QBE IL mnemonic`)+ 产物运行时爆栈。
+                //
+                // 判据:符号是 SYM_FN **且**当前不在 callee 位置
+                // (callee 位置 = NODE_CALL 正在推被调函数的类型 ⇒ 合法)。
+                if (*id_sym).kind == SYM_FN() {
+                    if (*ctx).in_callee_pos == (0 as i32) {
+                        let _fv = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                            "function value is not supported yet (the fn(...) pointer type is not implemented)" as *u8);
+                    }
+                }
                 let t = (*id_sym).type_ptr as *Type;
                 (*n).type_ptr = t as *u8;
                 return t;
@@ -1167,6 +1297,13 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let gsym = symtab_lookup_typed((*ctx).global_scope, (*id_sym).name);
         if gsym != (0 as *Sym) {
             if (*gsym).kind == SYM_FN() || (*gsym).kind == SYM_TYPE() {
+                // W-229:同上面的拦截(全局作用域这一路也要拦 —— 见上面的注释)。
+                if (*gsym).kind == SYM_FN() {
+                    if (*ctx).in_callee_pos == (0 as i32) {
+                        let _fv = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                            "function value is not supported yet (the fn(...) pointer type is not implemented)" as *u8);
+                    }
+                }
                 if (*gsym).type_ptr != (0 as *u8) {
                     // 替换 sym 让 codegen 拿到正确 module
                     if gsym != id_sym {
@@ -1371,6 +1508,40 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         let from = infer_type(ctx, ta, (*d).expr as *Node);
         if (*d).target_type != (0 as *u8) {
             let to = resolve_type_node(ctx, ta, (*d).target_type as *Node);
+            // W-233 (2026-11-21 真修):指针 → 切片 的转换**只有字符串字面量**合法
+            //   (它的长度是**已知的**)。
+            //
+            // 修前:任何 `*T → [*]T` 都被放行,但 codegen 的 NODE_CAST **只特判
+            // array→slice** ⇒ 指针那条只拷了指针、**len 根本没被填** ⇒ 产出
+            // 一个「指针对、长度错」的切片 ⇒ len() 得 0 ⇒ 下标读越界
+            // (规范:下标不做运行时边界检查)⇒ **访问违例**(0xC0000005)。
+            //
+            // 修法:非字符串字面量的指针→切片 **编译期拒绝**(响亮报错);
+            //   字符串字面量由 codegen 填上长度 ✓(元素类型也必须是 u8 ——
+            //   否则读元素会按另一种宽度重解释字节 ⇒ 又是静默给错值)。
+            if to != (0 as *Type) {
+                if (*to).kind == KIND_SLICE() {
+                    if from != (0 as *Type) {
+                        if (*from).kind == KIND_POINTER() {
+                            if (*((*d).expr as *Node)).kind == NODE_STRING() {
+                                let to_elem = (*to).elem as *Type;
+                                let from_elem = (*from).elem as *Type;
+                                if to_elem != (0 as *Type) {
+                                    if from_elem != (0 as *Type) {
+                                        if type_eq(from_elem, to_elem) == (0 as i32) {
+                                            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                    "string literal can only be converted to a [*]u8 slice" as *u8);
+                                        }
+                                    }
+                                }
+                            } else {
+                                let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                        "cannot convert a pointer to a slice: only string literals and arrays can be converted to slices" as *u8);
+                            }
+                        }
+                    }
+                }
+            }
             // array → slice 特殊：直接接受
             (*n).type_ptr = to as *u8;
             return to;
@@ -1866,11 +2037,48 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             }
         }
 
+        // W-229:callee 位置 ⇒ 标识符解析到 SYM_FN **不报错**(它是「被调用的
+        //   函数」,不是「函数值」)。推完立刻恢复标志(实参按**值**位置推 ⇒
+        //   `g(f)` 里的 `f` 会被拦)。
+        let saved_callee_pos = (*ctx).in_callee_pos;
+        (*ctx).in_callee_pos = 1 as i32;
         let callee_type = infer_type(ctx, ta, (*d).callee as *Node);
+        (*ctx).in_callee_pos = saved_callee_pos;
         // v3.1.1 (V3-C 3g.5): PhantomData 不允许实例化(只能作 type-level marker)
         if (*callee_type).kind == KIND_PHANTOM() {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "E0050: cannot instantiate PhantomData<T> (use as type-level marker only)" as *u8);
+        }
+        // W-236 (2026-11-21 真修):实参**个数** vs 形参个数。
+        //
+        // 修前:调用点只推实参的**类型**,**从不**比个数 ⇒ 少传/多传都编译通过
+        // ⇒ 少传的形参在 IR 里**没有值** ⇒ codegen 按「调用点给了几个」分配
+        // 寄存器 ⇒ callee 读到**残渣**(实测 `three(1, 2)` ⇒ a=0 b=5 c=6,
+        // 连**前两个**都错位)⇒ 静默给错值。
+        //
+        // 口径:**extern fn 不查** —— C 的可变参函数(printf / sprintf)在 jhyy 里
+        //   只能声明成**定长**签名(`extern fn printf(fmt: *u8, val: i32)`),
+        //   但调用点按 C 的习惯传**任意多个**实参 ⇒ 拿声明的 arity 去卡它是错的。
+        //   (编译器自己的源码里就有 `printf(target_help())` 这么一处。)
+        if (*callee_type).kind == KIND_FUNC() {
+            let mut skip_arity: i32 = 0 as i32;
+            if (*d).callee != (0 as *u8) {
+                if (*((*d).callee as *Node)).kind == NODE_IDENT() {
+                    let cid = node_ident_data((*d).callee as *Node);
+                    let csym = (*cid).sym as *Sym;
+                    if csym != (0 as *Sym) {
+                        if (*csym).is_extern != (0 as i32) {
+                            skip_arity = 1 as i32;
+                        }
+                    }
+                }
+            }
+            if skip_arity == (0 as i32) {
+                if (*d).nargs != (*callee_type).nparams {
+                    let _x = sema_error_arity(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                              (*callee_type).nparams, (*d).nargs);
+                }
+            }
         }
         // 推所有 arg 类型
         let mut i: i64 = 0 as i64;
@@ -1885,13 +2093,33 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             // save/restore:推断实参可能递归进别的表达式,不能让它看到
             // 上一个实参的期望类型。
             let saved_exp = (*ctx).expected_enum_type;
+            let mut param_t: *u8 = 0 as *u8;
             if (*callee_type).kind == KIND_FUNC() {
                 if i < (*callee_type).nparams {
-                    (*ctx).expected_enum_type =
-                        *(((*callee_type).params as i64 + i * (8 as i64)) as **u8);
+                    param_t = *(((*callee_type).params as i64 + i * (8 as i64)) as **u8);
+                    (*ctx).expected_enum_type = param_t;
                 }
             }
-            let _x = infer_type(ctx, ta, *(((*d).args as i64 + i * (8 as i64)) as **Node));
+            let arg_node = *(((*d).args as i64 + i * (8 as i64)) as **Node);
+            let _x = infer_type(ctx, ta, arg_node);
+            // W-230 (2026-11-21 真修):`null` 实参 ⇒ 填**形参类型**。
+            //
+            // 背景:`null` 的类型靠「caller 上下文」填充(NODE_NULL 分支只放一个
+            // 哨兵 0),而**调用实参这条路径从来没实现过** ⇒ null 在调用点始终
+            // **没有类型** ⇒ IR 按默认整型宽度发成 `w`(32 位)⇒ 第 5+ 个实参
+            // (栈位置)只写 4 字节,而 MS x64 的栈参数槽宽是 **8 字节**
+            // ⇒ callee 读到**高 4 字节是残渣**的指针。
+            // (填了类型 ⇒ IR 发成 `l` ⇒ 槽写满 ⇒ 残渣消失。)
+            if arg_node != (0 as *Node) {
+                if (*arg_node).kind == NODE_NULL() {
+                    if param_t != (0 as *u8) {
+                        let pt = param_t as *Type;
+                        if (*pt).kind == KIND_POINTER() {
+                            (*arg_node).type_ptr = param_t as *u8;
+                        }
+                    }
+                }
+            }
             (*ctx).expected_enum_type = saved_exp;
             i = i + (1 as i64);
         }
@@ -1997,6 +2225,37 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             return v;
         }
         (*d).resolved = resolved as *u8;
+        // W-236 / W-230:限定名调用(`mod::f(...)`)的实参个数 + `null` 实参类型。
+        //   口径与 NODE_CALL 那条路**同款**(extern fn 不查个数)。
+        if (*resolved).type_ptr != (0 as *u8) {
+            let rt = (*resolved).type_ptr as *Type;
+            if (*rt).kind == KIND_FUNC() {
+                if (*resolved).is_extern == (0 as i32) {
+                    if (*d).nargs != (*rt).nparams {
+                        let _x = sema_error_arity(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                                  (*rt).nparams, (*d).nargs);
+                    }
+                }
+                let mut ai2: i64 = 0 as i64;
+                while ai2 < (*d).nargs {
+                    if ai2 < (*rt).nparams {
+                        let p_t = *(((*rt).params as i64 + ai2 * (8 as i64)) as **u8);
+                        let a_node = *(((*d).args as i64 + ai2 * (8 as i64)) as **Node);
+                        if a_node != (0 as *Node) {
+                            if (*a_node).kind == NODE_NULL() {
+                                if p_t != (0 as *u8) {
+                                    let pt2 = p_t as *Type;
+                                    if (*pt2).kind == KIND_POINTER() {
+                                        (*a_node).type_ptr = p_t as *u8;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ai2 = ai2 + (1 as i64);
+                }
+            }
+        }
         if (*resolved).type_ptr != (0 as *u8) {
             let t = (*resolved).type_ptr as *Type;
             if (*t).kind == KIND_FUNC() {
@@ -2298,6 +2557,22 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                         let p = (*decl_type).prim;
                         if p == PRIM_I8() || p == PRIM_I16() || p == PRIM_I32() || p == PRIM_I64() ||
                            p == PRIM_U8() || p == PRIM_U16() || p == PRIM_U32() || p == PRIM_U64() {
+                            // W-228 (2026-11-21 真修):字面量**装不下**声明类型
+                            // ⇒ 编译期拒绝(口径同 Rust;C 只警告)。
+                            //
+                            // 修前:下面那行把字面量的类型强行按**声明类型**解释,
+                            // 而**值**还是那个装不下的原始值(IR 里是 64 位常量)
+                            // ⇒ **常量折叠与运行时两种解释并存**:
+                            //   `let a: i32 = 2147483648;` ⇒ `a as i64` 得 +2147483648,
+                            //   而 `a + 0i32` 得 −2147483648、`a < 0i32` 得**真**。
+                            // ⇒ 同一个值两种解释 ⇒ 静默给错值。
+                            let lid = node_int_data((*d).init as *Node);
+                            let lval = (*lid).value;
+                            let lprim = (*lid).prim;
+                            if sema_int_fits_prim(lval, lprim, p) == (0 as i32) {
+                                let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                        "integer literal out of range for the declared type (use a wider type or an explicit as cast)" as *u8);
+                            }
                             (*((*d).init as *Node)).type_ptr = decl_type as *u8;
                         }
                     }
@@ -2377,6 +2652,12 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "const declaration must be an array type [T; N]" as *u8);
         }
+        // ⚠️ 这里**刻意不做**「元素必须是常量表达式」的检查 ——
+        //   规范 § 12 明写「编译器**不做** const 表达式检查:元素位置放函数
+        //   调用能编译通过,但不会被求值,运行时取到 0」
+        //   ⇒ 加那条检查 = 与规范冲突(还会打死
+        //   `compiler/tests/examples/spec_const_nonconst_elem.jhyy` 那条一致性用例)。
+        //   W-234 的修法在 codegen 侧(元素初值**也走常量表达式求值**)。
         let sym = (*d).sym as *Sym;
         (*sym).type_ptr = arr_t as *u8;
         (*sym).kind = SYM_CONST();
@@ -2393,6 +2674,25 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         if type_eq(target_type, value_type) == (0 as i32) {
             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                     "assignment type mismatch" as *u8);
+        }
+        // W-228 (2026-11-21 真修):赋值的右值是**整数字面量**且装不下目标类型
+        // ⇒ 编译期拒绝(与 let 初始化**同款**口径)。
+        //
+        // 为什么赋值路径也要查:类型检查过了(字面量自己的 prim == 目标类型)⇒
+        // 「值装不下」这件事**没人管** ⇒ 与 let 路径一模一样的两种解释。
+        if (*d).value != (0 as *u8) {
+            if (*((*d).value as *Node)).kind == NODE_INT() {
+                if target_type != (0 as *Type) {
+                    if (*target_type).kind == KIND_PRIMITIVE() {
+                        let tp = (*target_type).prim;
+                        let vid = node_int_data((*d).value as *Node);
+                        if sema_int_fits_prim((*vid).value, (*vid).prim, tp) == (0 as i32) {
+                            let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
+                                    "integer literal out of range for the assigned type (use a wider type or an explicit as cast)" as *u8);
+                        }
+                    }
+                }
+            }
         }
         // v0.6.5 patch: forbid rebinding immutable `let`
         if (*d).target != (0 as *u8) {
@@ -2618,7 +2918,8 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
         while i < (*d).nfields {
             let fi = ptr_add_u8((*d).fields, i * (16 as i64)) as *NodeFieldInit;
             let fname = (*fi).name;
-            let fval_type = infer_type(ctx, ta, (*fi).value as *Node);
+            let fval_node = (*fi).value as *Node;
+            let mut fval_type = infer_type(ctx, ta, fval_node);
             let mut found: i32 = 0 as i32;
             let mut j: i64 = 0 as i64;
             while j < (*st).nfields {
@@ -2627,6 +2928,28 @@ fn infer_type(ctx: *SemaContext, ta: *TypeArena, n: *Node) -> *Type {
                 if f_name_ptr != (0 as *Sym) {
                     if strcmp((*f_name_ptr).name, fname) == (0 as i32) {
                         let ft_ptr = *((f_off as i64 + (8 as i64)) as **Type);
+                        // W-231 (2026-11-21 真修):struct 字面量里的 `null` 字段
+                        // ⇒ 填**字段类型**(指针字段)。
+                        //
+                        // 背景:`null` 的类型靠「caller 上下文」填充,而 **struct
+                        // 字面量字段这条路径从来没实现过** ⇒ 字段类型检查拿不到
+                        // null 的类型 ⇒ 落成「类型对不上」⇒ 报 `field type
+                        // mismatch`(措辞完全指不到真因)。
+                        // 而**同一个** `null` 写进 let 初始化是**合法**的
+                        // (let 路径有自动转换)⇒ 同一个字面量一个通一个不通。
+                        //
+                        // 修法:字段是**指针**类型 ⇒ 把 null 的类型填成字段类型
+                        // (与 let 路径同款口径)。
+                        if fval_node != (0 as *Node) {
+                            if (*fval_node).kind == NODE_NULL() {
+                                if ft_ptr != (0 as *Type) {
+                                    if (*ft_ptr).kind == KIND_POINTER() {
+                                        (*fval_node).type_ptr = ft_ptr as *u8;
+                                        fval_type = ft_ptr;
+                                    }
+                                }
+                            }
+                        }
                         if type_eq(ft_ptr, fval_type) == (0 as i32) {
                             let _x = sema_error_str(ctx, (*n).loc_filename, (*n).loc_line, (*n).loc_col,
                                                     "field type mismatch" as *u8);
@@ -3592,6 +3915,8 @@ fn sema_init(ctx: *SemaContext, arena: *Arena, ta: *TypeArena) -> i32 {
     (*ctx).closure_counter = 0 as i64;
     // W-115:闭包体检查标志(默认不在闭包里)
     (*ctx).in_closure = 0 as i32;
+    // W-229:调用者位置标志(默认不在调用者位置 —— 标识符被当**值**用)
+    (*ctx).in_callee_pos = 0 as i32;
     // init type arena（lazy init 也会触发）
     (*ta).arena = arena;
     (*ta).inited = 0 as i32;

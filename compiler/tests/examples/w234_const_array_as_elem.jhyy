@@ -1,0 +1,26 @@
+// w234_const_array_as_elem.jhyy — 台账 W-234:顶层 `const` 数组的元素写成
+// `1 as i32` ⇒ **静默读出 0**
+//
+// 修前(2026-11-20 实测):**编译通过、不报错**,但元素**读出来是 0** ——
+//   A_WITH_AS[1] ⇒ 0    (该是 2)
+//   B_PLAIN[1]   ⇒ 2  ✅
+// ⇒ 同样的语义(i32 数组)、只差一个 `as` ⇒ 一个对、一个**静默给 0**。
+//
+// 修后:顶层 const 数组的初值**也走常量表达式求值**(与顶层 `let` 同款)
+// ⇒ 带 `as` 的元素也求值出来 ⇒ A_WITH_AS[1] == 2。
+// (不是常量表达式的元素 ⇒ sema **编译期报错**,不再静默给 0。)
+//
+// EXPECT: 0
+const A_WITH_AS: [i32; 3] = [1 as i32, 2 as i32, 3 as i32];
+const B_PLAIN: [i32; 3] = [1, 2, 3];
+
+fn main_jhyy() -> i32 {
+    let a: i64 = A_WITH_AS[1] as i64;
+    let b: i64 = B_PLAIN[1] as i64;
+
+    let mut bad: i32 = 0;
+    if a != 2i64 { bad = bad + 1; }
+    if b != 2i64 { bad = bad + 2; }
+
+    return bad;
+}

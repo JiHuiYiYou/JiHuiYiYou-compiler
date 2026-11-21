@@ -247,7 +247,7 @@ Known gaps in the stdlib → [Known limitations](#known-limitations).
 
 ```bash
 python regress.py
-# => 281 passed, 20 skipped (301 total)
+# => 290 passed, 20 skipped (310 total)
 ```
 
 What those numbers mean — one term, one definition each (the counts themselves live
@@ -471,8 +471,8 @@ numbers.
 
 | Metric | Value |
 |--------|-------|
-| `regress.py` (regression suite) | **281 PASS + 0 XFAIL + 0 failed + 20 SKIP** (301 total) |
-| Assertion audit | 301 scanned · 281 runnable · 217 real assertions · 0 zero-signal |
+| `regress.py` (regression suite) | **290 PASS + 0 XFAIL + 0 failed + 20 SKIP** (310 total) |
+| Assertion audit | 310 scanned · 290 runnable · 222 real assertions · 0 zero-signal |
 | Benchmark suite | 9 tasks over 4 coverage axes — [published snapshot](bench/baseline/RESULTS-2026-11-04.md) (jhyy vs gcc wall clock; the code-quality floor is gcc `-O0`, not a pass/fail bar) |
 | Self-host closure | `make` iterates to a fixed point — emitted `.s` byte-identical |
 | `fixed_point.sh` | local gate (not in CI) — N=10 generations, `.il` and `.s` byte-equal |
@@ -482,7 +482,7 @@ numbers.
 | `jhyy-installer-4.1.5.exe` | shipped (~54 MB, includes .NET 8 Desktop Runtime + bundled ucrt64 toolchain) |
 | `jhyy-compiler-4.1.5.msi` | shipped (~27 MB, includes `jhyy-setuc.exe` + bundled toolchain) |
 | `jhyy-lang-4.1.5.vsix` | shipped (VS Code extension) |
-| Language composition | **66.2%** of the code is JHYY — 37135 of 56073 lines, 385 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
+| Language composition | **66.4%** of the code is JHYY — 37431 of 56372 lines, 386 files — [FACTS.md § 7](docs/internal/FACTS.md) <!-- langstat:row --> |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/internal/langstat-dark.svg">

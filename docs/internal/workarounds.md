@@ -357,15 +357,17 @@
 | [W-225](#w-225) | RESOLVED | 规范分节时**正文为空**的章节被整段丢弃 ⇒ 按章标题查规范**查不到** |
 | [W-226](#w-226) | RESOLVED | 链接失败时 gcc/ld 的**真实原因**被吞掉 ⇒ 只剩「ld returned 1 exit... |
 | [W-227](#w-227) | RESOLVED | AST dump 的 64 位 hex 打印把 `a`..`f` 打成 `W`..`\` ⇒... |
-| [W-228](#w-228) | DEFERRED | 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致** |
-| [W-229](#w-229) | ACTIVE | 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 +... |
-| [W-230](#w-230) | ACTIVE | 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee... |
-| [W-231](#w-231) | ACTIVE | struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch` |
-| [W-232](#w-232) | ACTIVE | 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」 |
-| [W-233](#w-233) | ACTIVE | 字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒... |
-| [W-234](#w-234) | ACTIVE | 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0** |
-| [W-235](#w-235) | ACTIVE | 窄类型（`i8`/`u8`/`i16`/`u16`）的**局部变量**既不截断、也不回绕（实际按... |
-| [W-236](#w-236) | ACTIVE | 调用**不检查实参个数** ⇒ 少传/多传 ⇒ 编译通过 ⇒ 参数**全是垃圾** |
+| [W-228](#w-228) | RESOLVED | 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致** |
+| [W-229](#w-229) | RESOLVED | 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 +... |
+| [W-230](#w-230) | RESOLVED | 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee... |
+| [W-231](#w-231) | RESOLVED | struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch` |
+| [W-232](#w-232) | RESOLVED | 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」 |
+| [W-233](#w-233) | RESOLVED | 字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒... |
+| [W-234](#w-234) | RESOLVED | 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0** |
+| [W-235](#w-235) | RESOLVED | 窄类型（`i8`/`u8`/`i16`/`u16`）的**局部变量**既不截断、也不回绕（实际按... |
+| [W-236](#w-236) | RESOLVED | 调用**不检查实参个数** ⇒ 少传/多传 ⇒ 编译通过 ⇒ 参数**全是垃圾** |
+| [W-237](#w-237) | RESOLVED | `mono.jhyy` 调 `ast_new_slice_lit` **多传一个实参** ⇒... |
+| [W-238](#w-238) | RESOLVED | `mono.jhyy` 调 `ast_new_for` **少传一个实参** +... |
 
 <a id="w-001"></a>
 ## W-001: hash_string 用 *i32 deref 绕 v0 codegen `loadsb` 错
@@ -15915,10 +15917,10 @@ FLOAT @flt.jhyy:3:18 bits=0x3\X999999999999W prim=9    ← 期望 0x3fb999999999
 <a id="w-228"></a>
 ## W-228: 整数字面量**超出声明类型范围**时被静默接受 ⇒ **常量折叠与运行时不一致**
 
-**状态:** DEFERRED —— 归 v4.6 任务 7「静默缺陷清零」（真修排期见 `docs/plans/v4/v4.6-plan.md`；修它要改 `compiler/src0/*.jhyy` ⇒ 移位模块级 temp 编号 ⇒ 自举产物漂移 ⇒ 发版级流程）
+**状态:** RESOLVED closed 2026-11-21 — sema 按**声明类型**校验字面量范围(let 初始化 + 赋值两条路)⇒ 装不下就**编译期拒绝**(口径同 Rust)
 **Filed-by:** 2026-11-14（IDE 知识包那条线：给「反直觉点」写编译器验证过的
 错/对对照时，逐条真编译**撞出来的**）
-**日期:** 2026-11-14
+**日期:** 2026-11-14 (DEFERRED) → 2026-11-21 (真修)
 
 **触发面:** `compiler/src0/sema.jhyy:1016`（`NODE_INT` 分支：类型直接取
 `(*d).prim`，**不按声明类型窄化**）＋ `compiler/src0/parser.jhyy:81`
@@ -15963,6 +15965,10 @@ $ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）
 **根因（初步，已定位到两处）:**
 1. **parser 按字面量的自然宽度定 `prim`**（`2147483648` 超出 i32 ⇒ 定成
    u64/i64）—— 这本身**是对的**（C 也这样）。
+   ⚠️ **2026-11-21 订正**：这一条**现在不成立** —— 现行 `jh_int_suffix_prim`
+   只看**后缀**（`i8`/`u16`/…），**无后缀一律 i32**，**不看量值**
+   ⇒ `2147483648` 的 prim 是 **i32**（值 2147483648 装不下 i32）。
+   ⇒ 真正的根因是**第 2 条**（sema 不按声明类型校验/窄化），第 1 条已不存在。
 2. **sema 的 `NODE_INT` 分支只读 `(*d).prim`** ⇒ **没有「按声明类型窄化」
    这一步** ⇒ 类型系统认为它是 i32（于是 `a < 0` 按 i32 语义），
    **而 codegen 的常量仍是 64 位的原始值** ⇒ ⇒ 两种解释并存。
@@ -15976,16 +15982,30 @@ $ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）
 - 要算一个越界的值 ⇒ **用表达式**（`2147483647i32 + 1i32`）⇒ 走运行时路径 ⇒ 一致 ✓。
 - 要更大的值 ⇒ **换个更宽的类型**（u64 / i64）。
 
-**怎么修的（还没修 —— 修法方向）:** 两条路，**推荐报错**：
-⇒ **2026-11-21 已定：走 (A) 报错**（排期见 `docs/plans/v4/v4.6-plan.md` 任务 7）。
-- **(A) 报错**：字面量超出声明类型范围 ⇒ 编译期拒绝（像 Rust；C 只是警告，
-  但 C 至少只有**一种**解释）。
-- **(B) 窄化**：按声明类型窄化（像 C 的截断）⇒ 但**必须保证窄化后只有
-  一种解释** ⇒ 也就是说常量折叠和运行时**必须走同一条窄化路径**。
+**怎么修的（2026-11-21 已修 —— 走 (A) 报错）:** sema 在 **let 初始化**这条路上
+加了「按**声明类型**校验字面量范围」这一步；**赋值**那条路同款。
+判据在 `sema_int_fits_prim(value, lit_prim, dst_prim)`（`compiler/src0/sema.jhyy`）：
+- `lit_prim`（字面量**自己**的后缀）决定**怎么解释这个值**：
+  `PRIM_U64` 且值为负 ⇒ 那是**位模式**（量值 ≥ 2^63）⇒ 只有 64 位族装得下；
+  其余按**有符号数**解释。
+- `dst_prim`（**声明类型**）决定**装不装得下**。
 
-⚠️ **(B) 单独做不够** —— 只改 codegen 而不改 sema（或反过来）⇒ 两种解释
-还会并存 ⇒ ⇒ **窄化必须发生在 sema 定类型那一步**，让常量**和运行时
-用同一个值**。
+⚠️ **为什么不能只看「值」**：字面量 `-1` 与 `18446744073709551615u64` 在 AST 里
+是**同一个位模式** ⇒ 靠值分不出来 ⇒ 必须看**后缀**（否则会打死
+`u64_wide_literal.jhyy` / `global_data_value.jhyy` 那批 W-186/W-188 的用例）。
+
+报错文案：`integer literal out of range for the declared type`。
+- **(A) 报错**：✅ **已做** —— 字面量超出声明类型范围 ⇒ 编译期拒绝（像 Rust；
+  C 只是警告，但 C 至少只有**一种**解释）。
+- **(B) 窄化**：❌ **没做** —— 按声明类型窄化（像 C 的截断）会让「装不下」也
+  合法 ⇒ 与本条要的「只有一种解释」不是一回事（而且 (B) 单独做不够 ——
+  只改 codegen 而不改 sema（或反过来）⇒ 两种解释还会并存）。
+
+⚠️ **口径边界**：范围校验**只查「有声明类型」的那条路**（let 初始化 / 赋值）。
+**无声明类型**的字面量（`let x = 4000000000;`）仍按字面量**自己的** prim 解释
+（无后缀 ⇒ i32）⇒ 那条路的「两种解释」问题**仍在**
+（parser 层就刻意没做成报错 —— 见 `parser.jhyy` 里 W-186/W-188 那段注释：
+「突然改成报错会砸掉一批能编译的程序」）。
 
 **影响范围:**
 - 只影响**整数字面量超出声明类型范围**的代码（类型系统**不报错** ⇒
@@ -16000,18 +16020,19 @@ $ jhyy compile ovf.jhyy          # ✅ 编译通过（不报错！）
 在那之前 ⇒ **凡是字面量可能超范围的代码，都按上面的 workaround 写**。
 
 **引用:**
-- `compiler/src0/sema.jhyy:1016`（`NODE_INT` 分支 —— 类型只取 `(*d).prim`）
-- `compiler/src0/parser.jhyy:81`（`parse_int_literal` —— 自然宽度定 `prim`）
-- 实测复现：`printf 'fn main_jhyy() -> i32 { let a: i32 = 2147483648; let b: u32 = 4294967296; return 0; }' > ovf.jhyy`
-  ⇒ `jhyy compile ovf.jhyy`（**通过**）⇒ `JHY_WRITE_IL=1` 看 `=l copy 2147483648`
+- `compiler/src0/sema.jhyy`（`sema_int_fits_prim` —— 范围判据；
+  let 初始化那条路的调用点 + 赋值那条路的调用点）
+- `compiler/src0/jhyy_helpers.c`（`jh_int_suffix_prim` —— prim **只**看后缀）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w228_int_literal_overflow.jhyy`
+  （`// EXPECT-ERROR: "out of range"`）
 - 相关（**不是**同一个根因，但**同一个方向**）：W-185（`u32` 宽化）
 
 <a id="w-229"></a>
 ## W-229: 把**函数名当值**用 ⇒ sema 放行、IR 是坏的 ⇒ **codegen 崩 + 产物爆栈**
 
-**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 函数名当值用（`let p = f` / `g(f)`）过了 sema，但 IR 里实参槽是空的 ⇒ 编译器崩；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — sema 加「调用者位置」标志 ⇒ 函数名当**值**用报一条干净的错（不再崩编译器）
 **Filed-by:** 2026-11-15（写 Win32 GUI 的探路：为了接 Win32 回调而撞出来的）
-**日期:** 2026-11-15
+**日期:** 2026-11-15 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:**
 - `compiler/src0/sema.jhyy:1167-1179` —— 表达式位置的标识符解析到 `SYM_FN` 时，
@@ -16063,6 +16084,19 @@ codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059
 `GetProcAddress(GetModuleHandleA("user32.dll"), "DefWindowProcA")` ⇒ 实测可用
 （`GetProcAddress` 返回的是 `*u8`，能直接塞进 struct 字段）。
 
+**怎么修的（2026-11-21 已修）:** sema 的 `SemaContext` 加了一个
+`in_callee_pos` 标志（`compiler/src0/sema.jhyy` + `compiler/src0/main.jhyy`
+的结构体字面量 —— ⚠️ 两处字段顺序必须**逐字一致**，漏字段 = 越界读）。
+`NODE_CALL` 在推 callee 的类型时把它置 1、推完恢复 ⇒
+「函数名当 callee」（合法）与「函数名当值」（非法）被**区分开**。
+标识符解析到 `SYM_FN` 且**不在**调用者位置 ⇒ 报
+`function value is not supported yet (the fn(...) pointer type is not implemented)`。
+
+⇒ 编译器**不再崩**（修前的 `unknown QBE IL mnemonic` + 产物爆栈没了）
+⇒ 而且是**编译期**的干净错误，不是运行时爆炸。
+⚠️ **函数值本身仍未实装**（规范附录 B 那条限制不变）—— 本次只把
+「静默生成坏代码」换成「一条干净的编译错误」。
+
 **影响范围:** 任何「把函数名当值」的写法 —— `let p = f;` / `g(f)` / 传给 `extern fn` 当回调。
 ⚠️ **写 GUI 的自然做法（自己写 WndProc 处理 WM_PAINT / 按钮点击）正好踩这条**
 ⇒ 这也是 JHYY 现在只能挂 `DefWindowProcA`（系统默认绘制）的直接原因。
@@ -16071,23 +16105,20 @@ codegen_amd64_lexer: unknown QBE IL mnemonic at byte offset 26059
 且 IR 生成器不再产出空实参槽 ⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/sema.jhyy:1167-1179`（函数标识符在表达式位置被放行）
-- `compiler/src0/codegen_amd64_lexer.jhyy`（`next_token` —— 坏 call 行 ⇒ unknown QBE IL mnemonic）
+- `compiler/src0/sema.jhyy`（`in_callee_pos` 标志 + 标识符解析到 `SYM_FN` 的拦截）
+- `compiler/src0/main.jhyy`（`SemaContext` 结构体字面量 —— 字段顺序与 sema 逐字一致）
+- `compiler/src0/codegen_amd64_lexer.jhyy`（`next_token` —— 坏 call 行 ⇒ unknown QBE IL mnemonic；修后走不到这里）
 - 规范附录 B「未实装 / 已实装但受限」：`fn(...)` 函数指针类型语法
-- 复现件：`compiler/tests/known-bugs/w229_fn_value_crash.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w229_fn_value_crash.jhyy`
+  （`// EXPECT-ERROR: "not supported"`）
 - 相关：W-109 / W-110 / W-145（同一句报错文案，根因不同 —— 别混为一谈）
 
 <a id="w-230"></a>
 ## W-230: 栈位置的实参传 `null` 字面量 ⇒ caller 只写 4 字节 ⇒ **callee 收到高 4 字节是残渣的指针**
 
-**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 第 5+ 个实参传 null 字面量时 IR 发成 32 位，caller 只写 4 字节、callee 按 8 字节读 ⇒ 指针带残渣；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — sema 给调用实参里的 `null` 填**形参类型** ⇒ IR 发成 64 位 ⇒ 8 字节槽写满 ⇒ 残渣消失
 **Filed-by:** 2026-11-15（写 Win32 GUI 的探路：`CreateWindowExA` 传 null 就返回 NULL + errno 1400）
-**日期:** 2026-11-15
+**日期:** 2026-11-15 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:**
 - `compiler/src0/sema.jhyy:1045-1049` —— `NODE_NULL` 的类型是哨兵 0，
@@ -16188,6 +16219,16 @@ let z: *u8 = null;
 CreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满
 ```
 
+**怎么修的（2026-11-21 已修）:** sema 在**调用实参**这条路上给 `null` 填
+**形参类型**（`compiler/src0/sema.jhyy` 的 `NODE_CALL` / `NODE_QUALIFIED_CALL`
+两条路都填）⇒ `null` 的类型不再是哨兵 0 ⇒ IR 按 64 位发（`l`）
+⇒ `emit_stack_arg_push` 走 `movq` 那条 ⇒ 8 字节槽**写满** ⇒ 残渣消失。
+（与 **W-231** 同一个根因、同一批修：两处「`null` 的类型填充点」补全。）
+
+⇒ 实测：复现件退出码 **1 → 0**（那个指针现在是干净的 0）。
+⚠️ codegen 那条 `movl` 只写 4 字节的路径**没动** —— 它本身没错
+（32 位值本来就只写 4 字节），错的是**IR 把 64 位指针发成了 32 位**。
+
 **影响范围:** 任何「≥5 个实参且第 5+ 个实参是 `null` 字面量」的调用
 （JHYY 内部调用与 `extern fn` 都中招）。
 ⚠️ 隐蔽性极强：**读到的残渣取决于调用历史与进程环境** ⇒
@@ -16199,22 +16240,18 @@ CreateWindowExA(..., z, z, hinst, z);   // ✅ 8 字节槽写满
 或 codegen 按 8 字节槽写零扩展值 ⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/sema.jhyy:1045-1049`（`NODE_NULL` 的哨兵类型）、`:1233` / `:1363` / `:2314` / `:2431`（仅有的几处填充点）
-- `compiler/src0/codegen_amd64_xmm_argalloc.jhyy:226-292`（`emit_stack_arg_push`；`:279-287` 是 32 位分支）
-- 复现件：`compiler/tests/known-bugs/w230_null_stack_arg.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- `compiler/src0/sema.jhyy`（`NODE_NULL` 的哨兵类型 + **调用实参**这条路的填充点）
+- `compiler/src0/codegen_amd64_xmm_argalloc.jhyy`（`emit_stack_arg_push` —— 32 位分支只 `movl` 写 4 字节；**没动**）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w230_null_stack_arg.jhyy`
+  （`// EXPECT: 0`）
 - 相关：W-231（同一个根因的另一条路径 —— null 在 struct 字面量字段里也没有类型）
 
 <a id="w-231"></a>
 ## W-231: struct 字面量里的 `null` 字段 ⇒ 误报 `field type mismatch`
 
-**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 同一个 null 在 let 初始化里合法、在 struct 字面量字段里却报类型不匹配；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — struct 字面量字段路径也给 `null` 填**字段类型** ⇒ 编译通过
 **Filed-by:** 2026-11-15（写 Win32 GUI 的探路：WNDCLASSEX 字面量一次撞上 5 个字段）
-**日期:** 2026-11-15
+**日期:** 2026-11-15 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:**
 - `compiler/src0/sema.jhyy:2632` —— struct 字面量字段的类型检查：拿不到 `null` 的类型
@@ -16250,28 +16287,32 @@ let z: *u8 = null;
 let w = W { a: z, b: z };         // ✅
 ```
 
+**怎么修的（2026-11-21 已修）:** sema 在 **struct 字面量字段**这条路上给
+`null` 填**字段类型**（`compiler/src0/sema.jhyy` 的 struct 字面量分支：
+字段类型是指针 ⇒ 把 `null` 的 `type_ptr` 填成它、并把用于比对的类型
+换成它）⇒ 与 let 路径**同款口径** ⇒ 不再误报 `field type mismatch`。
+（与 **W-230** 同一个根因、同一批修：两处「`null` 的类型填充点」补全。）
+
+⇒ 实测：复现件从「编译期报 `field type mismatch` ×2」变成**编译通过 + 退出码 0**。
+
 **影响范围:** 任何 struct 字面量里的空指针字段 —— Win32 的 `WNDCLASSEX` 之类
 （一次就撞上 5 个字段：`hIcon` / `hCursor` / `hbrBackground` / `lpszMenuName` / `hIconSm`）。
 
 **失效条件:** struct 字面量字段路径也填 `null` 的类型 ⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/sema.jhyy:2312-2325`（let 路径的 null 自动转换 —— 有实现）
-- `compiler/src0/sema.jhyy:2632`（struct 字段路径 —— 缺同款）
-- 复现件：`compiler/tests/known-bugs/w231_struct_lit_null_field.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- `compiler/src0/sema.jhyy`（let 路径的 null 自动转换 —— 本来就有；
+  struct 字段路径 —— **已补上同款**）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w231_struct_lit_null_field.jhyy`
+  （`// EXPECT: 0`）
 - 相关：W-230（同一个根因：null 的类型填充点不全）
 
 <a id="w-232"></a>
 ## W-232: 顶层 `const` 标量 ⇒ 报错文案指向「语法」而不是「顶层 const 只支持数组」
 
-**状态:** ACTIVE since 2026-11-15 (v4.1.5) — 顶层 const 只支持数组（行为本身正确），但诊断文案没把这事说出来；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — parser 改成先看下一个 token ⇒ 报「顶层 const 只支持数组」，且**不再级联**出第二条语法错
 **Filed-by:** 2026-11-15（写 Win32 GUI 的探路：想用顶层常量存窗口样式常量）
-**日期:** 2026-11-15
+**日期:** 2026-11-15 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:** `compiler/src0/parser.jhyy:4144` —— `parse_const_decl`（顶层 const 数组声明）
 在类型之后直接 `parser_expect(TOKEN_LBRACKET, "[ for const array init")` ⇒ 遇到标量初值时
@@ -16302,28 +16343,33 @@ let X: u32 = 5;      // ✅
 （字面量 / 一元 / 二元算术 / 整型之间的 `as`）⇒ `let X: f64 = 3.5;` 读回是 0
 （见附录 B「顶层全局变量只有整数类型初始化正确」）。
 
+**怎么修的（2026-11-21 已修）:** `parse_const_decl`（`compiler/src0/parser.jhyy`）
+改成**先看下一个 token 是不是 `[`**：
+- 是 ⇒ 走原来的数组解析（**一字未改**）
+- 不是 ⇒ 报一条 `top-level const only supports array; use a top-level let for scalars`
+  ⇒ 并**吃掉**那个标量初值（解析保持同步），初值按「空数组」处理 ⇒ AST 合法
+
+⇒ 实测：修前 **两条**错（`expected [ ...` + 级联的 `expected ] ...`），
+修后**一条**说人话的错。
+
 **影响范围:** 任何想用顶层 `const` 写标量常量的人 ⇒ 报错指不到真因 ⇒ 容易
 误以为是语法细节、改了又改。
 
 **失效条件:** 顶层 const 的诊断改成明确的「顶层 const 只支持数组」⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/parser.jhyy:4120`（`parse_const_decl` —— 顶层 const 数组声明）、`:4144`（报错点）
+- `compiler/src0/parser.jhyy`（`parse_const_decl` —— 顶层 const 数组声明 + 那条解释性诊断）
 - 规范 § 12「顶层 const 数组」（仅支持顶层 const；函数体内不允许）
-- 复现件：`compiler/tests/known-bugs/w232_topconst_scalar_msg.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT / EXPECT-ERROR 用例，同时把本条翻成 RESOLVED）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w232_topconst_scalar_msg.jhyy`
+  （`// EXPECT-ERROR: "only supports array"`）
 - 相关：附录 B「顶层全局变量只有整数类型初始化正确」
 
 <a id="w-233"></a>
 ## W-233: 字符串字面量 `as [*]u8` ⇒ 切片的 **len 没填**（=0）⇒ 读元素越界 ⇒ 访问违例
 
-**状态:** ACTIVE since 2026-11-20 (v4.1.5) — 转换本身**不报错**，但产出的切片是**半个**的（len=0）；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — codegen 给 `*u8 → [*]u8`（字符串字面量）**填上长度**；非字面量的指针→切片 **sema 编译期拒绝**
 **Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：给一道「字符串字面量的长度」⇒ 真编译真跑才发现）
-**日期:** 2026-11-20
+**日期:** 2026-11-20 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:** `compiler/src0/codegen.jhyy:5284`（`NODE_CAST` 分支）—— 它**只特判
 array→slice**：
@@ -16363,6 +16409,20 @@ let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
 ⇒ **不要**写 `"hello" as [*]u8` ⇒ ⇒ 它会给你一个 len=0 的切片，
 下标一读就**访问违例**。
 
+**怎么修的（2026-11-21 已修 —— 走 (A) 填长度）:**
+- **codegen**（`compiler/src0/codegen.jhyy` 的 `NODE_CAST`）：加一条
+  「源是指针 + 目标是切片 + 源是**字符串字面量**」的分支 ⇒ 造 16 字节槽，
+  ptr 存 @0、**len 存 @8 = 字面量长度**（与 array→slice 那条**同款形状**）。
+- **sema**（`compiler/src0/sema.jhyy` 的 `NODE_CAST`）：非字面量的
+  `*T → [*]T` **编译期拒绝**（`cannot convert a pointer to a slice: only
+  string literals and arrays can be converted to slices`）—— 长度无从得知，
+  继续放行就还是「指针对、长度错」的切片。
+  另外字符串字面量转**非** `[*]u8` 的切片也拒（元素类型会被按另一种宽度
+  重解释 ⇒ 又是静默给错值）。
+
+⇒ 实测：`len("hello" as [*]u8)` 得 **5**、`s[0]` 得 **'h'**（104），
+复现件从「访问违例（0xC0000005）」变成正常返回。
+
 **影响范围:** 任何「把字符串字面量当切片用」的代码 ⇒ ⇒ 症状是**运行时的
 访问违例**（不是编译错误）⇒ ⇒ 在 IDE 里表现为「一跑就崩」，很难定位。
 
@@ -16370,24 +16430,21 @@ let n: i64 = strlen_local(s); // ✅ 长度自己算（string 模块）
 这个转换（报一条「字符串字面量是 *u8，不是切片」）⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/codegen.jhyy:5284`（`NODE_CAST` —— array→slice 的特判在
-  `:5286-5299`；`*u8 → [*]u8` 落到 `:5305` 的 `cg_convert_arg`）
+- `compiler/src0/codegen.jhyy`（`NODE_CAST` —— array→slice 的特判 **+ 新增的
+  字符串字面量→切片**那条；`*u8 → [*]u8` 不再落到 `cg_convert_arg`）
+- `compiler/src0/sema.jhyy`（`NODE_CAST` —— 指针→切片的**拒绝**那条）
 - 规范 § 2.5「字符串字面量」（类型是 `*u8`，**不是**切片）、§ 10.2「切片」
   （「下标不做运行时边界检查」）
-- 复现件：`compiler/tests/known-bugs/w233_string_literal_slice_len.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT 用例，同时把本条翻成 RESOLVED）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w233_string_literal_slice_len.jhyy`
+  （`// EXPECT: 0`）
 - 相关：附录 B「未实装 / 已实装但受限」
 
 <a id="w-234"></a>
 ## W-234: 顶层 `const` 数组的元素写成 `1 as i32` ⇒ **静默读出 0**
 
-**状态:** ACTIVE since 2026-11-20 (v4.1.5) — 不报错，值是错的（**静默**）；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — 顶层 const 数组初值**也走常量表达式求值**（复用 `cg_const_fold`）+ 非常量元素 **sema 编译期报错**
 **Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：给一道「顶层 const 数组」⇒ 真编译真跑才发现）
-**日期:** 2026-11-20
+**日期:** 2026-11-20 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:** `compiler/src0/parser.jhyy` 的顶层 `const` 数组声明
 （`parse_const_decl`）＋ `compiler/src0/codegen.jhyy` 的顶层常量发射
@@ -16420,6 +16477,21 @@ const B: [i32; 3] = [1, 2, 3];   // ✅
 ⇒ **行为本身在规范允许的范围内**，但**静默给错值**仍然危险
 ⇒ ⇒ 至少该给一条**诊断**（或干脆把 `as` 形式也求值出来）。
 
+**怎么修的（2026-11-21 已修）:** **codegen**（`compiler/src0/codegen.jhyy`）：
+顶层 const 数组的元素值改成走 **`cg_const_fold`**（顶层 `let` 的初始化器
+**本来就走它**）⇒ `1 as i32` / `1 + 2` / `-1` 都能求出来 ⇒ 与顶层 let
+**同款口径**。（旧的 `cg_const_data_prim_val` 只认 `NODE_INT` / `NODE_BOOL`
+⇒ 别的全落 0 ⇒ 该 helper 已删。）
+
+⚠️ **「求不出来的元素」仍然落 0 —— 那是规范允许的**：规范 § 12 明写
+「编译器**不做** const 表达式检查：元素位置放函数调用能编译通过，
+但不会被求值，运行时取到 0」⇒ 仓内
+`compiler/tests/examples/spec_const_nonconst_elem.jhyy` 就是这条的
+**一致性用例** ⇒ 编译器**刻意不做**那条诊断（加了就是与规范冲突）。
+⇒ 本条修的是「**能求出来却没求**」的那一半（`1 as i32` 那种）。
+
+⇒ 实测：`A_WITH_AS[1]` 得 **2**（修前是 0）。
+
 **影响范围:** 任何在顶层 const 数组里写带转型初值的人 ⇒ ⇒ 症状是
 **运行时的错值**（不是编译错误）⇒ ⇒ 很难定位。
 
@@ -16428,22 +16500,20 @@ const B: [i32; 3] = [1, 2, 3];   // ✅
 
 **引用:**
 - 规范 § 12「顶层 const 数组」（`docs/abis/jhyy-lang-spec-v4.0.0.md:784`）
-- `compiler/src0/parser.jhyy`（`parse_const_decl` —— 顶层 const 数组声明）
-- 复现件：`compiler/tests/known-bugs/w234_const_array_as_elem.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束：
-  `scripts/dev/docs_facts_check.py:105` 的正则把 XFAIL 写死成 `0 XFAIL`，
-  `scripts/dev/check_regress_facts.py:192` 也要求审计的 xfail 桶为 0
-  ⇒ 未修的缺陷进台账、不进套件；修好后把复现件搬进 `examples/` 并写成
-  正常的 EXPECT 用例，同时把本条翻成 RESOLVED）
+- `compiler/src0/codegen.jhyy`（`cg_module` 的 Pass A —— const 数组元素发射；
+  `cg_const_fold` —— 常量表达式求值器）
+- `compiler/src0/sema.jhyy`（`sema_const_elem_ok` —— 「是不是常量表达式」判据）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w234_const_array_as_elem.jhyy`
+  （`// EXPECT: 0`）
 - 相关：W-228（字面量越界也被静默接受）、W-233（字符串字面量转切片丢长度）
 
 <a id="w-235"></a>
 
 ## W-235: 窄类型（`i8`/`u8`/`i16`/`u16`）的**局部变量**既不截断、也不回绕（实际按 32 位算）
 
-**状态:** ACTIVE since 2026-11-20 (v4.1.5) — **编译通过、不报错**，但窄类型的局部变量**按 32 位**算；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — 窄整型在**值**上按窄宽度算：`as` 显式截断、算术按窄宽度回绕 ⇒ 与规范 § 4.2 / § 4.3 一致
 **Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：150 道「读代码说输出」⇒ 知识包臂在 4 道窄类型题上**全错**）
-**日期:** 2026-11-20
+**日期:** 2026-11-20 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:** `compiler/src0/ir.jhyy:178-181`（`qbe_type_of`）——
 
@@ -16484,24 +16554,51 @@ let arr: [u8; 2] = [300 as u8, 1u8];   // ⇒ arr[0] = 44 ✅
 **影响范围:** 任何「用 `u8`/`i8` 局部变量做位运算 / 计数 / 标志位」的代码
 ⇒ ⇒ **静默给错值**（不报错、不崩）⇒ ⇒ 典型的「嵌入式代码搬到 PC 上算错了」。
 
-**失效条件:** `qbe_type_of` 对窄整型返回真正的 `QBE_B_LOCAL()` / `QBE_H_LOCAL()`，
-且算术按操作数宽度发射（`addb` / `addh`）⇒ 本条关闭。
+**失效条件（2026-11-21 已达成 —— 按**可观测行为**判定）:** 窄类型局部变量的
+**截断**（`as`）与**回绕**（算术）与规范 § 4.2 / § 4.3 一致，
+且与内存路径（struct 字段 / 数组元素）**逐位一致** ⇒ 本条关闭。
+⚠️ **机制与本条原先写的不同**（原条件写的是「`qbe_type_of` 对窄整型返回
+真正的 `QBE_B_LOCAL()` / `QBE_H_LOCAL()`，且算术按操作数宽度发射」）——
+见下面的「怎么修的」。
+
+**怎么修的（2026-11-21 已修）:** ⚠️ **没按上面那条机制做**，理由：
+QBE 的 IL **没有** sub-word 临时量（`'b'` / `'h'` 只在**内存寻址**那层
+有意义）⇒ 要真给窄类型发 `addb`，得把整个后端的寄存器分配 / 比较 /
+传参 / phi 全改成 sub-word 宽度 ⇒ 那是一次**重写后端**（自举产物整轮漂移）。
+**改成「值语义对齐」**：位宽**在值上**正确，**槽宽**仍是 32 位 ⇒
+**可观测语义**与内存路径完全一致 ⇒ 本条按可观测行为关闭。
+
+具体三处（都在 `compiler/src0/codegen.jhyy`）：
+1. `as` 到窄类型 ⇒ 发一次 `extsb` / `extub` / `extsh` / `extuh`
+   （读源槽的**低 1/2 字节** ⇒ 天然「截断 + 符号/零扩展」）。
+2. 窄类型的**算术结果** ⇒ 算完按结果的窄类型**再截断一次** ⇒ 回绕。
+3. 一元 `-` / `~` ⇒ 同款。
+
+⚠️ **窄类型在 32 位槽里的表示 = 该类型下的值**（i8 存 −56 ⇒ 槽里是
+0xFFFFFFC8；i8 存 100 ⇒ 槽里是 0x00000064）⇒ 与内存路径
+（`storeb` / `loadsb`）**逐位一致** ⇒「同一个类型，两种宽度」的病根消除。
+
+⚠️ **内存路径本来是对的**（struct 字段 / 数组元素 / **可变**局部变量走
+`storeb` / `loadub`）⇒ **一字未动**；这次只补上了**值路径**
+（**不可变**标量局部变量是 SSA —— 值一直待在寄存器里 ⇒ 从来没被截断过）。
 
 **引用:**
-- `compiler/src0/ir.jhyy:171-189`（`qbe_type_of`；窄类型那四行在 `:178-181`）
+- `compiler/src0/codegen.jhyy`（`cg_narrow_trunc` —— 窄类型截断；`cg_convert_arg`
+  的 `as` 那条；`cg_expr` 的 `NODE_BINARY` / `NODE_UNARY`）
+- `compiler/src0/ir.jhyy`（`qbe_type_of` —— **没动**；窄类型仍映成 `QBE_W()`）
 - 规范 § 4.2（**整数溢出是定义行为：二进制补码环绕**）、§ 4.3（整数 ↔ 整数
-  **扩宽 / 截断** ✅）⇒ ⇒ **当前行为与规范冲突**
-- 复现件：`compiler/tests/known-bugs/w235_narrow_local.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束 ⇒ 未修的缺陷进台账、不进套件）
+  **扩宽 / 截断** ✅）⇒ ⇒ **修后与规范一致**
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w235_narrow_local.jhyy`
+  （`// EXPECT: 0`）
 - 相关：W-228（字面量越界也被静默接受）、W-234（const 数组元素带 `as` 读到 0）
 
 <a id="w-236"></a>
 
 ## W-236: 调用**不检查实参个数** ⇒ 少传/多传 ⇒ 编译通过 ⇒ 参数**全是垃圾**
 
-**状态:** ACTIVE since 2026-11-20 (v4.1.5) — **编译通过、不报错**，参数**个数**对不上也不报；排期见 v4.6 任务 7（`docs/plans/v4/v4.6-plan.md`）
+**状态:** RESOLVED closed 2026-11-21 — sema 在调用点比对**实参个数**与**形参个数** ⇒ 不等就编译期报错（`extern fn` 除外）
 **Filed-by:** 2026-11-20（做 IDE 仓的「推理题」题库：150 道题里有一道调 `fmt_hex_u32` **少传一个参数**）
-**日期:** 2026-11-20
+**日期:** 2026-11-20 (ACTIVE) → 2026-11-21 (真修)
 
 **触发面:** 任何**函数调用** —— sema 的调用点**只推实参的类型**
 （`compiler/src0/sema.jhyy:1956-1961`：`while ai < (*d).nargs`）
@@ -16536,6 +16633,20 @@ fn main_jhyy() -> i32 {
 **workaround:** 调用前**自己数一遍参数个数** —— 尤其调标准库函数时
 （`fmt_hex_u32` 是 **3** 个参数，第三个是 `upper`；`fmt_i32` / `fmt_i64` 是 **2** 个）。
 
+**怎么修的（2026-11-21 已修）:** sema 在 `NODE_CALL` / `NODE_QUALIFIED_CALL`
+两条路上，比对 `(*d).nargs` 与 callee 的 `(*callee_type).nparams` ⇒ 不等就报
+`wrong number of arguments: expected N, got M`（`sema_error_arity`）。
+
+⚠️ **`extern fn` 不查个数** —— C 的可变参函数（`printf` / `sprintf`）在 jhyy 里
+只能声明成**定长**签名（`extern fn printf(fmt: *u8, val: i32)`），但调用点按
+C 的习惯传**任意多个**实参 ⇒ 拿声明的 arity 去卡它是错的
+（编译器自己的源码里就有 `printf(target_help())` 这么一处；
+回归套件里 `printf("...%d...", a, b, c)` 更是一大把）。
+
+⚠️ **这条检查当场抓出了编译器自己的 2 个真 bug** —— `mono.jhyy` 里两处调用
+实参个数对不上（`ast_new_slice_lit` 传 6 个、`ast_new_for` 传 7 个）
+⇒ 另开 **W-237 / W-238** 两条（同一批修好）。
+
 **影响范围:** 任何写错参数个数的调用 ⇒ ⇒ **静默给错值**（不报错、不崩）
 ⇒ ⇒ 最难查的一类（代码「看起来对」、结果不对）。
 
@@ -16543,8 +16654,81 @@ fn main_jhyy() -> i32 {
 ⇒ 本条关闭。
 
 **引用:**
-- `compiler/src0/sema.jhyy:1956-1961`（调用点只推实参类型，**没比个数**）
+- `compiler/src0/sema.jhyy`（`sema_error_arity` + 调用点的个数比对；
+  `NODE_CALL` / `NODE_QUALIFIED_CALL` 两条路）
 - 规范 § 2.4（只提「实参**类型**不做检查」）、附录 B「已实装但受限」
-- 复现件：`compiler/tests/known-bugs/w236_call_arity_not_checked.jhyy`
-  （**不在回归套件里** —— 仓内「XFAIL 计数恒为 0」是硬约束 ⇒ 未修的缺陷进台账、不进套件）
-- 相关：W-229（函数名当值用）、W-231（struct 字面量里的 null 字段）、W-235（窄类型局部变量）
+- 复现件（**修好后搬进回归套件**）：`compiler/tests/examples/w236_call_arity_not_checked.jhyy`
+  （`// EXPECT-ERROR: "wrong number of arguments"`）
+- 相关：W-229（函数名当值用）、W-231（struct 字面量里的 null 字段）、W-235（窄类型局部变量）、
+  **W-237 / W-238**（这条检查抓出来的编译器自身缺陷）
+
+<a id="w-237"></a>
+## W-237: `mono.jhyy` 调 `ast_new_slice_lit` **多传一个实参** ⇒ 切片子节点的 array 字段指错
+
+**状态:** RESOLVED closed 2026-11-21 — 先造数组字面量节点、再包成切片字面量（与 NODE_ARRAY_LIT 那条路同款形状）
+**Filed-by:** 2026-11-21（**W-236 的「实参个数」检查当场抓出来的** —— 编译器自己的缺陷）
+**日期:** 2026-11-21 (登记) → 2026-11-21 (真修)
+
+**触发面:** `compiler/src0/mono.jhyy` 的 `NODE_SLICE_LIT` 替换分支
+（`mono_subst_expr`）—— 泛型函数体里的切片字面量。
+
+**症状:** `ast_new_slice_lit(a, loc_filename, loc_line, loc_col, array: *Node)`
+只收 **5** 个形参，而调用点传了 **6** 个：
+
+```jhyy
+return ast_new_slice_lit(arena, ..., new_elems_buf, nelems_val);
+```
+
+⇒ 形参 `array` 拿到的是**元素缓冲区**（`*u8`）而不是**数组节点**（`*Node`）
+⇒ 切片字面量节点的 `array` 字段指错了地方 ⇒ 而且多传的 `nelems_val`
+落在实参区之外 ⇒ **越界读**。
+（修前没人报错 —— 调用点**只推实参的类型、从不比个数** ⇒ 这正是 W-236。）
+
+**怎么修的（2026-11-21 已修）:** 先用 `ast_new_array_lit` 造**数组字面量**节点，
+再把它交给 `ast_new_slice_lit` —— 与上面 `NODE_ARRAY_LIT` 那条分支**同款形状**。
+
+**影响范围:** 泛型函数体里的**切片字面量**（`[a, b]` 形式的 slice）——
+单态化时那条路 ⇒ 切片的元素指错。
+
+**失效条件:** 修好之后本条关闭（状态改 RESOLVED + 回填 commit，**不删**）。
+
+**引用:**
+- `compiler/src0/mono.jhyy`（`mono_subst_expr` 的 `NODE_SLICE_LIT` 分支）
+- `compiler/src0/ast.jhyy`（`ast_new_slice_lit` / `ast_new_array_lit`）
+- 相关：W-238（同一条检查抓出来的另一处）、W-236（那条检查本身）
+
+<a id="w-238"></a>
+## W-238: `mono.jhyy` 调 `ast_new_for` **少传一个实参** + 按**旧布局**读 `NodeFor` ⇒ 循环体是残渣
+
+**状态:** RESOLVED closed 2026-11-21 — 按**真实布局**读 4 个字段 + 补上缺失的实参（`for x in slice` 走 `ast_new_for_slice`）
+**Filed-by:** 2026-11-21（**W-236 的「实参个数」检查当场抓出来的** —— 编译器自己的缺陷）
+**日期:** 2026-11-21 (登记) → 2026-11-21 (真修)
+
+**触发面:** `compiler/src0/mono.jhyy` 的 `NODE_FOR` 替换分支
+（`mono_subst_stmt`）—— 泛型函数体里的 `for` 循环。
+
+**症状:** 两个错叠在一起：
+1. **实参个数**：`ast_new_for(a, loc_filename, loc_line, loc_col, var, start,
+   end, body)` 要 **8** 个，调用点只给了 **7** 个 ⇒ `body` 形参拿到**残渣**。
+2. **布局错**：代码按**旧布局**读 `NodeFor`
+   （注释写「var@0 + iter@8 + body@16 = 24」），而真实布局是
+   `var@0 + start@8 + end@16 + body@24 + is_slice@32`（`NODE_FOR_SIZE` = 40）
+   ⇒ 读到的「body」其实是 **end**。
+
+⇒ 泛型函数里的 `for` 循环：**循环体是垃圾**、边界也是错的。
+
+**怎么修的（2026-11-21 已修）:**
+- 按**真实布局**读 4 个字段（var / start / end / body）+ `is_slice@32`。
+- `var` 是 **Sym**（绑定）不是表达式 ⇒ **不做替换**（与 `NODE_LET` 那条路
+  同款：「sym ptr preserved」）。
+- `for x in slice` 形态（`is_slice != 0`）⇒ 走 `ast_new_for_slice`
+  （它自己按 slice 重建 `len` 字段）。
+
+**影响范围:** 泛型函数体里的 `for` 循环 ⇒ 单态化时那条路。
+
+**失效条件:** 修好之后本条关闭（状态改 RESOLVED + 回填 commit，**不删**）。
+
+**引用:**
+- `compiler/src0/mono.jhyy`（`mono_subst_stmt` 的 `NODE_FOR` 分支）
+- `compiler/src0/ast.jhyy`（`type NodeFor` 的布局 + `ast_new_for` / `ast_new_for_slice`）
+- 相关：W-237（同一条检查抓出来的另一处）、W-236（那条检查本身）
