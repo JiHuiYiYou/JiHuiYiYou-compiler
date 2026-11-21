@@ -385,7 +385,7 @@ _parse_cache: dict = {}
 def parse_workarounds(path: Optional[Path] = None) -> list[dict]:
     """解析整个 workarounds.md, 返回 [{id, status, date, trigger, symptom, ...}, ...].
 
-    ⚠️ **带缓存** —— 台账 1.0 MB / 222 条，每次调用重读重解析就是纯浪费
+    ⚠️ **带缓存** —— 台账不小，每次调用重读重解析就是纯浪费
     （MCP 会话里反复调）。缓存按 **mtime** 失效 ⇒ 改了台账能立刻看到。
     """
     p = Path(path) if path else DEFAULT_PATH
